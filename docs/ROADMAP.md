@@ -46,7 +46,7 @@ Full PR descriptions live in `prs/`. This file is the index.
 
 | PR | Description | Status | Depends on |
 |----|-------------|--------|------------|
-| [PR-009](../prs/PR-009-run-logging.md) | Run logging schema — canonical `user_attrs` (provenance triple, environment, peak_rss) + `ask`/`tell` wrapper for one-off runs + query helpers; CLI: `rux-ml runs {list, show, compare}` | `[ ]` | PR-008 |
+| [PR-009](../prs/PR-009-run-logging.md) | Run logging schema — canonical `user_attrs` (provenance triple, environment, peak_rss) + `ask`/`tell` wrapper for one-off runs + query helpers; CLI: `rux-ml runs {list, show, compare}` | `[x]` | PR-008 |
 | [PR-010](../prs/PR-010-model-registry.md) | Model registry — bundle write/read (`pipeline.skops` + `model.ubj`) + Pydantic-validated `manifest.json` + atomic `champion.json` rewrite + thin `load_model(problem, version="champion")` loader; CLI: `rux-ml registry {promote, list, rollback}` | `[ ]` | PR-009 |
 
 ## Phase F: Memory & ops
