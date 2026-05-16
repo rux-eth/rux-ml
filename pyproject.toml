@@ -14,6 +14,7 @@ dependencies = [
     "typer>=0.12",
     "pydantic>=2.6",
     "pydantic-settings>=2.6",
+    "xxhash>=3.7",
 ]
 
 # Note: [project.scripts] entry point lands in PR-003 (CLI skeleton),
@@ -48,7 +49,12 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["PLR2004"]  # magic numbers OK in tests
+"tests/**/*.py" = [
+    "PLR2004",  # magic numbers OK in tests
+    "TC001",    # don't bother moving imports into TYPE_CHECKING in tests
+    "TC002",
+    "TC003",
+]
 
 [tool.basedpyright]
 include = ["src", "tests"]

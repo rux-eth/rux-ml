@@ -1,0 +1,35 @@
+# rux-ml — base config (always loaded)
+#
+# See configs/README.md for layered loading + override precedence (CLI > env >
+# .env > study > problem > base > defaults).
+#
+# Most fields rely on the Pydantic defaults in src/rux_ml/config/<layer>.py.
+# Only override here when the project-wide value should differ from the model
+# default. Per-problem and per-study TOMLs overlay this via deep_merge.
+
+[data]
+# `source_path` and `target_column` MUST be set per problem (see configs/problems/).
+# `gpu_in_memory_x_gb_max = 18.0` is the D3 ingest decision-rule threshold.
+
+[features]
+# `categorical_low_card_threshold` deliberately has no default per D4 (BEST-GUESS).
+# Set per problem when categoricals matter.
+
+[training]
+# Defaults: kind="xgboost", device="cuda", tree_method="hist",
+# enable_categorical=true, learning_rate=0.1, max_depth=6, n_estimators=100.
+
+[tuning]
+# Defaults: sampler="tpe" (multivariate=true, group=true, n_startup_trials=20),
+# pruner="hyperband", trial_isolation="subprocess", n_trials=50.
+
+[runs]
+# Defaults: storage_url="sqlite:///studies/studies.db",
+# artifacts_root="studies/artifacts".
+
+[registry]
+# Defaults: root="registry", version_format="v_{date}_{short_hash}".
+
+[memory]
+# Defaults: watchdog_threshold_gb=28.0 (BEST-GUESS per D10),
+# omp_threads=24, openblas_threads=1, mkl_threads=1, polars_threads=24.
