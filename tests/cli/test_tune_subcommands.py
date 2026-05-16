@@ -117,7 +117,7 @@ def test_tune_start_runs_2_trials_and_records_user_attrs(
     completed = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
     assert len(completed) == 2
 
-    # PR-015 + PR-006 provenance set lands in user_attrs (8 layers + root + git + data hashes).
+    # PR-015 + PR-006 + PR-011 provenance set lands in user_attrs.
     expected = {
         "data_cfg_hash",
         "features_cfg_hash",
@@ -133,9 +133,11 @@ def test_tune_start_runs_2_trials_and_records_user_attrs(
         "data_bytes_hash",
         "data_logical_hash",
         "metric",
+        "peak_rss_mb",  # required since PR-011
     }
     for t in completed:
         assert expected.issubset(t.user_attrs.keys()), expected - t.user_attrs.keys()
+        assert t.user_attrs["peak_rss_mb"] > 0
 
     # Per-trial cv_cfg_hash is identical (no overrides to cv); training_cfg_hash differs
     # (search_space tunes training.learning_rate + training.max_depth).
