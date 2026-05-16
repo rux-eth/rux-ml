@@ -33,3 +33,5 @@
 [memory]
 # Defaults: watchdog_threshold_gb=28.0 (BEST-GUESS per D10),
 # omp_threads=24, openblas_threads=1, mkl_threads=1, polars_threads=24.
+# `cache_host_ratio = null` lets XGBoost auto-estimate the ExtMemQuantileDMatrix
+# host-RAM fraction (per D3 ingest path); set explicitly when host RAM is tight.
