@@ -283,7 +283,7 @@ The workbench uses three on-disk stores plus the layered config files. All runti
 | **Optuna study** | `studies/studies.db` | SQLite (`RDBStorage`) | Per-trial params, intermediate metrics, `user_attrs` (the run log) |
 | **Optuna artifacts** | `studies/artifacts/...` | `optuna.artifacts.FileSystemArtifactStore` | Per-trial model bundles, plots, prediction CSVs |
 | **Model registry** | `registry/<problem>/<version>/...` | filesystem | Promoted bundles + manifest + atomic `champion.json` |
-| **Data CAS** | `data/cas/...` + `data/manifests/...` | filesystem (hardlinks + JSON) | Versioned dataset snapshots; manifests index by composite `data_hash` |
+| **Data CAS** | `data/cas/...` + `data/manifests/...` | filesystem (hardlinks + JSON) | Versioned dataset snapshots; manifests index by composite `data_hash`. **Hardlinks require source and `data/cas/` to share a filesystem; cross-device errors (`OSError(errno.EXDEV)`) fall back to `shutil.copy2` with a warning** |
 | **Logs** | `logs/...` | structured JSONL | Per-run logs (trial-correlated) |
 | **Config** | `configs/{base.toml, problems/<n>.toml, studies/<n>.toml}` | TOML | Layered configuration |
 

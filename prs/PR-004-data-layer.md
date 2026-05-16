@@ -8,7 +8,97 @@ This PR MUST NOT be implemented until `PROCEDURE-pr-research.md` has been comple
 
 ## Research findings
 
-_To be populated by `PROCEDURE-pr-research.md`._
+### State Assessment (2026-05-16)
+
+**Current state of the codebase**:
+
+- `dev` at commit `fe90aab` (PR-003 merged: CLI skeleton; 61 tests passing)
+- `src/rux_ml/` has `config/`, `cli/`, `_internal/` (`hashing.py` with `xxh3_64_*`, `canonical_json`, `sha256_canonical`); **no `data/` subpackage yet**
+- `pyproject.toml` declares `xxhash>=3.7` (added by PR-002); polars + xgboost NOT yet in runtime deps — PR-004 must add `polars>=1.40` and `xgboost>=3.1`
+- `configs/base.toml` has a `[data]` section header (placeholder per PR-001 + PR-002); PR-004 adds defaults
+- `src/rux_ml/cli/data.py` has no-op `hash`, `version`, `list` subcommands — PR-004 fills them
+- `src/rux_ml/config/data.py` already defines `DataConfig` with `source_path`, `target_column`, `cas_root`, `manifests_root`, `gpu_in_memory_x_gb_max`, `split_ratios` — PR-004 consumes this schema
+
+**Assumptions at PR draft time** (drafted 2026-05-15 from D3, D9, D14):
+
+- Polars (`pl.scan_parquet` / `pl.read_parquet`) as the canonical reader, including hive-partitioned directories
+- `pl.Expr.hash` for sorted-canonical-column-projection logical hashing
+- `xxhash` for streaming bytes hashing (PR-002 added `xxhash>=3.7`)
+- SHA-256 for the composite manifest hash combine
+- XGBoost `DataIter` subclass with `next(self, input_data) -> bool` + `reset(self)` for `ExtMemQuantileDMatrix`
+- `ExtMemQuantileDMatrix(..., cache_host_ratio=...)` for the GPU out-of-core path with host-RAM cache
+- `pathlib.Path.hardlink_to` for the CAS
+- `LazyFrame.collect(engine="streaming")` for larger-than-RAM batch materialization
+- `LazyFrame.collect_schema()` for zero-materialization schema inspection
+
+**Verification against current authoritative sources**:
+
+| Item | Status | Source |
+|---|---|---|
+| Polars 1.40.x; `read_parquet` / `scan_parquet` stable | **STILL CURRENT** | [polars on PyPI](https://pypi.org/project/polars/) |
+| `scan_parquet(dir, hive_partitioning=...)` partition discovery | **STILL CURRENT** | [Polars GitHub releases](https://github.com/pola-rs/polars/releases) |
+| `pl.Expr.hash(seed=...)` for column hashing | **STILL CURRENT** | [polars.Expr.hash](https://docs.pola.rs/api/python/stable/reference/expressions/api/polars.Expr.hash.html) |
+| XGBoost `DataIter` (`next(input_data)`, `reset`, `super().__init__(cache_prefix=...)`) | **STILL CURRENT** | [external_memory.html](https://xgboost.readthedocs.io/en/stable/tutorials/external_memory.html) |
+| `ExtMemQuantileDMatrix(..., cache_host_ratio=...)` (added 3.1.0; auto-estimated when `None`) | **STILL CURRENT** | [XGBoost python_api](https://xgboost.readthedocs.io/en/stable/python/python_api.html) |
+| `xxhash` 3.7.0 (released 2026-04-25); use `xxh3_64` (already exposed via `_internal/hashing.py`) | **STILL CURRENT** | [xxhash on PyPI](https://pypi.org/project/xxhash/) |
+| SHA-256 vs BLAKE3 for manifest combine | **STILL CURRENT** — SHA-256 remains the universal default; combine step is kilobytes of JSON, not a hot path | [SHA-256 alternatives 2025](https://devtoolspro.org/articles/sha256-alternatives-faster-hash-functions-2025/), [Kerkour: hash 2030](https://kerkour.com/fast-secure-hash-function-sha256-sha512-sha3-blake3) |
+| `pathlib.Path.hardlink_to(target)` (3.10+; arg order reversed vs `os.link`) | **STILL CURRENT** — **doc note: same-filesystem requirement** | [pathlib.Path.hardlink_to](https://docs.python.org/3/library/pathlib.html#pathlib.Path.hardlink_to) |
+| `LazyFrame.collect(engine="streaming")` for larger-than-RAM | **STILL CURRENT** | [Polars streaming guide](https://docs.pola.rs/user-guide/concepts/streaming/) |
+| `LazyFrame.collect_schema()` zero-materialization schema | **STILL CURRENT** | [polars.LazyFrame.collect_schema](https://docs.pola.rs/api/python/stable/reference/lazyframe/api/polars.LazyFrame.collect_schema.html) |
+
+**Stale assumptions**: None.
+
+**New constraints learned from prior PRs or codebase evolution**:
+
+- `DataConfig` (PR-002) already pins the schema (`cas_root`, `manifests_root`, `split_ratios`, `gpu_in_memory_x_gb_max`) — PR-004 consumes it, doesn't define new fields.
+- `configs/base.toml` has an empty `[data]` table; PR-004 may add concrete defaults if they need to override the Pydantic field defaults (currently they match — likely no edit needed beyond a comment).
+- `_internal/hashing.py` (PR-002) already exposes `xxh3_64_bytes`, `xxh3_64_file`, `canonical_json`, `sha256_canonical`. PR-004 uses these — no duplication.
+- PR-003 CLI's `data.py` already wires the subcommand surface with `get_options(ctx)`. PR-004 replaces the `not_implemented` bodies with real implementations using the resolved `RuxMLConfig`.
+
+**Documentation note from state assessment** (worth capturing in PR + ARCHITECTURE.md if applicable):
+
+- **`Path.hardlink_to` requires source and destination on the same filesystem.** The CAS dir (`data/cas/`) must live on the same mount as wherever the source Parquet is read from, or the hardlink fails with `OSError`. PR-004 should fall back to a `shutil.copy2` with a warning when `os.link` raises `OSError(errno.EXDEV)` ("Invalid cross-device link"), and document this in the CLI help text + `docs/ARCHITECTURE.md` Storage section if needed.
+
+**Synthesis Outcome: CONFIRM** (with one cross-filesystem doc note).
+
+### Synthesis (2026-05-16)
+
+**Outcome:** Confirm.
+
+**Changes to this PR from research:**
+- Add **`polars>=1.40`** and **`xgboost>=3.1`** as runtime dependencies in `pyproject.toml` (planned; just locking the exact pins).
+- Implement an **`EXDEV` cross-device fallback** in the CAS path (`shutil.copy2` + warning) — derived from the documentation note above.
+
+**Changes to ARCHITECTURE.md:** Add a one-sentence note in the "Storage" section that `data/cas/` should live on the same mount as the source Parquet for hardlink-based CAS to be efficient; otherwise the workbench falls back to copies and emits a warning.
+
+**Changes to CONSTRAINTS.md / CONVENTIONS.md / CLAUDE.md:** None.
+
+**New PRs that must come first:** None.
+
+**Research-backed details now locked in this PR:**
+- Polars 1.40.x + `scan_parquet` (lazy) / `read_parquet` (eager) with hive-partition discovery
+- `pl.Expr.hash` over a sorted canonical column projection for `logical_hash` (D9)
+- `xxh3_64` via `_internal/hashing.py` for `bytes_hash` component
+- SHA-256 for the composite manifest combine (kilobytes-of-JSON, not hot)
+- XGBoost 3.x `DataIter` subclass; `ExtMemQuantileDMatrix(cache_host_ratio=…)` for GPU out-of-core
+- `pathlib.Path.hardlink_to(target)` with EXDEV → copy fallback
+- `LazyFrame.collect(engine="streaming")` for larger-than-RAM batches
+- `LazyFrame.collect_schema()` for zero-materialization schema access
+
+### Gate Check
+
+- Premise still valid: ✓ (no drift, no architectural rework)
+- No prerequisite PRs surfaced: ✓
+- User approved updated spec: ✓ (2026-05-16)
+- Implementation cleared: ✓ (2026-05-16)
+
+### Implementation notes (2026-05-16)
+
+Three small bugs surfaced during the test pass; each is documented here for future maintainers:
+
+1. **`_logical_hash` was scanning `files[0].parent` when only one file was passed**, which silently mixed in unrelated Parquet files under the same directory. Fixed to pass the explicit file list to `pl.scan_parquet`. Tests verifying single-file vs partitioned-directory logical-hash equality caught this.
+2. **`ParquetDataIter.__init__` validated `files` *before* calling `super().__init__()`**, which left `xgboost.DataIter.__del__` to crash with `AttributeError` on a missing `_temporary_data` attribute when the ValueError raised. Fixed by calling `super().__init__` first.
+3. **Two CLI tests in `tests/cli/` referenced obsolete "not yet implemented" behavior for `data` verbs.** Removed those entries from `test_subcommands.py` (now covered by `test_data_subcommands.py`) and switched `test_callback_populates_global_options` to invoke `tune start` (still a no-op until PR-007).
 
 ---
 

@@ -1,0 +1,30 @@
+"""Data layer — Polars/Parquet ingest, splits, content-addressed versioning, XGBoost DataIter.
+
+Public surface is intentionally small; most callers reach for the layer
+modules directly (e.g. ``from rux_ml.data.versioning import compute_data_hash``).
+"""
+
+from rux_ml.data.data_iter import ParquetDataIter
+from rux_ml.data.loaders import load_parquet, materialize
+from rux_ml.data.splits import train_val_test_split
+from rux_ml.data.versioning import (
+    Manifest,
+    compute_data_hash,
+    list_manifests,
+    read_manifest,
+    snapshot,
+    write_manifest,
+)
+
+__all__ = [
+    "Manifest",
+    "ParquetDataIter",
+    "compute_data_hash",
+    "list_manifests",
+    "load_parquet",
+    "materialize",
+    "read_manifest",
+    "snapshot",
+    "train_val_test_split",
+    "write_manifest",
+]

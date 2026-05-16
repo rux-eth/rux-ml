@@ -72,28 +72,27 @@ def test_callback_populates_global_options(runner: CliRunner) -> None:
         [
             "--config",
             "configs/base.toml",
-            "--problem",
-            "churn_v1",
-            "--study",
-            "churn_xgb_wide",
             "--set",
             "training.learning_rate=0.05",
             "--set",
             "tuning.n_trials=100",
             "--verbose",
             "--dry-run",
-            "data",
-            "list",
+            "tune",
+            "start",
+            "study_a",
+            "--n-trials",
+            "5",
         ],
     )
     assert result.exit_code == 0
     # The no-op body acknowledges the wiring without needing to expose ctx
     combined = result.stdout + (result.stderr or "")
-    assert "PR-004" in combined
+    assert "PR-007" in combined
 
 
 def test_callback_rejects_malformed_set(runner: CliRunner) -> None:
-    result = runner.invoke(app, ["--set", "no_equals_sign", "data", "list"])
+    result = runner.invoke(app, ["--set", "no_equals_sign", "tune", "start", "study_a"])
     assert result.exit_code != 0
 
 
