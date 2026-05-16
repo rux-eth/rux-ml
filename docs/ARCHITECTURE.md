@@ -22,7 +22,7 @@ The Python package is organized into layered subpackages. Dependencies flow down
 |---|---|---|
 | **CLI** | `src/rux_ml/cli/` | Typer-backed entry points — `data`, `train`, `tune`, `runs`, `registry` verb groups |
 | **Config** | `src/rux_ml/config/` | Pydantic-settings models per layer, composed into `RuxMLConfig`; loads from layered TOML + env + CLI overrides |
-| **Data** | `src/rux_ml/data/` | Polars/Parquet loaders, train/val/test splits, content-addressed dataset versioning (composite hash + manifest + CAS), XGBoost `DataIter` for `ExtMemQuantileDMatrix` |
+| **Data** | `src/rux_ml/data/` | Polars/Parquet loaders, train/val/test splits, content-addressed dataset versioning (composite hash + manifest + CAS), XGBoost `DataIter` for `ExtMemQuantileDMatrix`, `Splitter` Protocol + concrete strategies (per PR-015) |
 | **Features** | `src/rux_ml/features/` | sklearn `Pipeline`+`ColumnTransformer` orchestrator; Polars-expression stateless transforms wrapped in `FunctionTransformer`; `category_encoders` `NestedCVWrapper` for high-card categoricals |
 | **Training** | `src/rux_ml/training/` | `Trainer` `typing.Protocol` (sklearn API: `fit`/`predict`/`predict_proba`/`best_iteration_`); model factory (`XGBClassifier`, etc.); metric registry |
 | **Tuning** | `src/rux_ml/tuning/` | Optuna study orchestration; `objective(trial, base_cfg)`; `SearchSpec`-walker; samplers (TPE default) and pruners (Hyperband default); subprocess-per-trial spawn |
@@ -247,6 +247,53 @@ SearchSpec = Annotated[Union[FloatSpec, IntSpec, CatSpec],
 ```
 
 The objective walks `cfg.search_space` and translates each entry to a `trial.suggest_*` call.
+
+### CV Strategy — `Splitter` Protocol (per PR-015)
+
+Repeated cross-validation is expressed through a `typing.Protocol` over the **universal subset of the sklearn splitter API**: `split(X, y, *, groups)` yielding `(train_idx, test_idx)` row-index pairs (sklearn convention). Polars-in (matches PR-005), numpy-index-out — repeated CV stays in indices so PR-007's objective owns the materialisation policy.
+
+```python
+# src/rux_ml/data/cv.py
+from typing import Protocol, ClassVar
+from collections.abc import Iterator
+import polars as pl
+import numpy as np
+from numpy.typing import NDArray
+
+class Splitter(Protocol):
+    extmem_compatible: ClassVar[bool]
+    def split(
+        self,
+        X: pl.DataFrame,
+        y: pl.Series | None = None,
+        *,
+        groups: NDArray[np.int_] | None = None,
+    ) -> Iterator[tuple[NDArray[np.int_], NDArray[np.int_]]]: ...
+    def get_n_splits(self) -> int: ...
+```
+
+Concrete strategies (each constructible from its `CVConfig` variant via `make_splitter(cfg, *, seed=…)`):
+
+- `KFoldSplitter` / `StratifiedKFoldSplitter` / `TimeSeriesSplitter` / `GroupKFoldSplitter` — wrap sklearn `KFold` / `StratifiedKFold` / `TimeSeriesSplit(gap, max_train_size)` / `GroupKFold`
+- `CombinatorialPurgedSplitter` — wraps `skfolio.model_selection.CombinatorialPurgedCV` (BSD-3); flattens skfolio's `(train, list[test_path])` yield into the sklearn `(train, test)` shape (per-path decomposition out of scope at v0)
+
+**Per-strategy leakage guarantees** (Q2.b research output):
+
+| Strategy | Guarantees | Does NOT guarantee |
+|---|---|---|
+| `KFold` (shuffled) | Each row in exactly one test fold | Group separation; class balance; temporal ordering |
+| `StratifiedKFold` | Class proportions per fold | Group separation; temporal ordering |
+| `GroupKFold` | Each group in exactly one test fold | Class balance; equal fold sizes; temporal ordering |
+| `TimeSeriesSplit` | Train precedes test; `gap` excludes adjacent | Group separation; variable-horizon label purging; class balance |
+| `CombinatorialPurgedCV` | Two-sided label-overlap purge + one-sided post-test embargo (AFML §7.4.2) | Class balance; group separation |
+
+**Groups column-to-array convention**: `GroupKFoldCV` carries `groups_column: str`; the caller resolves it via `df[col].to_numpy()` before calling `splitter.split(..., groups=arr)`. Splitter holds no DataFrame state.
+
+**ExtMem compatibility**: only `TimeSeriesSplitter` is `extmem_compatible` at v0 (file-level path requires partition-aligned strategies); incompatible pairings raise `NotImplementedError` at training time — materialised fallback deferred to a follow-up PR.
+
+Per-strategy config lives in `src/rux_ml/config/cv.py` as a tagged-union `CVConfig` (one Pydantic sub-model per strategy, discriminated by `kind`). `RuxMLConfig.cv` adds the 8th per-layer config hash (`cv_cfg_hash`) to the per-trial provenance triple (`docs/CONSTRAINTS.md`).
+
+The one-shot `train_val_test_split(df, *, ratios, seed) → dict[str, pl.DataFrame]` from PR-004 is intentionally **separate** from the Splitter Protocol — different shapes for different memory regimes (one-shot returns DataFrames; repeated returns indices to avoid K-fold materialisation).
 
 ### Model bundle + manifest (per D8)
 

@@ -33,7 +33,16 @@ if TYPE_CHECKING:
     from rux_ml.cli._shared import GlobalOptions
 
 _DEFAULT_SPLIT_SEED = 0  # PR-013 will replace with SeedSequence-derived per-component seeds.
-_HASH_LAYERS = ("data", "features", "training", "tuning", "runs", "registry", "memory")
+_HASH_LAYERS = (
+    "data",
+    "features",
+    "training",
+    "tuning",
+    "runs",
+    "registry",
+    "memory",
+    "cv",  # PR-015 — Splitter strategy hash joins the per-trial provenance triple.
+)
 _TIMESTAMP_FORMAT = "%Y%m%dT%H%M%SZ"
 
 

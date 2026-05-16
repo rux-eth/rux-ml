@@ -58,7 +58,7 @@ Source data lives **outside** the repo by default; the workbench's `data/cas/` +
 Names recorded on every Optuna trial (constraints in `docs/CONSTRAINTS.md`):
 
 - `data_hash` — dataset content hash (D9)
-- `data_cfg_hash`, `features_cfg_hash`, `training_cfg_hash`, `tuning_cfg_hash` — per-layer config hashes (D17)
+- `data_cfg_hash`, `features_cfg_hash`, `training_cfg_hash`, `tuning_cfg_hash`, `cv_cfg_hash` — per-layer config hashes (`cv_cfg_hash` added by PR-015)
 - `root_cfg_hash` — full config hash (alias also written as `config_hash` for backward-compat queries)
 - `git_sha`, `entropy_hex`, `image_digest`, `xgboost_version`, `cuda_runtime_version`, `gpu_model`, `driver_version`, `omp_threads`, `peak_rss_mb`
 
@@ -173,6 +173,33 @@ Per D13, no Rust at v0. When the first crate lands:
 - Line length: project default (88 / 100 — pick one in PR-001 and stay consistent)
 - Imports: external → internal → relative, ruff-sorted
 - **CLI subpackage exception (`src/rux_ml/cli/**`):** ruff's `TC001/TC002/TC003` (move imports into `TYPE_CHECKING`) is disabled. Reason: Typer uses `inspect.signature(..., eval_str=True)` at command-registration time, and string annotations like `"typer.Context"` fail with `NameError` if the underlying module isn't importable at runtime. Configured in `pyproject.toml` `[tool.ruff.lint.per-file-ignores]`.
+
+---
+
+## CV strategy conventions (per PR-015)
+
+The workbench distinguishes **one-shot** and **repeated** splitting at the API level:
+
+- **One-shot** — `rux_ml.data.splits.train_val_test_split(df, *, ratios, seed) → dict[str, pl.DataFrame]`. Returns three materialised Polars frames in one call. Used by `rux-ml train` for the single-baseline path; pre-dates the Splitter Protocol and does not consume `cfg.cv`.
+- **Repeated CV** — `rux_ml.data.cv.Splitter` Protocol (`split(X: pl.DataFrame, y, *, groups) → Iterator[(np.ndarray, np.ndarray)]`). Yields row-index pairs per sklearn convention. Used by PR-007's Optuna objective and any future HPO loop. The Splitter is constructed inside the trial subprocess via `make_splitter(cfg.cv, seed=…)`.
+
+The shapes intentionally differ — one-shot returns DataFrames (cheap when K=1); repeated returns indices (avoids materialising K × DataFrames in memory-bound trials).
+
+**Groups column-to-array convention** (`GroupKFoldCV`): the config carries `groups_column: str` (a column name on the input DataFrame). The **caller** resolves it to `np.ndarray` via `df[col].to_numpy()` before calling `splitter.split(..., groups=arr)`. The Splitter never holds DataFrame state. Two cited production precedents: sklearn user guide on Group K-Fold; mlxtend `GroupTimeSeriesSplit` user guide. This keeps the Splitter Protocol stateless and pickle-friendly even though PR-015's design builds the Splitter inside the trial child (so cross-process pickling is not exercised at v0).
+
+**Per-strategy default selection by data shape:**
+
+| Data shape | Default Splitter |
+|---|---|
+| IID tabular, balanced target | `KFoldCV(n_splits=5, shuffle=True)` |
+| IID tabular, imbalanced classification target | `StratifiedKFoldCV` |
+| Time-indexed (fixed horizon labels) | `TimeSeriesSplitCV(gap=<label_horizon>)` |
+| Time-indexed (variable horizon labels, overlapping) | `CombinatorialPurgedCV` with `embargo_size ∈ [0.005·N, 0.02·N]` per AFML §7.4.2 |
+| Grouped (entity ID, session ID, etc.) | `GroupKFoldCV(groups_column=…)` |
+
+These are starting-point defaults; final choice is per-problem and lives in `configs/problems/<name>.toml`.
+
+**ExtMem compatibility:** only `TimeSeriesSplitCV` is `extmem_compatible` at v0; pairing any other Splitter with `ExtMemQuantileDMatrix` raises `NotImplementedError` at training time (materialised fallback deferred to a follow-up PR).
 
 ---
 

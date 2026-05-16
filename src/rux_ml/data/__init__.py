@@ -4,6 +4,15 @@ Public surface is intentionally small; most callers reach for the layer
 modules directly (e.g. ``from rux_ml.data.versioning import compute_data_hash``).
 """
 
+from rux_ml.data.cv import (
+    CombinatorialPurgedSplitter,
+    GroupKFoldSplitter,
+    KFoldSplitter,
+    Splitter,
+    StratifiedKFoldSplitter,
+    TimeSeriesSplitter,
+    make_splitter,
+)
 from rux_ml.data.data_iter import ParquetDataIter
 from rux_ml.data.loaders import load_parquet, materialize
 from rux_ml.data.splits import train_val_test_split
@@ -17,11 +26,18 @@ from rux_ml.data.versioning import (
 )
 
 __all__ = [
+    "CombinatorialPurgedSplitter",
+    "GroupKFoldSplitter",
+    "KFoldSplitter",
     "Manifest",
     "ParquetDataIter",
+    "Splitter",
+    "StratifiedKFoldSplitter",
+    "TimeSeriesSplitter",
     "compute_data_hash",
     "list_manifests",
     "load_parquet",
+    "make_splitter",
     "materialize",
     "read_manifest",
     "snapshot",

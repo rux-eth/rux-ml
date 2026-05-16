@@ -29,6 +29,7 @@ from pydantic_settings import (
 )
 
 from rux_ml._internal.hashing import canonical_json
+from rux_ml.config.cv import CVConfig, KFoldCV
 from rux_ml.config.data import DataConfig
 from rux_ml.config.features import FeaturesConfig
 from rux_ml.config.memory import MemoryConfig
@@ -51,6 +52,7 @@ _HASH_ELIDED_FIELDS: dict[str, set[str]] = {
     "runs": {"storage_url", "artifacts_root"},
     "registry": {"root"},
     "memory": set(),
+    "cv": set(),
 }
 
 
@@ -88,6 +90,7 @@ class RuxMLConfig(BaseSettings):
     runs: RunsConfig = Field(default_factory=RunsConfig)
     registry: RegistryConfig = Field(default_factory=RegistryConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
+    cv: CVConfig = Field(default_factory=KFoldCV)
     search_space: dict[str, SearchSpec] = Field(default_factory=dict)
 
     model_config = SettingsConfigDict(

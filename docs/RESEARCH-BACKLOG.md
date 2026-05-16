@@ -41,7 +41,7 @@ All 14 v0 PRs are Tier 1 — every architectural choice was research-backed duri
 
 | PR | Title | Design research | Required research topics |
 |----|-------|-----------------|--------------------------|
-| [PR-015](../prs/PR-015-cv-strategy.md) | CV strategy — Splitter Protocol + library research + splits.py rewrite | `design-research ✗` (not in D1–D17; surfaced 2026-05-16 from user direction) | (1) library choice per CV family (sklearn / mlxtend / custom CPCV); (2) data-leakage prevention per strategy (time-leakage, group-leakage, embargo for CPCV); (3) parallelism interactions with D6 `n_jobs=1` + D10 subprocess-per-trial + thread pinning; (4) API ergonomics (Polars vs pandas input; configuration composition with `cfg.search_space`). See `prs/PR-015-cv-strategy.md` `## Research backing` for the full scope. |
+| [PR-015](../prs/PR-015-cv-strategy.md) | CV strategy — Splitter Protocol + library research + splits.py rewrite | `design-research ✗` → **`fully-researched 2026-05-16`** + **`implementation-cleared 2026-05-16`**. Resolved: (1) sklearn for IID/time/group + skfolio `CombinatorialPurgedCV` for CPCV; (2) embargo iff label-horizon ≥1 bar / lag features / autocorrelated residuals; one-sided AFML semantics; (3) sequential folds on GPU per D6, Splitter built inside trial subprocess (no pickle), hybrid file-level ExtMem with `NotImplementedError` for incompatible pairings; (4) Polars-in Splitter + numpy index-pair out + new top-level `CVConfig` (8th layer + `cv_cfg_hash` added to provenance triple). |
 
 Future PRs added later (e.g., a PR adding the first Rust crate per D13's profile-driven trigger) start as Tier 2 unless they explicitly inherit prior research.
 
