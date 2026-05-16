@@ -1,0 +1,28 @@
+{
+  "fixture_version": "golden_v1",
+  "master_entropy": 42,
+  "entropy_hex": "4323988864d84a1fdff6ed7da001c6a4",
+  "data_hash": "11f180647b92238316a2f614d1366322998f09d6c64825211a758f9c51fa71bd|98f8c686f027ab27769990c4bef553fd1bedc733fe5ae42f47df27e87fad994f",
+  "data_bytes_hash": "11f180647b92238316a2f614d1366322998f09d6c64825211a758f9c51fa71bd",
+  "data_logical_hash": "98f8c686f027ab27769990c4bef553fd1bedc733fe5ae42f47df27e87fad994f",
+  "root_cfg_hash": "cd75bc2ceb6d3f1fb9bcf31d90479c7548d395febceebb65707933831e7a7e1d",
+  "library_versions": {
+    "xgboost": "3.2.0",
+    "scikit_learn": "1.8.0",
+    "numpy": "2.4.5",
+    "polars": "1.40.1",
+    "skops": "0.14.0"
+  },
+  "cuda_runtime_version": "unknown",
+  "tolerance": {
+    "preds_atol": 1e-05,
+    "preds_rtol": 0.0001,
+    "metric_abs_tol": 0.005
+  },
+  "dataset": {
+    "rows": 200,
+    "numeric_columns": 3,
+    "categorical_levels": 3
+  },
+  "created_at": "2026-05-16T18:27:16.234819+00:00"
+}
