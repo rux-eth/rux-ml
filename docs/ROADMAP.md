@@ -33,7 +33,7 @@ Full PR descriptions live in `prs/`. This file is the index.
 
 | PR | Description | Status | Depends on |
 |----|-------------|--------|------------|
-| [PR-015](../prs/PR-015-cv-strategy.md) | **Tier-2** CV strategy — `Splitter` `typing.Protocol` + research-backed library choice across `KFold` / `StratifiedKFold` / `TimeSeriesSplit` / `GroupKFold` / walk-forward / CPCV; rewrites `src/rux_ml/data/splits.py` to consume a Splitter; per-strategy leakage tests + parallelism notes; updates `docs/ARCHITECTURE.md` + `docs/CONVENTIONS.md` | `[ ]` | PR-004, PR-005 |
+| [PR-015](../prs/PR-015-cv-strategy.md) | **Tier-2** CV strategy — `Splitter` `typing.Protocol` + research-backed library choice across `KFold` / `StratifiedKFold` / `TimeSeriesSplit` / `GroupKFold` / walk-forward / CPCV; rewrites `src/rux_ml/data/splits.py` to consume a Splitter; per-strategy leakage tests + parallelism notes; updates `docs/ARCHITECTURE.md` + `docs/CONVENTIONS.md` | `[x]` | PR-004, PR-005 |
 
 ## Phase D: Tuning
 
