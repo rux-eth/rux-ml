@@ -1,4 +1,4 @@
-"""Memory + threading config (per D10)."""
+"""Memory + threading config (per D10 + PR-006 ingest decision rule)."""
 
 from rux_ml.config._strict_model import StrictModel
 
@@ -13,3 +13,7 @@ class MemoryConfig(StrictModel):
     openblas_threads: int = 1
     mkl_threads: int = 1
     polars_threads: int = 24
+
+    # XGBoost ExtMemQuantileDMatrix host-RAM cache fraction (per D3 ingest path).
+    # `None` lets XGBoost auto-estimate; set explicitly when host-RAM headroom is tight.
+    cache_host_ratio: float | None = None

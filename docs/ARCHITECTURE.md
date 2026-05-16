@@ -191,7 +191,9 @@ All choices are TOML knobs in `[tuning]`.
 
 ### `Trainer` Protocol (per D5)
 
-The unifying contract across model families is the sklearn estimator API expressed as a `typing.Protocol`. Zero runtime cost; full compile-time substitutability across `XGBClassifier`, `LGBMClassifier`, `CatBoostClassifier`, sklearn estimators, and any future custom model.
+The unifying contract across model families is the sklearn estimator API expressed as a `typing.Protocol`. Zero runtime cost; full compile-time substitutability across `XGBClassifier`, `XGBRegressor`, `LGBMClassifier`, `CatBoostClassifier`, sklearn estimators, and any future custom model.
+
+The Protocol covers only the **universal subset** (`fit` + `predict`) so both classifiers and regressors satisfy it. Classification-only (`predict_proba`) and conditionally-available (`best_iteration_` after early-stopping fit) attributes are accessed defensively at call sites — the metric registry casts to a classifier surface for AUC / logloss; the CLI uses `getattr(..., None)` for `best_iteration`.
 
 ```python
 # src/rux_ml/training/protocol.py
@@ -199,11 +201,8 @@ from typing import Protocol, Any
 from numpy.typing import ArrayLike
 
 class Trainer(Protocol):
-    def fit(self, X: Any, y: ArrayLike, *, eval_set=None, **kwargs) -> "Trainer": ...
+    def fit(self, X: Any, y: ArrayLike, **kwargs: Any) -> "Trainer": ...
     def predict(self, X: Any) -> ArrayLike: ...
-    def predict_proba(self, X: Any) -> ArrayLike: ...
-    @property
-    def best_iteration_(self) -> int | None: ...
 ```
 
 The model factory (`src/rux_ml/training/factory.py`) returns the configured concrete trainer:
@@ -357,6 +356,7 @@ Container digest pinning is non-negotiable per `docs/CONSTRAINTS.md`.
 | Thread allocation | `OMP_NUM_THREADS=24`, `OPENBLAS_NUM_THREADS=1`, `MKL_NUM_THREADS=1`, `POLARS_MAX_THREADS=24`, XGBoost `nthread=24` | per-library all-or-one |
 | Skipped | `RLIMIT_AS` (unreliable on Linux) | — |
 | On-demand profiling | `memray attach --aggregate` | manual |
+| ExtMem host-RAM cache | `MemoryConfig.cache_host_ratio` (`null` = XGBoost auto-estimate) — consumed by the D3 ingest path when X exceeds `gpu_in_memory_x_gb_max` | `null` |
 
 Sequential trials (D6) plus 24-thread CPU means each library may use the whole CPU when active. BLAS env vars are pinned to 1 to suppress nested oversubscription that `threadpoolctl` cannot reliably reach across distinct OpenMP runtimes (libgomp vs libiomp).
 

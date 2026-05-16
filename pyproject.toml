@@ -21,6 +21,7 @@ dependencies = [
     "scikit-learn>=1.4",
     "category-encoders>=2.6",
     "pyarrow>=17",
+    "optuna>=4.0",
 ]
 
 [project.scripts]
