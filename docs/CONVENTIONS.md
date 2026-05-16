@@ -203,6 +203,31 @@ These are starting-point defaults; final choice is per-problem and lives in `con
 
 ---
 
+## HPO objective shape (per PR-007)
+
+The Optuna objective is **K-fold CV-mean** per the PR-007 Tier-2 research findings:
+
+- Each trial calls `make_splitter(cfg.cv, seed=cfg.tuning.entropy)` (PR-015's Splitter Protocol) and runs `cfg.cv.n_splits` fits.
+- Per-fold scores are reported via `trial.report(fold_score, step=fold_idx)` so `WilcoxonPruner` (the default — purpose-built for K-fold CV per Optuna 3.6+) can paired-test against running trials.
+- The trial returns `statistics.fmean(fold_scores)` as the aggregate objective value (arithmetic mean; switch to median only after measured outlier evidence per Q1.b research).
+- Features pipeline is re-fit per fold for leakage hygiene (cardinalities re-computed on each fold's train set).
+- XGBoost-internal `early_stopping_rounds` runs against each fold's val partition (the test fold).
+- **`XGBoostPruningCallback` is NOT wired inside the CV loop** — Optuna #3203 documents that the callback's per-fold `step=0,1,…` reports break iteration-level pruners. Within-fold pruning is owned by XGBoost; cross-fold pruning is owned by Optuna's fold-level pruner.
+
+A future single-fit objective regime (no CV; one fit per trial) would re-enable `XGBoostPruningCallback` for iteration-level pruning. That regime is not exposed at v0; the literal preserves `hyperband` / `successive_halving` pruner choices for it.
+
+## Trial config derivation (per PR-007)
+
+`build_objective(base_cfg)` derives a fresh `trial_cfg` per trial by:
+1. Walking `base_cfg.search_space` via `walk_search_space(...) → dict[str, Any]` (flat dot-path keys like `training.learning_rate`).
+2. Unflattening dot-paths to a nested dict (`{"training": {"learning_rate": 0.05}}`).
+3. Deep-merging with `base_cfg.model_dump()`.
+4. Re-validating the merged dict via `RuxMLConfig.model_validate(merged)`.
+
+This pattern avoids the pitfalls of `model_copy(update=…)` with nested fields (which replaces the whole sub-model with a raw dict). Trial-cfg-derivation re-validates the entire config so type/constraint errors surface clearly per trial.
+
+---
+
 ## Where new conventions go
 
 When a convention emerges that isn't documented here, add it during the same PR that establishes it. Conventions added retroactively go stale fast.

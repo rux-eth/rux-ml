@@ -39,7 +39,7 @@ Full PR descriptions live in `prs/`. This file is the index.
 
 | PR | Description | Status | Depends on |
 |----|-------------|--------|------------|
-| [PR-007](../prs/PR-007-optuna-basics.md) | Optuna basics — study create/load + functional `objective(trial, base_cfg)` + `SearchSpec` walker (TOML-declared search space) + sequential trials in-process + SQLite `RDBStorage` + `XGBoostPruningCallback`; CLI: `rux-ml tune {start, resume, status}`. **Consumes the Splitter from PR-015** | `[ ]` | PR-006, PR-015 |
+| [PR-007](../prs/PR-007-optuna-basics.md) | Optuna basics — study create/load + functional `objective(trial, base_cfg)` + `SearchSpec` walker (TOML-declared search space) + sequential trials in-process + SQLite `RDBStorage` + K-fold CV-mean objective + WilcoxonPruner default; CLI: `rux-ml tune {start, resume, status, retry-trial}`. **Consumes the Splitter from PR-015** | `[x]` | PR-006, PR-015 |
 | [PR-008](../prs/PR-008-subprocess-isolation.md) | Subprocess-per-trial isolation — `python -m rux_ml._internal.trial_runner` entry point + `subprocess.run` dispatcher with spawn semantics + parent/child coordination via shared SQLite + override JSON passing; CLI: `tuning.trial_isolation` config knob | `[ ]` | PR-007 |
 
 ## Phase E: Run logging & registry

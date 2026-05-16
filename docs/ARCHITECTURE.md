@@ -171,17 +171,30 @@ Override: tuning.trial_isolation = "in_process" (TOML)
           documented Optuna OOM cure is the subprocess path)
 ```
 
-### Optuna sampler / pruner (per D6)
+### Optuna sampler / pruner (per D6, locked-in by PR-007 Tier-2 research)
 
 ```
+objective:
+  K-fold CV-mean (per cfg.cv via PR-015's make_splitter)             # default; per-fold scores reported via trial.report() for WilcoxonPruner
+  Single fit per trial                                               # not exposed at v0; reserved for a future regime
+
 sampler:
-  TPESampler(multivariate=True, group=True, n_startup_trials=20)  # default
-  GPSampler(...)                                                    # if budget < ~50 trials and search space is fully continuous
-  HEBO/BoTorch                                                      # configurable alternatives
+  TPESampler(multivariate=True, group=True, constant_liar=True,      # default — XGBoost search spaces always include categoricals/conditionals which route to TPE per Optuna AutoSampler convention
+             n_startup_trials=20)
+  GPSampler(...)                                                     # for purely-numerical sub-studies up to AutoSampler's hard-coded 250-trial GP→post-GP boundary
+  HEBO (via optunahub, opt-in)                                       # not in default deps; sampler factory raises clear ImportError pointing at `pip install optunahub hebo`
+  BoTorchSampler                                                     # REMOVED — deprecated in Optuna 3.6 (~5x slower than GPSampler; no cited tabular-GBM advantage)
+
 pruner:
-  HyperbandPruner                                                   # default
-  WilcoxonPruner                                                    # experimental, for k-fold CV objectives
+  WilcoxonPruner                                                     # default — Optuna 3.6+ design intent for "k-fold cross-validation score of a machine learning model"
+  MedianPruner                                                       # conservative alternate (Optuna's own xgboost_cv_integration.py uses it; production-grade)
+  HyperbandPruner, SuccessiveHalvingPruner                           # preserved in the literal for hypothetical single-fit objectives
+  NopPruner ("none")                                                 # disables pruning
 ```
+
+**Important**: `XGBoostPruningCallback` is **NOT** wired inside the CV loop (Optuna #3203 — duplicate `step=0,1,…` reports per fold break iteration-level pruners). Per-fold XGBoost-internal `early_stopping_rounds` handles within-fold pruning; Optuna pruning operates only at fold granularity via `trial.report(fold_score, fold_idx)`.
+
+**TPE + Wilcoxon caveat**: Optuna's WilcoxonPruner docs note "TPESampler currently cannot utilize the information of pruned trials effectively" under Wilcoxon. Real tradeoff documented; mitigation is `cfg.tuning.pruner = "median"` for users who want the TPE feedback loop to learn from pruned trials.
 
 All choices are TOML knobs in `[tuning]`.
 

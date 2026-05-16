@@ -31,9 +31,13 @@
 # Defaults: root="registry", version_format="v_{date}_{short_hash}".
 
 [cv]
-# Per PR-015 (Tier-2). Default: kind="kfold", n_splits=5, shuffle=true (IID baseline).
+# Per PR-015 (Tier-2). Tagged-union over Splitter strategies — `kind` MUST be
+# set explicitly because empty `[cv]` can't disambiguate the discriminator.
 # Switch via kind ∈ {kfold, stratified_kfold, time_series, group_kfold, cpcv}.
 # CPCV (skfolio) requires per-problem embargo_size / purged_size for AFML use.
+kind = "kfold"
+n_splits = 5
+shuffle = true
 
 [memory]
 # Defaults: watchdog_threshold_gb=28.0 (BEST-GUESS per D10),

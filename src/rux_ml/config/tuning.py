@@ -38,14 +38,25 @@ SearchSpec = Annotated[
 
 
 class TuningConfig(StrictModel):
-    # Sampler / pruner choice per D6.
-    sampler: Literal["tpe", "gp", "botorch", "hebo"] = "tpe"
-    pruner: Literal["hyperband", "median", "successive_halving", "wilcoxon", "none"] = "hyperband"
+    # Sampler choice — narrowed by PR-007 Tier-2 research (2026-05-16). BoTorchSampler
+    # was deprecated for single-objective HPO in Optuna 3.6 (~5x slower than GPSampler
+    # with no cited tabular-GBM advantage) and is no longer offered. HEBO is opt-in
+    # via `optunahub` — the sampler factory raises a clear ImportError pointing at
+    # `pip install optunahub hebo` when selected without the optional deps.
+    sampler: Literal["tpe", "gp", "hebo"] = "tpe"
+
+    # Pruner choice — PR-007 research locked WilcoxonPruner as default for the
+    # K-fold CV-mean objective (per-fold statistical test). MedianPruner is the
+    # conservative alternate (production-grade — Optuna's own xgboost_cv_integration
+    # example uses it). Hyperband / SuccessiveHalving preserved for hypothetical
+    # future single-fit objectives.
+    pruner: Literal["hyperband", "median", "successive_halving", "wilcoxon", "none"] = "wilcoxon"
 
     n_trials: int = 50
     n_startup_trials: int = 20  # for TPE
     multivariate: bool = True  # TPE option
     group: bool = True  # TPE option
+    constant_liar: bool = True  # TPE option — matches Optuna AutoSampler's TPE config
 
     # Subprocess-per-trial isolation per D10/D16 (CUDA + fork is broken).
     trial_isolation: Literal["subprocess", "in_process"] = "subprocess"

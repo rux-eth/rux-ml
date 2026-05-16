@@ -9,13 +9,10 @@ from rux_ml.cli import app
 
 # (argv, expected substring in stderr noting which PR will implement it)
 SUBCOMMANDS: list[tuple[list[str], str]] = [
-    # data verbs landed in PR-004 and `train` in PR-006 — they no longer
-    # print "not yet implemented". Covered by tests/cli/test_data_subcommands.py
-    # and tests/cli/test_train_subcommand.py instead.
-    (["tune", "start", "study_a", "--n-trials", "5"], "PR-007"),
-    (["tune", "resume", "study_a", "--n-trials", "3"], "PR-007"),
-    (["tune", "status", "study_a"], "PR-007"),
-    (["tune", "retry-trial", "study_a", "42"], "PR-007"),
+    # data verbs landed in PR-004, `train` in PR-006, and `tune` in PR-007 —
+    # they no longer print "not yet implemented". Covered by
+    # tests/cli/test_data_subcommands.py / test_train_subcommand.py /
+    # test_tune_subcommands.py instead.
     (["runs", "list"], "PR-009"),
     (["runs", "show", "1"], "PR-009"),
     (["runs", "compare", "1", "2"], "PR-009"),
