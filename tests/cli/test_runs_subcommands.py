@@ -20,9 +20,7 @@ def runs_workdir(tmp_path: Path) -> Path:
     """Workdir with a base.toml + 2 completed trials in one study."""
     src = tmp_path / "synth.parquet"
     rng = np.random.default_rng(0)
-    pl.DataFrame(
-        {"x1": rng.normal(size=50).tolist(), "y": [0, 1] * 25}
-    ).write_parquet(src)
+    pl.DataFrame({"x1": rng.normal(size=50).tolist(), "y": [0, 1] * 25}).write_parquet(src)
 
     config = tmp_path / "base.toml"
     storage_url = f"sqlite:///{tmp_path}/studies/studies.db"
@@ -44,18 +42,18 @@ shuffle = true
     )
     # Populate two trials in one named study.
     cfg = RuxMLConfig(
-        runs=RunsConfig(
-            storage_url=storage_url, artifacts_root=tmp_path / "studies/artifacts"
-        ),
+        runs=RunsConfig(storage_url=storage_url, artifacts_root=tmp_path / "studies/artifacts"),
         data=DataConfig(source_path=src, target_column="y"),
     )
     hashes = data_hashes(src)
     with one_off_run(cfg, problem="prob_a", study="wide") as a:
-        TrialAttrs.from_cfg(cfg, hashes, metric="auc", best_iteration=3).record(a.trial)
+        TrialAttrs.from_cfg(cfg, hashes, metric="auc", best_iteration=3, peak_rss_mb=0.0).record(
+            a.trial
+        )
         a.tell(0.91)
     study = optuna.load_study(study_name=a.study.study_name, storage=storage_url)
     trial = study.ask()
-    TrialAttrs.from_cfg(cfg, hashes, metric="auc", best_iteration=5).record(trial)
+    TrialAttrs.from_cfg(cfg, hashes, metric="auc", best_iteration=5, peak_rss_mb=0.0).record(trial)
     study.tell(trial, 0.93)
     # Stash the study name for test access via a sentinel file.
     (tmp_path / "study_name.txt").write_text(a.study.study_name)
@@ -73,9 +71,7 @@ def test_runs_list_shows_two_trials(runner: CliRunner, runs_workdir: Path) -> No
     assert study_name in result.stdout
 
 
-def test_runs_list_filters_by_problem_prefix(
-    runner: CliRunner, runs_workdir: Path
-) -> None:
+def test_runs_list_filters_by_problem_prefix(runner: CliRunner, runs_workdir: Path) -> None:
     result = runner.invoke(app, _argv(runs_workdir, "runs", "list", "--problem", "prob_a"))
     assert result.exit_code == 0, result.stderr or result.stdout
     study_name = (runs_workdir / "study_name.txt").read_text().strip()
@@ -87,13 +83,9 @@ def test_runs_list_filters_by_problem_prefix(
     assert "no trials found" in empty.stdout
 
 
-def test_runs_show_displays_provenance_triple(
-    runner: CliRunner, runs_workdir: Path
-) -> None:
+def test_runs_show_displays_provenance_triple(runner: CliRunner, runs_workdir: Path) -> None:
     study_name = (runs_workdir / "study_name.txt").read_text().strip()
-    result = runner.invoke(
-        app, _argv(runs_workdir, "runs", "show", "0", "--study", study_name)
-    )
+    result = runner.invoke(app, _argv(runs_workdir, "runs", "show", "0", "--study", study_name))
     assert result.exit_code == 0, result.stderr or result.stdout
     assert "trial number: 0" in result.stdout
     assert "value:" in result.stdout
@@ -115,9 +107,7 @@ def test_runs_show_displays_provenance_triple(
         assert layer in result.stdout
 
 
-def test_runs_show_errors_on_missing_study(
-    runner: CliRunner, runs_workdir: Path
-) -> None:
+def test_runs_show_errors_on_missing_study(runner: CliRunner, runs_workdir: Path) -> None:
     result = runner.invoke(
         app, _argv(runs_workdir, "runs", "show", "0", "--study", "no_such_study")
     )

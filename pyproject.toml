@@ -25,6 +25,7 @@ dependencies = [
     "skfolio>=0.20.1",
     "optuna-integration[xgboost]>=4.8.0",
     "skops>=0.10",
+    "psutil>=5.9",
 ]
 
 [project.scripts]

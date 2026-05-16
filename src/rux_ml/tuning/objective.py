@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any, cast
 import optuna
 from xgboost import ExtMemQuantileDMatrix
 
+from rux_ml._internal.memory import MemoryPressureError, Watchdog
 from rux_ml.config import (
     CatSpec,
     FloatSpec,
@@ -216,6 +217,21 @@ def _fold_scores(
     return scores
 
 
+def _record_attrs(
+    trial: optuna.Trial,
+    trial_cfg: RuxMLConfig,
+    hashes: dict[str, str],
+    peak_rss_mb: float,
+) -> None:
+    """Record the per-trial provenance triple including PR-011's ``peak_rss_mb``."""
+    TrialAttrs.from_cfg(
+        trial_cfg,
+        hashes,
+        metric=trial_cfg.training.metric,
+        peak_rss_mb=peak_rss_mb,
+    ).record(trial)
+
+
 def build_objective(base_cfg: RuxMLConfig) -> Callable[[optuna.Trial], float]:
     """Return the closure ``study.optimize`` consumes.
 
@@ -236,11 +252,6 @@ def build_objective(base_cfg: RuxMLConfig) -> Callable[[optuna.Trial], float]:
         overrides = walk_search_space(base_cfg.search_space, trial)
         trial_cfg = _apply_overrides(base_cfg, overrides)
 
-        # Record the per-trial provenance triple via the PR-009 schema.
-        TrialAttrs.from_cfg(
-            trial_cfg, hashes, metric=trial_cfg.training.metric
-        ).record(trial)
-
         # Build the Splitter per PR-015; resolve `groups` from the data layer if needed.
         splitter = make_splitter(trial_cfg.cv, seed=trial_cfg.tuning.entropy)
         groups = None
@@ -257,7 +268,23 @@ def build_objective(base_cfg: RuxMLConfig) -> Callable[[optuna.Trial], float]:
         # ExtMem-incompatible Splitter gate (PR-015 sub-decision C1).
         _check_extmem_compat(x_full, splitter, trial_cfg)
 
-        scores = _fold_scores(trial_cfg, x_full, y_full, splitter, groups, trial)
+        # Watchdog wraps the per-trial fit work (PR-011). Observational +
+        # post-fit-check: a tripped watchdog converts to optuna.TrialPruned.
+        # Attrs are recorded in a `finally` so peak_rss_mb lands on pruned
+        # AND completed trials.
+        with Watchdog(
+            threshold_gb=trial_cfg.memory.watchdog_threshold_gb,
+            sample_hz=trial_cfg.memory.watchdog_sample_hz,
+        ) as wd:
+            try:
+                scores = _fold_scores(trial_cfg, x_full, y_full, splitter, groups, trial)
+            except MemoryPressureError:
+                raise optuna.TrialPruned from None
+            finally:
+                _record_attrs(trial, trial_cfg, hashes, wd.peak_mb)
+
+        if wd.tripped:
+            raise optuna.TrialPruned
         return statistics.fmean(scores)
 
     return objective

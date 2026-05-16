@@ -23,6 +23,7 @@ from typing import Annotated
 import optuna
 import typer
 
+from rux_ml._internal.env import pin_threads
 from rux_ml.cli._shared import get_options
 from rux_ml.config import RuxMLConfig
 from rux_ml.runs import study_name
@@ -89,6 +90,9 @@ def _run_trials(
     """Dispatch trials per ``cfg.tuning.trial_isolation``."""
     opts = get_options(ctx)
     if cfg.tuning.trial_isolation == "in_process":
+        # PR-011: parent pins env vars before the in-process fit loop (subprocess
+        # children already self-pin via ``_internal/trial_runner.main``).
+        pin_threads(cfg.memory)
         objective = build_objective(cfg)
         study_obj.optimize(objective, n_trials=n_trials)
         return

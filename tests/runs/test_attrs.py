@@ -23,7 +23,7 @@ def parquet_file(tmp_path: Path) -> Path:
 def test_from_cfg_populates_required_now_fields(parquet_file: Path) -> None:
     cfg = RuxMLConfig()
     hashes = data_hashes(parquet_file)
-    attrs = TrialAttrs.from_cfg(cfg, hashes, metric="auc")
+    attrs = TrialAttrs.from_cfg(cfg, hashes, metric="auc", peak_rss_mb=123.4)
     for layer in HASH_LAYERS:
         assert getattr(attrs, f"{layer}_cfg_hash")
     assert attrs.root_cfg_hash
@@ -32,16 +32,21 @@ def test_from_cfg_populates_required_now_fields(parquet_file: Path) -> None:
     assert attrs.data_bytes_hash == hashes["data_bytes_hash"]
     assert attrs.data_logical_hash == hashes["data_logical_hash"]
     assert attrs.metric == "auc"
-    # Optional fields default to None.
+    # Required (PR-011): peak_rss_mb was passed explicitly.
+    assert attrs.peak_rss_mb == 123.4
+    # Optional fields still default to None.
     assert attrs.best_iteration is None
     assert attrs.entropy_hex is None
-    assert attrs.peak_rss_mb is None
 
 
 def test_from_cfg_changes_when_cv_strategy_changes(parquet_file: Path) -> None:
     hashes = data_hashes(parquet_file)
-    a = TrialAttrs.from_cfg(RuxMLConfig(cv=KFoldCV(n_splits=5)), hashes, metric="auc")
-    b = TrialAttrs.from_cfg(RuxMLConfig(cv=StratifiedKFoldCV(n_splits=5)), hashes, metric="auc")
+    a = TrialAttrs.from_cfg(
+        RuxMLConfig(cv=KFoldCV(n_splits=5)), hashes, metric="auc", peak_rss_mb=0.0
+    )
+    b = TrialAttrs.from_cfg(
+        RuxMLConfig(cv=StratifiedKFoldCV(n_splits=5)), hashes, metric="auc", peak_rss_mb=0.0
+    )
     assert a.cv_cfg_hash != b.cv_cfg_hash
     assert a.root_cfg_hash != b.root_cfg_hash
 
@@ -49,7 +54,7 @@ def test_from_cfg_changes_when_cv_strategy_changes(parquet_file: Path) -> None:
 def test_record_writes_only_non_none_fields(parquet_file: Path) -> None:
     cfg = RuxMLConfig()
     hashes = data_hashes(parquet_file)
-    attrs = TrialAttrs.from_cfg(cfg, hashes, metric="auc", best_iteration=42)
+    attrs = TrialAttrs.from_cfg(cfg, hashes, metric="auc", best_iteration=42, peak_rss_mb=234.5)
 
     study = optuna.create_study()
     trial = study.ask()
@@ -65,15 +70,18 @@ def test_record_writes_only_non_none_fields(parquet_file: Path) -> None:
     assert written["metric"] == "auc"
     # best_iteration was explicitly set → it lands.
     assert written["best_iteration"] == 42
+    # peak_rss_mb is required (PR-011) — always lands.
+    assert "peak_rss_mb" in written
     # Optional fields left as None do NOT pollute user_attrs.
     assert "entropy_hex" not in written
-    assert "peak_rss_mb" not in written
 
 
 def test_from_trial_round_trips(parquet_file: Path) -> None:
     cfg = RuxMLConfig()
     hashes = data_hashes(parquet_file)
-    original = TrialAttrs.from_cfg(cfg, hashes, metric="logloss", best_iteration=7)
+    original = TrialAttrs.from_cfg(
+        cfg, hashes, metric="logloss", best_iteration=7, peak_rss_mb=345.6
+    )
 
     study = optuna.create_study()
     trial = study.ask()
@@ -105,7 +113,7 @@ def test_from_trial_ignores_unknown_user_attrs(parquet_file: Path) -> None:
     """``extra="ignore"`` — unrelated user_attrs don't break validation."""
     cfg = RuxMLConfig()
     hashes = data_hashes(parquet_file)
-    attrs = TrialAttrs.from_cfg(cfg, hashes, metric="auc")
+    attrs = TrialAttrs.from_cfg(cfg, hashes, metric="auc", peak_rss_mb=123.4)
 
     study = optuna.create_study()
     trial = study.ask()

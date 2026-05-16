@@ -53,7 +53,7 @@ Full PR descriptions live in `prs/`. This file is the index.
 
 | PR | Description | Status | Depends on |
 |----|-------------|--------|------------|
-| [PR-011](../prs/PR-011-memory-and-threading.md) | Memory & threading — `psutil` watchdog + `MemoryPressureError` → `optuna.TrialPruned` + thread-pinning env vars (`OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, `POLARS_MAX_THREADS`); per-trial `peak_rss_mb` recorded in `user_attrs` | `[ ]` | PR-008 |
+| [PR-011](../prs/PR-011-memory-and-threading.md) | Memory & threading — `psutil` watchdog + `MemoryPressureError` → `optuna.TrialPruned` + thread-pinning env vars (`OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, `POLARS_MAX_THREADS`); per-trial `peak_rss_mb` recorded in `user_attrs` | `[x]` | PR-008 |
 | [PR-012](../prs/PR-012-container.md) | Container — `Dockerfile` from `nvidia/cuda:12.4.1-devel-ubuntu22.04@sha256:<digest>` + uv + maturin install + non-root user + `docker-compose.yml` with `--gpus all` + `--memory=32g` + volume mounts | `[ ]` | PR-001 |
 
 ## Phase G: Reproducibility hardening

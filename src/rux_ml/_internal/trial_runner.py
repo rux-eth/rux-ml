@@ -27,13 +27,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from rux_ml.config import MemoryConfig, RuxMLConfig
+    from rux_ml.config import RuxMLConfig
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -73,17 +72,6 @@ def _load_overrides(path: Path | None) -> dict[str, Any]:
     return dict(raw)  # type: ignore[arg-type]
 
 
-def _pin_thread_env(memory: MemoryConfig) -> None:
-    """Export thread / pool size env vars BEFORE heavy imports.
-
-    numpy / openblas / mkl / polars read these at import-time to size their
-    thread pools; setting them after the libraries are imported is a no-op.
-    The child sets them once here, then lazily imports the rest of the stack.
-    """
-    os.environ["OMP_NUM_THREADS"] = str(memory.omp_threads)
-    os.environ["OPENBLAS_NUM_THREADS"] = str(memory.openblas_threads)
-    os.environ["MKL_NUM_THREADS"] = str(memory.mkl_threads)
-    os.environ["POLARS_MAX_THREADS"] = str(memory.polars_threads)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -108,7 +96,9 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     # CRITICAL: pin BLAS/OpenMP/Polars env vars BEFORE importing numpy/polars/sklearn/xgboost.
-    _pin_thread_env(cfg.memory)
+    from rux_ml._internal.env import pin_threads  # noqa: PLC0415
+
+    pin_threads(cfg.memory)
 
     # Lazy-import the rest of the stack now that env is pinned.
     from rux_ml.training import optuna_direction  # noqa: PLC0415

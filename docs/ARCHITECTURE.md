@@ -74,12 +74,12 @@ CLI: rux-ml tune start \
     ├─ pin env vars from cfg.memory BEFORE numpy/polars/sklearn/xgboost import:
     │     OMP_NUM_THREADS, OPENBLAS_NUM_THREADS, MKL_NUM_THREADS, POLARS_MAX_THREADS
     ├─ lazy-import: rux_ml.tuning + rux_ml.training + heavy libs
-    ├─ start psutil watchdog (PR-011 — deferred)
     ├─ study = tuning.create_or_load(name, storage, sampler, pruner, direction, load_if_exists=True)
     ├─ study.optimize(build_objective(cfg), n_trials=1)
     │   # build_objective (PR-007) runs K-fold CV-mean per cfg.cv:
     │   #   walk_search_space → overrides → trial_cfg = RuxMLConfig.model_validate(deep-merged)
-    │   #   record 8-layer user_attrs via runs.provenance.build_user_attrs
+    │   #   wrap per-trial body in Watchdog (PR-011): 1Hz psutil RSS sampler + post-fit check
+    │   #   record 8+ layer user_attrs via TrialAttrs.from_cfg().record() (includes peak_rss_mb)
     │   #   make_splitter(cfg.cv, seed=cfg.tuning.entropy); ExtMem-compat gate
     │   #   for fold in folds: fit features + trainer, score, trial.report(score, fold_idx)
     │   #   if trial.should_prune(): raise optuna.TrialPruned
@@ -142,12 +142,23 @@ for each categorical column:
 
 The threshold is a TOML knob in `[features]` with **no default value** (BEST-GUESS — to be tuned on first dataset).
 
-### Memory-pressure response (per D10)
+### Memory-pressure response (per D10, locked-in by PR-011)
 
 ```
-psutil watchdog at memory.watchdog_threshold_gb (default 28 GB) sampling at 1 Hz:
-  if RSS > threshold:
-    raise MemoryPressureError → optuna.TrialPruned + diagnostics log
+Watchdog wraps each trial body (rux_ml._internal.memory.Watchdog):
+  background thread samples psutil.Process.memory_info().rss at
+  memory.watchdog_sample_hz (default 1 Hz); tracks peak; sets `tripped` flag
+  if RSS > memory.watchdog_threshold_gb (default 28 GB, BEST-GUESS).
+
+Observational + post-fit-check (not preemptive):
+  XGBoost training is a long-running C call — Python signals from a background
+  thread aren't reliable inside C extensions. The trial body checks
+  wd.tripped after the fit returns:
+    if wd.tripped: raise optuna.TrialPruned (caught by objective wrapper)
+  Hard OOMs (process > OS limit) are handled by PR-008's subprocess
+  isolation: OS kill → non-zero exit → parent marks trial FAIL.
+
+Recorded on every trial: TrialAttrs.peak_rss_mb (required field — PR-011).
 
 NOT used: dynamic Polars batch shrinking, mid-trial DMatrix swap.
 The static pre-trial path (D3 ingest selector) is the only adaptive layer.

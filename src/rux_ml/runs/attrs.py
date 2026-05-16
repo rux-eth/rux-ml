@@ -77,8 +77,11 @@ class TrialAttrs(BaseModel):
     cuda_runtime_version: str | None = None  # PR-012 / PR-013
     gpu_model: str | None = None             # PR-013
     driver_version: str | None = None        # PR-013
-    omp_threads: int | None = None           # PR-011
-    peak_rss_mb: float | None = None         # PR-011
+    omp_threads: int | None = None           # PR-011 (Optional — env-recorded later if needed)
+
+    # PR-011 tightened from Optional → required: every trial records the peak RSS
+    # the watchdog observed during the per-trial body.
+    peak_rss_mb: float
 
     @classmethod
     def from_cfg(
@@ -87,12 +90,14 @@ class TrialAttrs(BaseModel):
         data_hashes: dict[str, str],
         *,
         metric: str,
+        peak_rss_mb: float,
         best_iteration: int | None = None,
     ) -> TrialAttrs:
         """Construct a ``TrialAttrs`` from a resolved config + data hashes.
 
         Used by both the 1-trial baseline path (``cli/train.py``) and the
-        sweep objective (``tuning/objective.py``).
+        sweep objective (``tuning/objective.py``). ``peak_rss_mb`` is sourced
+        from the PR-011 ``Watchdog`` wrapping the trial body.
         """
         return cls(
             data_cfg_hash=layer_cfg_hash(cfg, "data"),
@@ -110,6 +115,7 @@ class TrialAttrs(BaseModel):
             data_logical_hash=data_hashes["data_logical_hash"],
             metric=metric,
             best_iteration=best_iteration,
+            peak_rss_mb=peak_rss_mb,
         )
 
     def record(self, trial: optuna.Trial) -> None:

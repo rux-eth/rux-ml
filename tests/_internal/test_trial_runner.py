@@ -48,8 +48,16 @@ def test_load_overrides_rejects_non_dict_json(tmp_path: Path) -> None:
         trial_runner._load_overrides(p)
 
 
-def test_pin_thread_env_exports_all_four(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``_pin_thread_env`` sets OMP/OPENBLAS/MKL/POLARS env vars from MemoryConfig."""
+def test_pin_threads_exports_all_four(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``pin_threads`` sets OMP/OPENBLAS/MKL/POLARS env vars from MemoryConfig.
+
+    PR-011 moved the helper from ``trial_runner._pin_thread_env`` to the public
+    ``rux_ml._internal.env.pin_threads`` (sub-decision A1).
+    """
+    import os  # noqa: PLC0415
+
+    from rux_ml._internal.env import pin_threads  # noqa: PLC0415
+
     # Reset env so we can observe the writes.
     for key in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "POLARS_MAX_THREADS"):
         monkeypatch.delenv(key, raising=False)
@@ -57,9 +65,7 @@ def test_pin_thread_env_exports_all_four(monkeypatch: pytest.MonkeyPatch) -> Non
     memory = MemoryConfig(
         omp_threads=12, openblas_threads=2, mkl_threads=3, polars_threads=8
     )
-    trial_runner._pin_thread_env(memory)
-    import os  # noqa: PLC0415
-
+    pin_threads(memory)
     assert os.environ["OMP_NUM_THREADS"] == "12"
     assert os.environ["OPENBLAS_NUM_THREADS"] == "2"
     assert os.environ["MKL_NUM_THREADS"] == "3"

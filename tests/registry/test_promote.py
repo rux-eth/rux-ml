@@ -55,7 +55,9 @@ def _populate_trial(cfg: RuxMLConfig) -> tuple[str, int]:
     assert cfg.data.source_path is not None
     hashes = data_hashes(cfg.data.source_path)
     with one_off_run(cfg, problem="churn_v1", study="wide") as run:
-        TrialAttrs.from_cfg(cfg, hashes, metric="auc", best_iteration=4).record(run.trial)
+        TrialAttrs.from_cfg(cfg, hashes, metric="auc", best_iteration=4, peak_rss_mb=0.0).record(
+            run.trial
+        )
         run.tell(0.91)
     return run.study.study_name, run.trial.number
 

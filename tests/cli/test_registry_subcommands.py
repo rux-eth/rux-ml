@@ -76,15 +76,15 @@ shuffle = true
         training=TrainingConfig(
             device="cpu", metric="auc", n_estimators=8, max_depth=3, learning_rate=0.3
         ),
-        runs=RunsConfig(
-            storage_url=storage_url, artifacts_root=tmp_path / "studies/artifacts"
-        ),
+        runs=RunsConfig(storage_url=storage_url, artifacts_root=tmp_path / "studies/artifacts"),
         registry=RegistryConfig(root=registry_root),
         cv=KFoldCV(n_splits=3, shuffle=True),
     )
     hashes = data_hashes(src)
     with one_off_run(cfg, problem="churn_v1", study="wide") as run:
-        TrialAttrs.from_cfg(cfg, hashes, metric="auc", best_iteration=4).record(run.trial)
+        TrialAttrs.from_cfg(cfg, hashes, metric="auc", best_iteration=4, peak_rss_mb=0.0).record(
+            run.trial
+        )
         run.tell(0.91)
     return tmp_path, run.study.study_name, run.trial.number
 
@@ -101,10 +101,14 @@ def test_registry_promote_writes_bundle_and_prints_version(
         app,
         _argv(
             workdir,
-            "registry", "promote",
-            "--problem", "churn_v1",
-            "--study", study_name,
-            "--trial", str(trial_number),
+            "registry",
+            "promote",
+            "--problem",
+            "churn_v1",
+            "--study",
+            study_name,
+            "--trial",
+            str(trial_number),
         ),
         catch_exceptions=False,
     )
@@ -122,10 +126,14 @@ def test_registry_list_shows_problems_and_champions(
         app,
         _argv(
             workdir,
-            "registry", "promote",
-            "--problem", "churn_v1",
-            "--study", study_name,
-            "--trial", str(trial_number),
+            "registry",
+            "promote",
+            "--problem",
+            "churn_v1",
+            "--study",
+            study_name,
+            "--trial",
+            str(trial_number),
         ),
         catch_exceptions=False,
     )

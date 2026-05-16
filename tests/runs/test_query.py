@@ -41,13 +41,15 @@ def _populate_two_trials(cfg: RuxMLConfig, parquet_file: Path) -> str:
     """Create two completed trials in one study; return the study name."""
     hashes = data_hashes(parquet_file)
     with one_off_run(cfg, problem="prob_a", study="wide") as a:
-        TrialAttrs.from_cfg(cfg, hashes, metric="auc", best_iteration=3).record(a.trial)
+        TrialAttrs.from_cfg(cfg, hashes, metric="auc", best_iteration=3, peak_rss_mb=0.0).record(
+            a.trial
+        )
         a.tell(0.91)
     # Reuse the same study by passing the exact name through study_name.
     study_name = a.study.study_name
     study = optuna.load_study(study_name=study_name, storage=cfg.runs.storage_url)
     trial = study.ask()
-    TrialAttrs.from_cfg(cfg, hashes, metric="auc", best_iteration=5).record(trial)
+    TrialAttrs.from_cfg(cfg, hashes, metric="auc", best_iteration=5, peak_rss_mb=0.0).record(trial)
     study.tell(trial, 0.93)
     return study_name
 

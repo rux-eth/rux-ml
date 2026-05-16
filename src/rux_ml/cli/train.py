@@ -15,9 +15,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
+import optuna
 import polars as pl
 import typer
 
+from rux_ml._internal.env import pin_threads
+from rux_ml._internal.memory import MemoryPressureError, Watchdog
 from rux_ml.cli._shared import get_options
 from rux_ml.config import RuxMLConfig
 from rux_ml.data import load_parquet, materialize, train_val_test_split
@@ -101,10 +104,12 @@ def run_command(ctx: typer.Context) -> None:
         study=opts.study,
         overrides=opts.overrides,
     )
-    source_path, target_col = _require(cfg)
+    # PR-011: pin OMP/BLAS/POLARS env vars before any in-process fit (no-op for the
+    # subprocess child case which self-pins via ``_internal/trial_runner.main``).
+    pin_threads(cfg.memory)
 
+    source_path, target_col = _require(cfg)
     hashes = data_hashes(source_path)
-    score, best_iter = _fit_and_score(cfg, source_path, target_col)
 
     with one_off_run(
         cfg,
@@ -112,17 +117,36 @@ def run_command(ctx: typer.Context) -> None:
         study=opts.study,
         direction=optuna_direction(cfg.training.metric),
     ) as run:
+        # PR-011: watchdog wraps the fit; tripped → pruned.
+        with Watchdog(
+            threshold_gb=cfg.memory.watchdog_threshold_gb,
+            sample_hz=cfg.memory.watchdog_sample_hz,
+        ) as wd:
+            try:
+                score, best_iter = _fit_and_score(cfg, source_path, target_col)
+            except MemoryPressureError:
+                TrialAttrs.from_cfg(
+                    cfg, hashes, metric=cfg.training.metric, peak_rss_mb=wd.peak_mb
+                ).record(run.trial)
+                raise optuna.TrialPruned from None
+
         TrialAttrs.from_cfg(
             cfg,
             hashes,
             metric=cfg.training.metric,
             best_iteration=best_iter,
+            peak_rss_mb=wd.peak_mb,
         ).record(run.trial)
+        if wd.tripped:
+            # Threshold crossed during the fit even though the fit completed —
+            # mark the trial pruned so it doesn't pollute the best-trial pool.
+            raise optuna.TrialPruned
         run.tell(score)
 
         typer.echo(f"score ({cfg.training.metric}): {score:.6f}")
         typer.echo(f"  study:    {run.study.study_name}")
         typer.echo(f"  trial:    {run.trial.number}")
         typer.echo(f"  storage:  {cfg.runs.storage_url}")
+        typer.echo(f"  peak_rss_mb: {wd.peak_mb:.1f}")
         if best_iter is not None:
             typer.echo(f"  best_iter: {best_iter}")

@@ -87,7 +87,8 @@ def test_train_records_user_attrs_in_sqlite(runner: CliRunner, train_workdir: Pa
     assert len(study.trials) == 1
     attrs = study.trials[0].user_attrs
 
-    # PR-006-minimum provenance subset must all be present (cv_cfg_hash added by PR-015).
+    # Provenance subset must all be present (cv_cfg_hash added by PR-015,
+    # peak_rss_mb added + tightened to required by PR-011).
     expected = {
         "data_cfg_hash",
         "features_cfg_hash",
@@ -103,9 +104,11 @@ def test_train_records_user_attrs_in_sqlite(runner: CliRunner, train_workdir: Pa
         "data_bytes_hash",
         "data_logical_hash",
         "metric",
+        "peak_rss_mb",
     }
     assert expected.issubset(attrs.keys()), expected - attrs.keys()
     assert attrs["metric"] == "auc"
+    assert attrs["peak_rss_mb"] > 0  # watchdog seeds peak from current RSS at entry
     # git_sha is either "unknown" (CI without .git) or a 40-char hex SHA.
     assert attrs["git_sha"] == "unknown" or len(attrs["git_sha"]) == 40
 
