@@ -30,6 +30,11 @@
 [registry]
 # Defaults: root="registry", version_format="v_{date}_{short_hash}".
 
+[cv]
+# Per PR-015 (Tier-2). Default: kind="kfold", n_splits=5, shuffle=true (IID baseline).
+# Switch via kind ∈ {kfold, stratified_kfold, time_series, group_kfold, cpcv}.
+# CPCV (skfolio) requires per-problem embargo_size / purged_size for AFML use.
+
 [memory]
 # Defaults: watchdog_threshold_gb=28.0 (BEST-GUESS per D10),
 # omp_threads=24, openblas_threads=1, mkl_threads=1, polars_threads=24.

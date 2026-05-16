@@ -3,6 +3,13 @@
 Per D9, a full ``SeedSequence`` + per-component spawn lands in PR-013;
 this PR uses a single integer seed routed through Polars' native shuffle
 so PR-013 can plug a derived seed in unchanged.
+
+**One-shot vs repeated CV** (PR-015): ``train_val_test_split`` is a one-shot
+convenience that returns Polars DataFrames directly. For repeated K-fold-style
+cross-validation (used by PR-007's Optuna objective and any HPO loop), use the
+``Splitter`` Protocol in :mod:`rux_ml.data.cv` instead — it yields ``(train_idx,
+test_idx)`` row-index pairs (sklearn convention) so the caller controls
+materialisation policy.
 """
 
 from __future__ import annotations

@@ -22,6 +22,7 @@ dependencies = [
     "category-encoders>=2.6",
     "pyarrow>=17",
     "optuna>=4.0",
+    "skfolio>=0.20.1",
 ]
 
 [project.scripts]

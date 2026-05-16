@@ -87,7 +87,7 @@ def test_train_records_user_attrs_in_sqlite(runner: CliRunner, train_workdir: Pa
     assert len(study.trials) == 1
     attrs = study.trials[0].user_attrs
 
-    # PR-006-minimum provenance subset must all be present.
+    # PR-006-minimum provenance subset must all be present (cv_cfg_hash added by PR-015).
     expected = {
         "data_cfg_hash",
         "features_cfg_hash",
@@ -96,6 +96,7 @@ def test_train_records_user_attrs_in_sqlite(runner: CliRunner, train_workdir: Pa
         "runs_cfg_hash",
         "registry_cfg_hash",
         "memory_cfg_hash",
+        "cv_cfg_hash",
         "root_cfg_hash",
         "git_sha",
         "data_hash",

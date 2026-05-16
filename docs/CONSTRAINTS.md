@@ -97,7 +97,7 @@ Every value that could vary between datasets, problems, environments, or experim
 Every Optuna trial — sweep or one-off — records the following in `trial.set_user_attr(...)`:
 
 - `data_hash` — composite hash of dataset bytes + canonical projection (per D9)
-- `data_cfg_hash`, `features_cfg_hash`, `training_cfg_hash`, `tuning_cfg_hash` — per-layer config hashes
+- `data_cfg_hash`, `features_cfg_hash`, `training_cfg_hash`, `tuning_cfg_hash`, `cv_cfg_hash` — per-layer config hashes (`cv_cfg_hash` added by PR-015 — Splitter strategy participates in the per-trial provenance triple)
 - `root_cfg_hash` — full config hash (excluding elided fields)
 - `git_sha` — code version
 - `entropy_hex` — `SeedSequence` entropy (per D9)
