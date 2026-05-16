@@ -8,7 +8,71 @@ This PR MUST NOT be implemented until `PROCEDURE-pr-research.md` has been comple
 
 ## Research findings
 
-_To be populated by `PROCEDURE-pr-research.md`._
+### State Assessment (2026-05-16, LOCAL-ONLY)
+
+**Current state of the codebase**:
+
+- `dev` at `d6d7748` (PR-009 merged). Working tree clean.
+- `src/rux_ml/registry/` **does not exist**. `src/rux_ml/cli/registry.py` has 3 stub subcommands (`promote`, `list`, `rollback`) calling `not_implemented(..., "PR-010")`.
+- `RegistryConfig` (PR-002): `root: Path = Path("registry")`, `version_format: str = "v_{date}_{short_hash}"`.
+- `runs.TrialAttrs.from_trial(frozen)` (PR-009) — the explicit promotion-validation hand-off; raises `pydantic.ValidationError` on missing required-now fields.
+- `runs.load_run(storage_url, study_name, trial_number)` (PR-009) — returns a `Run` rich object with `params` + `attrs: TrialAttrs | None`.
+- **`skops` is NOT in `pyproject.toml` deps yet** — PR-010 must add it.
+- **`optuna.artifacts` is NOT used anywhere** — PR-007's `build_objective` does NOT upload `pipeline.skops` / `model.ubj` artifacts. The architecture-diagram `optuna.artifacts.upload_artifact(...)` was design-intent but unimplemented. PR-010 resolves this by re-fitting at promotion (sub-decision A1).
+
+**Local API verification (already-installed libraries)**:
+
+| Item | Status |
+|---|---|
+| XGBoost 3.2.0 `Booster.save_model("…ubj")` / `load_model(...)` | **STILL CURRENT** (exercised in PR-006) |
+| `optuna.artifacts.FileSystemArtifactStore` + `upload_artifact` / `download_artifact` (Optuna 4.8) | available but **not used today** |
+| `skops.io.dump` / `load` | **NEEDS INSTALL** |
+
+**Stale assumption in PR-010 file + architecture diagram**:
+
+The spec step 3 says "Download artifacts from Optuna (`pipeline.skops`, `model.ubj`)". Neither PR-007's objective nor PR-008's trial_runner uploads artifacts — there's nothing in the artifact store to download at promotion. **Resolved**: promote re-fits at promotion time (sub-decision A1) and the architecture diagram is updated to drop the `optuna.artifacts.upload_artifact` line from the trial body.
+
+**New constraints learned from PR-006 / PR-007 / PR-008 / PR-009**:
+
+1. **`TrialAttrs.from_trial(frozen)` is the promotion-validation hand-off** (PR-009 explicit). PR-010's promote refuses to promote when validation raises.
+2. **`runs.load_run(storage, study, trial_number)` is the trial-fetch surface** (PR-009).
+3. **Trial-ID convention** is `trial.number` scoped to `--study NAME` (PR-007 / PR-009 precedent).
+4. **Re-fit path**: `build_objective` is per-trial-with-CV; promote needs a different code path that does a single full-train fit on the data + materialises the (Pipeline, Booster) pair. Reuse `make_features` / `make_trainer` / `make_splitter`'s underlying logic without the CV loop.
+5. **Inference-deps separation** (D8): `src/rux_ml/registry/__init__.py` exports `load_model` and imports only `xgboost` / `skops` / `sklearn` / `polars` + registry sub-modules. NO transitive `rux_ml.tuning` / `rux_ml.data.cv` / `rux_ml.training` imports (those are training-stack). The test enforces this via subprocess + blocked `sys.modules`.
+
+### Synthesis (Phase 4, 2026-05-16)
+
+**Outcome: Confirm** — D8 design research stands. Tier-1 classification stands (sub-decision A is an implementation-strategy choice within D8's design space; the rest are bounded engineering judgment).
+
+**User-approved sub-decisions (2026-05-16):**
+
+- **A1** — Re-fit at promotion time. Self-contained PR-010; promote requires training stack (already in workbench deps); `load_model` stays light. Architecture diagram's `optuna.artifacts.upload_artifact(...)` line is dropped — replaced with "promote re-fits final model from cfg + trial.params on full train+val data."
+- **B1** — Strict separation: `registry/__init__.py` imports only `xgboost` / `skops` / `sklearn` / `polars` + registry sub-modules. Inference-deps test enforces.
+- **C1** — `v_{YYYY}_{MM}_{DD}_{short_hash}` with `short_hash = root_cfg_hash[:6]`. Sortable by date; deterministic given the same config+data.
+- **D1** — `champion.json` schema: `{"version", "promoted_at", "promoted_from": {"study", "trial_number", "metric_value"}}`. Atomic rewrite via tmp + `os.replace`.
+- **E1** — Tmp file in same dir + `os.replace` (POSIX-atomic rename). Standard pattern; matches v0's single-machine sequential model.
+
+**Changes from research**:
+
+- `skops` added to runtime deps.
+- Architecture-diagram drift: the trial-body `optuna.artifacts.upload_artifact(...)` line is removed. Promote re-fits. Updated in the same commit.
+- `library_versions` block on the manifest is populated at promote time via `importlib.metadata.version("…")` so the bundle records exactly what produced it.
+
+**Changes to `docs/ARCHITECTURE.md`** (same commit): Data Flow "After study completes — promotion is an explicit step" section refreshed to reflect re-fit-at-promote.
+
+**Changes to `docs/CONSTRAINTS.md`**: None.
+
+**Changes to `docs/CONVENTIONS.md`**: None.
+
+**No new prerequisite PRs surfaced.** PR-011 (memory & threading) and PR-013 (seed management) remain correctly sequenced downstream; PR-014 (golden regression tests) builds on the registry as the loadable-bundle surface.
+
+### Gate Check (Phase 5, 2026-05-16)
+
+- Premise still valid: ✓ (D8 design research stands)
+- No prerequisite PRs surfaced: ✓
+- User approved Tier-1 classification: ✓ (2026-05-16)
+- User approved locked-in spec (A1, B1, C1, D1, E1): ✓ (2026-05-16)
+- Implementation cleared: ✓ (2026-05-16)
 
 ---
 

@@ -66,10 +66,11 @@ def test_parse_set_overrides_rejects_empty_key() -> None:
 
 
 def test_callback_populates_global_options(runner: CliRunner) -> None:
-    """Invoke with global flags + a still-stub subcommand and verify args don't crash.
+    """Invoke with global flags + a benign real subcommand and verify args flow through.
 
-    Uses `registry list` (a PR-010 stub) so the callback wiring is exercised
-    without needing the heavy subcommand bodies that PR-006/PR-007/PR-009 made real.
+    Post-PR-010, all subcommands are real bodies — no more "not yet implemented"
+    stubs. ``registry list`` against an empty/missing registry is benign
+    (exits 0 with a "no registry" message) so it's safe as the wiring probe.
     """
     result = runner.invoke(
         app,
@@ -86,10 +87,10 @@ def test_callback_populates_global_options(runner: CliRunner) -> None:
             "list",
         ],
     )
-    assert result.exit_code == 0
-    # The stub body acknowledges the wiring; once PR-010 implements it, switch to another stub.
+    assert result.exit_code == 0, result.stderr or result.stdout
     combined = result.stdout + (result.stderr or "")
-    assert "PR-010" in combined
+    # The benign body prints either "no registry at <path>" or a per-problem header.
+    assert "registry" in combined.lower() or "problems" in combined.lower()
 
 
 def test_callback_rejects_malformed_set(runner: CliRunner) -> None:

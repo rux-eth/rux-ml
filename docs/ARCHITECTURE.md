@@ -27,7 +27,7 @@ The Python package is organized into layered subpackages. Dependencies flow down
 | **Training** | `src/rux_ml/training/` | `Trainer` `typing.Protocol` (sklearn API: `fit`/`predict`/`predict_proba`/`best_iteration_`); model factory (`XGBClassifier`, etc.); metric registry |
 | **Tuning** | `src/rux_ml/tuning/` | Optuna study orchestration; `objective(trial, base_cfg)`; `SearchSpec`-walker; samplers (TPE default) and pruners (Hyperband default); subprocess-per-trial spawn |
 | **Runs** | `src/rux_ml/runs/` | Optuna-as-experiment-log read API; canonical `user_attrs` schema (Pydantic-validated `TrialAttrs` per PR-009); `one_off_run` context manager wrapping `study.ask`/`study.tell`; query helpers (`list_runs`, `load_run`, `compare_runs` returning Polars / Pydantic objects) |
-| **Registry** | `src/rux_ml/registry/` | Model bundle write/read (`pipeline.skops` + `model.ubj` + `manifest.json`); promotion logic with atomic `champion.json` rewrite; thin `load_model(problem, version="champion")` API |
+| **Registry** | `src/rux_ml/registry/` | Model bundle write/read (`pipeline.skops` + `model.ubj` + Pydantic-validated `manifest.json`); promotion logic with atomic `champion.json` rewrite via tmp + `os.replace`; thin `load_model(problem, version="champion")` API with strict inference-deps separation (no transitive training-stack imports — verified by subprocess test) |
 | **Internal** | `src/rux_ml/_internal/` | Logging, hashing helpers (`xxhash`/`blake3`), env (OMP/BLAS pinning, `WORKBENCH_HOME` resolution), `SeedSequence` + `.spawn()`, `psutil` memory watchdog raising `MemoryPressureError` |
 
 `src/rux_ml/_internal/trial_runner.py` is the entry point invoked by `subprocess.run` per trial — see Data Flow below.
@@ -91,13 +91,19 @@ After study completes — promotion is an explicit step:
   CLI: rux-ml registry promote \
        --problem churn_v1 --study churn_xgb_wide_<study_id> --trial <best>
 
-  cli.registry.promote():
-    ├─ load trial from study storage
-    ├─ download artifacts via optuna.artifacts.download_artifact()
-    ├─ compose manifest from trial user_attrs + library versions
+  cli.registry.promote() (per PR-010 sub-decision A1 — re-fit at promote):
+    ├─ load trial from study storage via runs.load_run
+    ├─ validate TrialAttrs.from_trial(frozen)
+    │     raises pydantic.ValidationError if provenance is incomplete →
+    │     promotion REFUSED (CONSTRAINTS.md reproducibility rule)
+    ├─ apply trial.params overrides to base RuxMLConfig → trial_cfg
+    ├─ re-fit final (pipeline, booster) on train+val (no CV folds, no
+    │     per-fold reporting — just a clean final fit)
+    ├─ compose ModelManifest from TrialAttrs + library versions +
+    │     feature_list_hash
     ├─ write registry/<problem>/<version>/{pipeline.skops, model.ubj, manifest.json}
     │     where <version> = v_<YYYY>_<MM>_<DD>_<short_hash>
-    └─ atomic rewrite registry/<problem>/champion.json
+    └─ atomic rewrite registry/<problem>/champion.json (tmp + os.replace)
 ```
 
 For a one-off (non-sweep) baseline training, `cli.train.run()` follows the same path but wraps the call as a single trial via `study.ask()` + `study.tell()` — sweep and one-off runs share the same store and the same provenance schema.
