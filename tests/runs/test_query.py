@@ -8,6 +8,8 @@ import optuna
 import polars as pl
 import pytest
 
+from rux_ml._internal.env import EnvironmentVersions
+from rux_ml._internal.seeds import SeedBag
 from rux_ml.config import DataConfig, RunsConfig, RuxMLConfig
 from rux_ml.runs import (
     TrialAttrs,
@@ -37,26 +39,47 @@ def _cfg_with(tmp_path: Path) -> RuxMLConfig:
     )
 
 
-def _populate_two_trials(cfg: RuxMLConfig, parquet_file: Path) -> str:
+def _populate_two_trials(
+    cfg: RuxMLConfig,
+    parquet_file: Path,
+    bag: SeedBag,
+    versions: EnvironmentVersions,
+) -> str:
     """Create two completed trials in one study; return the study name."""
     hashes = data_hashes(parquet_file)
     with one_off_run(cfg, problem="prob_a", study="wide") as a:
-        TrialAttrs.from_cfg(cfg, hashes, metric="auc", best_iteration=3, peak_rss_mb=0.0).record(
-            a.trial
-        )
+        TrialAttrs.from_cfg(
+            cfg,
+            hashes,
+            metric="auc",
+            best_iteration=3,
+            peak_rss_mb=0.0,
+            bag=bag,
+            versions=versions,
+        ).record(a.trial)
         a.tell(0.91)
     # Reuse the same study by passing the exact name through study_name.
     study_name = a.study.study_name
     study = optuna.load_study(study_name=study_name, storage=cfg.runs.storage_url)
     trial = study.ask()
-    TrialAttrs.from_cfg(cfg, hashes, metric="auc", best_iteration=5, peak_rss_mb=0.0).record(trial)
+    TrialAttrs.from_cfg(
+        cfg,
+        hashes,
+        metric="auc",
+        best_iteration=5,
+        peak_rss_mb=0.0,
+        bag=bag,
+        versions=versions,
+    ).record(trial)
     study.tell(trial, 0.93)
     return study_name
 
 
-def test_list_runs_returns_polars_dataframe(tmp_path: Path, parquet_file: Path) -> None:
+def test_list_runs_returns_polars_dataframe(
+    tmp_path: Path, parquet_file: Path, seed_bag: SeedBag, env_versions: EnvironmentVersions
+) -> None:
     cfg = _cfg_with(tmp_path)
-    name = _populate_two_trials(cfg, parquet_file)
+    name = _populate_two_trials(cfg, parquet_file, seed_bag, env_versions)
     df = list_runs(cfg.runs.storage_url)
     assert isinstance(df, pl.DataFrame)
     assert df.height >= 2
@@ -64,17 +87,22 @@ def test_list_runs_returns_polars_dataframe(tmp_path: Path, parquet_file: Path) 
     assert name in df["study_name"].to_list()
 
 
-def test_list_runs_filters_by_study_name(tmp_path: Path, parquet_file: Path) -> None:
+def test_list_runs_filters_by_study_name(
+    tmp_path: Path, parquet_file: Path, seed_bag: SeedBag, env_versions: EnvironmentVersions
+) -> None:
     cfg = _cfg_with(tmp_path)
-    name = _populate_two_trials(cfg, parquet_file)
+    name = _populate_two_trials(cfg, parquet_file, seed_bag, env_versions)
     df = list_runs(cfg.runs.storage_url, study=name)
     assert df.height >= 2
     assert set(df["study_name"].to_list()) == {name}
 
 
-def test_list_runs_filters_by_problem_prefix(tmp_path: Path, parquet_file: Path) -> None:
+def test_list_runs_filters_by_problem_prefix(
+    tmp_path: Path, parquet_file: Path, seed_bag: SeedBag, env_versions: EnvironmentVersions
+) -> None:
     cfg = _cfg_with(tmp_path)
-    _populate_two_trials(cfg, parquet_file)  # problem="prob_a" → study name starts "prob_a_"
+    # problem="prob_a" → study name starts "prob_a_"
+    _populate_two_trials(cfg, parquet_file, seed_bag, env_versions)
     df = list_runs(cfg.runs.storage_url, problem="prob_a")
     assert df.height >= 2
     assert all(s.startswith("prob_a_") for s in df["study_name"].to_list())
@@ -89,9 +117,11 @@ def test_list_runs_empty_when_no_studies(tmp_path: Path) -> None:
     assert df.is_empty()
 
 
-def test_load_run_returns_validated_attrs(tmp_path: Path, parquet_file: Path) -> None:
+def test_load_run_returns_validated_attrs(
+    tmp_path: Path, parquet_file: Path, seed_bag: SeedBag, env_versions: EnvironmentVersions
+) -> None:
     cfg = _cfg_with(tmp_path)
-    name = _populate_two_trials(cfg, parquet_file)
+    name = _populate_two_trials(cfg, parquet_file, seed_bag, env_versions)
     run = load_run(cfg.runs.storage_url, name, trial_number=0)
     assert run.study_name == name
     assert run.trial_number == 0
@@ -108,9 +138,11 @@ def test_load_run_raises_on_missing_study(tmp_path: Path) -> None:
         load_run(cfg.runs.storage_url, "no_such_study", trial_number=0)
 
 
-def test_load_run_raises_on_missing_trial(tmp_path: Path, parquet_file: Path) -> None:
+def test_load_run_raises_on_missing_trial(
+    tmp_path: Path, parquet_file: Path, seed_bag: SeedBag, env_versions: EnvironmentVersions
+) -> None:
     cfg = _cfg_with(tmp_path)
-    name = _populate_two_trials(cfg, parquet_file)
+    name = _populate_two_trials(cfg, parquet_file, seed_bag, env_versions)
     with pytest.raises(KeyError, match="trial #99"):
         load_run(cfg.runs.storage_url, name, trial_number=99)
 
@@ -131,9 +163,11 @@ def test_load_run_returns_none_attrs_on_invalid_user_attrs(tmp_path: Path) -> No
     assert run.attrs is None
 
 
-def test_compare_runs_returns_wide_dataframe(tmp_path: Path, parquet_file: Path) -> None:
+def test_compare_runs_returns_wide_dataframe(
+    tmp_path: Path, parquet_file: Path, seed_bag: SeedBag, env_versions: EnvironmentVersions
+) -> None:
     cfg = _cfg_with(tmp_path)
-    name = _populate_two_trials(cfg, parquet_file)
+    name = _populate_two_trials(cfg, parquet_file, seed_bag, env_versions)
     df = compare_runs(cfg.runs.storage_url, name, [0, 1])
     assert isinstance(df, pl.DataFrame)
     assert df.height == 2

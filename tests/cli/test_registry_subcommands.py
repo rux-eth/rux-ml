@@ -9,6 +9,8 @@ import polars as pl
 import pytest
 from typer.testing import CliRunner
 
+from rux_ml._internal.env import EnvironmentVersions
+from rux_ml._internal.seeds import SeedBag
 from rux_ml.cli import app
 from rux_ml.config import (
     DataConfig,
@@ -24,7 +26,9 @@ from rux_ml.runs import TrialAttrs, data_hashes, one_off_run
 
 
 @pytest.fixture
-def registry_workdir(tmp_path: Path) -> tuple[Path, str, int]:
+def registry_workdir(
+    tmp_path: Path, seed_bag: SeedBag, env_versions: EnvironmentVersions
+) -> tuple[Path, str, int]:
     """Workdir with a synthetic Parquet + base.toml + one fully-recorded trial.
 
     Returns ``(workdir, study_name, trial_number)`` so each test can promote that trial.
@@ -82,9 +86,15 @@ shuffle = true
     )
     hashes = data_hashes(src)
     with one_off_run(cfg, problem="churn_v1", study="wide") as run:
-        TrialAttrs.from_cfg(cfg, hashes, metric="auc", best_iteration=4, peak_rss_mb=0.0).record(
-            run.trial
-        )
+        TrialAttrs.from_cfg(
+            cfg,
+            hashes,
+            metric="auc",
+            best_iteration=4,
+            peak_rss_mb=0.0,
+            bag=seed_bag,
+            versions=env_versions,
+        ).record(run.trial)
         run.tell(0.91)
     return tmp_path, run.study.study_name, run.trial.number
 

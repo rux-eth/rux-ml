@@ -10,13 +10,17 @@ import polars as pl
 import pytest
 from typer.testing import CliRunner
 
+from rux_ml._internal.env import EnvironmentVersions
+from rux_ml._internal.seeds import SeedBag
 from rux_ml.cli import app
 from rux_ml.config import DataConfig, RunsConfig, RuxMLConfig
 from rux_ml.runs import TrialAttrs, data_hashes, one_off_run
 
 
 @pytest.fixture
-def runs_workdir(tmp_path: Path) -> Path:
+def runs_workdir(
+    tmp_path: Path, seed_bag: SeedBag, env_versions: EnvironmentVersions
+) -> Path:
     """Workdir with a base.toml + 2 completed trials in one study."""
     src = tmp_path / "synth.parquet"
     rng = np.random.default_rng(0)
@@ -47,13 +51,27 @@ shuffle = true
     )
     hashes = data_hashes(src)
     with one_off_run(cfg, problem="prob_a", study="wide") as a:
-        TrialAttrs.from_cfg(cfg, hashes, metric="auc", best_iteration=3, peak_rss_mb=0.0).record(
-            a.trial
-        )
+        TrialAttrs.from_cfg(
+            cfg,
+            hashes,
+            metric="auc",
+            best_iteration=3,
+            peak_rss_mb=0.0,
+            bag=seed_bag,
+            versions=env_versions,
+        ).record(a.trial)
         a.tell(0.91)
     study = optuna.load_study(study_name=a.study.study_name, storage=storage_url)
     trial = study.ask()
-    TrialAttrs.from_cfg(cfg, hashes, metric="auc", best_iteration=5, peak_rss_mb=0.0).record(trial)
+    TrialAttrs.from_cfg(
+        cfg,
+        hashes,
+        metric="auc",
+        best_iteration=5,
+        peak_rss_mb=0.0,
+        bag=seed_bag,
+        versions=env_versions,
+    ).record(trial)
     study.tell(trial, 0.93)
     # Stash the study name for test access via a sentinel file.
     (tmp_path / "study_name.txt").write_text(a.study.study_name)

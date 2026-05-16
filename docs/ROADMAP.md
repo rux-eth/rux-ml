@@ -60,8 +60,8 @@ Full PR descriptions live in `prs/`. This file is the index.
 
 | PR | Description | Status | Depends on |
 |----|-------------|--------|------------|
-| [PR-013](../prs/PR-013-seed-management.md) | Seed management — `SeedSequence(entropy)` per run + `.spawn()` for `{split, cv, sampler, xgb}` seeds + entropy persistence in `user_attrs` + version logging (`xgboost_version`, `cuda_runtime_version`, `image_digest`) | `[ ]` | PR-009, PR-015 |
-| [PR-014](../prs/PR-014-golden-tests.md) | Golden regression test infrastructure — tolerance-based fixtures + `@pytest.mark.golden` marker + a single end-to-end golden test on a tiny fixed-seed dataset (XGBoost) using `np.testing.assert_allclose` + AUC tolerance bands | `[ ]` | PR-010, PR-013 |
+| [PR-013](../prs/PR-013-seed-management.md) | Seed management — `SeedSequence(entropy)` per run + `.spawn()` for `{split, cv, sampler, xgb}` seeds + entropy persistence in `user_attrs` + version logging (`xgboost_version`, `cuda_runtime_version`, `image_digest`) | `[x]` | PR-009, PR-015 |
+| [PR-014](../prs/PR-014-golden-tests.md) | Golden regression test infrastructure — tolerance-based fixtures + `@pytest.mark.golden` marker + a single end-to-end golden test on a tiny fixed-seed dataset (XGBoost) using `np.testing.assert_allclose` + AUC tolerance bands | `[x]` | PR-010, PR-013 |
 
 ---
 

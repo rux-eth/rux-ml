@@ -1,19 +1,20 @@
 .DEFAULT_GOAL := help
-.PHONY: help install lint format type test test-golden test-gpu clean docker-build docker-run docker-shell
+.PHONY: help install lint format type test test-golden test-gpu regenerate-golden clean docker-build docker-run docker-shell
 
 help:
 	@echo "rux-ml — make targets"
-	@echo "  install        uv sync (install + dev deps)"
-	@echo "  lint           ruff check"
-	@echo "  format         ruff format"
-	@echo "  type           basedpyright src/ tests/"
-	@echo "  test           pytest (default markers; excludes gpu/slow/golden/docker)"
-	@echo "  test-gpu       pytest -m gpu"
-	@echo "  test-golden    pytest -m golden"
-	@echo "  docker-build   build rux-ml:local image and capture digest to .docker-image-digest"
-	@echo "  docker-run     run rux-ml in container (ARGS=\"<cli args>\")"
-	@echo "  docker-shell   open a bash shell in the container"
-	@echo "  clean          remove caches and build artifacts"
+	@echo "  install              uv sync (install + dev deps)"
+	@echo "  lint                 ruff check"
+	@echo "  format               ruff format"
+	@echo "  type                 basedpyright src/ tests/"
+	@echo "  test                 pytest (default markers; excludes gpu/slow/golden/docker)"
+	@echo "  test-gpu             pytest -m gpu"
+	@echo "  test-golden          pytest -m golden"
+	@echo "  regenerate-golden    rewrite tests/golden/fixtures/golden_v1/ (manual; never CI)"
+	@echo "  docker-build         build rux-ml:local image and capture digest to .docker-image-digest"
+	@echo "  docker-run           run rux-ml in container (ARGS=\"<cli args>\")"
+	@echo "  docker-shell         open a bash shell in the container"
+	@echo "  clean                remove caches and build artifacts"
 
 install:
 	uv sync
@@ -35,6 +36,9 @@ test-gpu:
 
 test-golden:
 	uv run pytest -m golden
+
+regenerate-golden:
+	uv run pytest -m golden --regenerate-golden
 
 docker-build:
 	DOCKER_BUILDKIT=1 docker build -t rux-ml:local .

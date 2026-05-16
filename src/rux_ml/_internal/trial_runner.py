@@ -101,6 +101,9 @@ def main(argv: list[str] | None = None) -> int:
     pin_threads(cfg.memory)
 
     # Lazy-import the rest of the stack now that env is pinned.
+    # ``seeds`` triggers numpy via its function bodies (top-level imports stay
+    # stdlib + pydantic) but we import lazily for symmetry with the rest.
+    from rux_ml._internal.seeds import make_seed_bag  # noqa: PLC0415
     from rux_ml.training import optuna_direction  # noqa: PLC0415
     from rux_ml.tuning import (  # noqa: PLC0415
         build_objective,
@@ -109,10 +112,15 @@ def main(argv: list[str] | None = None) -> int:
         make_sampler,
     )
 
+    # PR-013: study-level bag (trial_number=0 as the sentinel for study-creation
+    # seeding) supplies the sampler seed. The objective derives per-trial bags
+    # internally using the same master entropy + actual trial.number.
+    study_bag = make_seed_bag(master_entropy=cfg.tuning.entropy, trial_number=0)
+
     study = create_or_load(
         name=args.study_name,
         storage=cfg.runs.storage_url,
-        sampler=make_sampler(cfg.tuning, seed=cfg.tuning.entropy),
+        sampler=make_sampler(cfg.tuning, seed=study_bag.sampler_seed),
         pruner=make_pruner(cfg.tuning),
         direction=optuna_direction(cfg.training.metric),
         load_if_exists=True,
