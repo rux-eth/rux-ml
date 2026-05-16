@@ -22,7 +22,7 @@ All 14 v0 PRs are Tier 1 — every architectural choice was research-backed duri
 
 | PR | Title | Design research | State assessed | Implementation cleared |
 |----|-------|-----------------|----------------|------------------------|
-| [PR-001](../prs/PR-001-project-scaffold.md) | Project scaffold | `design-research ✓` (D1, D12, D14, D15) | — | — |
+| [PR-001](../prs/PR-001-project-scaffold.md) | Project scaffold | `design-research ✓` (D1, D12, D14, D15) | `state-assessed 2026-05-15` (2 drifts → amended) | `implementation-cleared 2026-05-15` |
 | [PR-002](../prs/PR-002-config-skeleton.md) | Config layer skeleton | `design-research ✓` (D2, D16, D17) | — | — |
 | [PR-003](../prs/PR-003-cli-skeleton.md) | CLI skeleton | `design-research ✓` (D11, D15) | — | — |
 | [PR-004](../prs/PR-004-data-layer.md) | Data layer | `design-research ✓` (D3, D9, D14) | — | — |

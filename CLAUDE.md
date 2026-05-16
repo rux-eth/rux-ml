@@ -23,7 +23,7 @@ The project uses **uv** for Python dependency management and **maturin** for the
 | Run golden regression tests | `make test-golden` |
 | Lint | `uv run ruff check .` |
 | Format | `uv run ruff format .` |
-| Type check | `uv run mypy src/` |
+| Type check | `uv run basedpyright src/` |
 | All the above | `make test` |
 | Build container | `make docker-build` |
 | Run CLI in container | `docker compose run rux-ml --help` |

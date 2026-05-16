@@ -1,0 +1,67 @@
+[build-system]
+requires = ["uv_build>=0.11.14,<0.12"]
+build-backend = "uv_build"
+
+[project]
+name = "rux-ml"
+version = "0.0.1"
+description = "Personal ML research workbench for tabular GBM lifecycle (XGBoost-first)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "rux-eth" }]
+dependencies = [
+    "typer>=0.12",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.6",
+]
+
+# Note: [project.scripts] entry point lands in PR-003 (CLI skeleton),
+# once `rux_ml.cli:app` actually exists.
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0",
+    "pytest-xdist>=3.6",
+    "ruff>=0.6",
+    "basedpyright>=1.18",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W",     # pycodestyle / pyflakes
+    "I",                # isort
+    "UP",               # pyupgrade
+    "B",                # bugbear
+    "SIM",              # simplify
+    "RUF",              # ruff-specific
+    "PL",               # pylint
+    "TID",              # tidy imports
+    "TCH",              # type-checking imports
+]
+ignore = [
+    "PLR0913",          # too-many-arguments — common in ML config-driven code
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["PLR2004"]  # magic numbers OK in tests
+
+[tool.basedpyright]
+include = ["src", "tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+reportMissingTypeStubs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "gpu: requires CUDA-capable GPU (skipped on CPU-only machines)",
+    "slow: takes more than ~5s (excluded from default run)",
+    "golden: golden-dataset regression test (excluded from default run)",
+    "integration: multi-component integration test",
+]
+addopts = "-m 'not gpu and not slow and not golden'"

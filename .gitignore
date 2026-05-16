@@ -13,3 +13,43 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+
+# Python
+__pycache__/
+*.py[codz]
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.basedpyright_cache/
+.coverage*
+htmlcov/
+.tox/
+.nox/
+
+# Rust (when first crate lands per D13)
+target/
+
+# ML workbench runtime dirs
+studies/
+registry/
+artifacts/
+data/
+logs/
+
+# Common ML clutter
+mlruns/
+wandb/
+*.db
+*.sqlite
+*.sqlite3
+*.pkl
+*.ubj
+*.onnx
+*.safetensors
+
+# Container build artifacts (per PR-012)
+.docker-image-digest
