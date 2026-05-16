@@ -228,6 +228,27 @@ This pattern avoids the pitfalls of `model_copy(update=…)` with nested fields 
 
 ---
 
+## Subprocess-per-trial env pinning (per PR-008)
+
+The subprocess-per-trial path (`cfg.tuning.trial_isolation = "subprocess"`, default) requires a strict module-loading order in `src/rux_ml/_internal/trial_runner.py`:
+
+1. **Top-level imports stay stdlib-only** (`argparse`, `json`, `os`, `sys`, `pathlib`).
+2. `main()` parses CLI args + loads the overrides JSON.
+3. `from rux_ml.config import RuxMLConfig` (light — pydantic + tomllib only).
+4. `cfg = RuxMLConfig.from_layers(...)`.
+5. **Pin thread env vars from `cfg.memory` before any heavy import**:
+   - `OMP_NUM_THREADS` = `cfg.memory.omp_threads`
+   - `OPENBLAS_NUM_THREADS` = `cfg.memory.openblas_threads`
+   - `MKL_NUM_THREADS` = `cfg.memory.mkl_threads`
+   - `POLARS_MAX_THREADS` = `cfg.memory.polars_threads`
+6. **Now** lazy-import `rux_ml.tuning` + the rest (which pull in numpy / polars / sklearn / xgboost).
+
+**Why the order matters**: numpy / openblas / mkl read these env vars at import-time to size their thread pools. Setting them after the libraries are imported is a no-op against the existing pool — at best it affects subsequent operations and at worst it silently does nothing. The child sets them once before the first heavy import.
+
+The parent-side dispatcher uses a manual `for _ in range(n_trials): subprocess.run([...])` loop (PR-008 sub-decision A1). It does **not** call `study.optimize(_spawn_trial_dispatcher, ...)` — that pattern would double-tell the trial score (parent's `optimize` calls `study.tell` after the dispatcher returns, while the child has already told the score itself). Each child runs its own `study.optimize(build_objective(cfg), n_trials=1)`; SQLite coordinates state.
+
+---
+
 ## Where new conventions go
 
 When a convention emerges that isn't documented here, add it during the same PR that establishes it. Conventions added retroactively go stale fast.

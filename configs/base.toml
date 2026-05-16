@@ -20,8 +20,10 @@
 # enable_categorical=true, learning_rate=0.1, max_depth=6, n_estimators=100.
 
 [tuning]
-# Defaults: sampler="tpe" (multivariate=true, group=true, n_startup_trials=20),
-# pruner="hyperband", trial_isolation="subprocess", n_trials=50.
+# Defaults: sampler="tpe" (multivariate=true, group=true, n_startup_trials=20,
+# constant_liar=true), pruner="wilcoxon" (per PR-007), trial_isolation="subprocess",
+# n_trials=50. `trial_timeout_s = null` disables the per-trial wall-clock timeout
+# (PR-008); set an integer to kill hanging trials.
 
 [runs]
 # Defaults: storage_url="sqlite:///studies/studies.db",

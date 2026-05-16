@@ -79,6 +79,29 @@ def _argv(workdir: Path, *args: str) -> list[str]:
     return ["--config", str(workdir / "base.toml"), *args]
 
 
+def test_tune_start_in_process_mode_runs_2_trials(
+    runner: CliRunner, tune_workdir: Path
+) -> None:
+    """Explicitly force ``trial_isolation = "in_process"`` and verify the legacy
+    PR-007 path still works (no subprocess spawn). Default is "subprocess";
+    other tests in this module exercise that path."""
+    result = runner.invoke(
+        app,
+        _argv(
+            tune_workdir,
+            "--set", "tuning.trial_isolation=\"in_process\"",
+            "tune", "start", "smoke_in_proc", "--n-trials", "2",
+        ),
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr or result.stdout
+    assert "isolation: in_process" in result.stderr or "isolation: in_process" in result.stdout
+    storage = f"sqlite:///{tune_workdir}/studies/studies.db"
+    study = optuna.load_study(study_name="smoke_in_proc", storage=storage)
+    completed = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+    assert len(completed) == 2
+
+
 def test_tune_start_runs_2_trials_and_records_user_attrs(
     runner: CliRunner, tune_workdir: Path
 ) -> None:

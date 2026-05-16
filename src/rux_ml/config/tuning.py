@@ -61,5 +61,10 @@ class TuningConfig(StrictModel):
     # Subprocess-per-trial isolation per D10/D16 (CUDA + fork is broken).
     trial_isolation: Literal["subprocess", "in_process"] = "subprocess"
 
+    # Per-trial wall-clock timeout (seconds) for the subprocess path (PR-008).
+    # None disables the timeout. The parent kills a hanging child after
+    # ``trial_timeout_s`` and marks the trial as FAIL in storage.
+    trial_timeout_s: int | None = None
+
     # Optional pinned entropy for reproducibility (per D9). None -> derive per run.
     entropy: int | None = None
