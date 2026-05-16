@@ -23,11 +23,18 @@ if TYPE_CHECKING:
     from rux_ml.training.protocol import Trainer
 
 
-def _xgb_kwargs(cfg: TrainingConfig) -> dict[str, object]:
+def _xgb_kwargs(cfg: TrainingConfig, *, seed: int | None) -> dict[str, object]:
     """Assemble the XGBoost kwargs from TrainingConfig top-level fields + model_kwargs.
 
     ``model_kwargs`` always wins on key collisions so callers can override
     top-level defaults from TOML without having to add new TrainingConfig fields.
+
+    ``seed`` (PR-013): when not None, sets XGBoost's ``random_state``. The
+    sklearn wrapper threads this into the booster's RNG for bootstrap
+    sampling, column subsampling, and any other internal randomness so two
+    fits with the same seed (and ``tree_method="hist"`` + single thread on
+    CPU) produce bit-exact predictions. GPU `hist` is near-deterministic
+    only (per D9 + CONSTRAINTS.md tolerance-based golden-tests rule).
     """
     base: dict[str, object] = {
         "device": cfg.device,
@@ -41,16 +48,24 @@ def _xgb_kwargs(cfg: TrainingConfig) -> dict[str, object]:
         "early_stopping_rounds": cfg.early_stopping_rounds,
         "eval_metric": cfg.metric,
     }
+    if seed is not None:
+        base["random_state"] = seed
     base.update(cfg.model_kwargs)
     return base
 
 
-def make_trainer(cfg: TrainingConfig) -> Trainer:
+def make_trainer(cfg: TrainingConfig, *, seed: int | None = None) -> Trainer:
     """Return the concrete trainer for ``cfg``.
 
     ``cfg.kind`` selects the family (only ``"xgboost"`` implemented in v0); the
     task (classifier vs regressor) is derived from ``cfg.metric`` so the
     user-visible config has a single source of truth.
+
+    ``seed`` (PR-013): plumbs ``SeedBag.xgb_seed`` into XGBoost's
+    ``random_state``. When ``None``, XGBoost defaults to its internal
+    nondeterministic RNG. ``model_kwargs`` in the config takes precedence
+    over the ``seed`` argument on key collision (matches PR-006's existing
+    "model_kwargs wins" convention for direct user overrides).
 
     Raises:
         NotImplementedError: when ``cfg.kind`` is set to a family beyond
@@ -64,7 +79,7 @@ def make_trainer(cfg: TrainingConfig) -> Trainer:
         )
         raise NotImplementedError(msg)
 
-    kwargs = _xgb_kwargs(cfg)
+    kwargs = _xgb_kwargs(cfg, seed=seed)
     task = task_for_metric(cfg.metric)
     # XGBoost stubs don't expose ``best_iteration_`` (set at runtime) so the
     # structural match against the minimal Trainer Protocol needs a cast here.

@@ -249,6 +249,30 @@ The parent-side dispatcher uses a manual `for _ in range(n_trials): subprocess.r
 
 ---
 
+## Seed management conventions (per PR-013)
+
+Reproducibility-grade seed handling lives in `src/rux_ml/_internal/seeds.py`. Future PRs that introduce new randomized components should plumb through the `SeedBag` rather than adding a new top-level seed field.
+
+- **Master entropy lives at one place: `cfg.tuning.entropy: int | None`.** `None` auto-pins via `os.urandom`; an integer pins for reproducibility across the whole study.
+- **Per-trial derivation is `(master_entropy, trial.number)` deterministic.** `make_seed_bag` uses `SeedSequence(entropy=master, spawn_key=(trial.number,))` so two trials with the same pair produce the same bag, and distinct `trial.number`s produce distinct bags. NumPy's [`SeedSequence.spawn`](https://numpy.org/doc/stable/reference/random/parallel.html) is the documented mechanism for this.
+- **Sampler seed is study-level**, not per-trial. The Optuna sampler is constructed once at study creation; both `_internal/trial_runner.py` and `cli/tune.py` derive a study-level bag with `trial_number=0` as the sentinel and feed `study_bag.sampler_seed` to `make_sampler`. The per-trial bags (inside the objective) carry their own `sampler_seed` slot for symmetry but it is unused.
+- **`bag.entropy_hex` (32 lowercase hex chars) is the round-trip identity.** Storing it in `TrialAttrs.entropy_hex` is sufficient to reconstruct the full bag — no need for the master or trial number at promotion time. `registry/promote.py` reads the recorded `entropy_hex` and calls `make_seed_bag_from_hex` so the re-fit uses the EXACT same `split_seed` and `xgb_seed` the originating trial used. Without this contract, the promoted bundle would silently diverge from the trial's reported metrics.
+- **Child seeds are int32-safe.** `_seed_from_child` masks to `[0, 2**31)` so JSON / SQLite TEXT round-trips and XGBoost's `random_state` handling are both stable.
+- **`features/encoders.py` `NestedCVWrapper` keeps `random_state=0`.** Target-encoder internal CV is an implementation detail of the feature pipeline, not part of the outer `(split, cv, sampler, xgb)` bag. Future PRs that introduce additional randomized feature transforms may revisit if the determinism contract demands it.
+- **CPU bit-exact contract**: `device="cpu"` + `tree_method="hist"` + `OMP_NUM_THREADS=1` + pinned `xgb_seed` → bit-exact predictions. The integration test in `tests/integration/test_determinism_cpu.py` asserts this with `np.testing.assert_array_equal`; subsampling (`subsample=0.8, colsample_bytree=0.8`) is enabled there so the seed actually drives randomness.
+- **GPU near-determinism contract** (per D9): `device="cuda"` + pinned `xgb_seed` → predictions match within `atol=1e-5`. **Never** `assert_array_equal` on GPU output (forbidden by `docs/CONSTRAINTS.md` Tolerance-Based Golden Tests rule). If the GPU tolerance test fails intermittently, investigate against XGBoost release notes; do not loosen the tolerance silently.
+
+## Environment version capture (per PR-013)
+
+`_internal/env.py:get_versions(memory)` is the single source for the `TrialAttrs` environment block. Five fields, three required:
+
+- **Required**: `xgboost_version` (`xgboost.__version__`), `cuda_runtime_version` (`xgboost.build_info()["CUDA_VERSION"]` formatted `"major.minor"`), `omp_threads` (from `cfg.memory.omp_threads`), `image_digest` (from `.docker-image-digest` file or the literal `"unknown"` outside the container).
+- **Optional**: `gpu_model` + `driver_version` (from `nvidia-smi --query-gpu`, `None` on CPU-only hosts where nvidia-smi is absent).
+
+`xgboost.build_info()` is the XGBoost-3.x canonical surface for build metadata; the legacy `xgboost.config_context()` is for *configuring* XGBoost, not querying the build, and does not expose `CUDA_VERSION`. The PR-012 container smoke output confirmed the API: `CUDA_VERSION: [12, 9]`.
+
+---
+
 ## Where new conventions go
 
 When a convention emerges that isn't documented here, add it during the same PR that establishes it. Conventions added retroactively go stale fast.

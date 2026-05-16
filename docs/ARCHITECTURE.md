@@ -400,8 +400,8 @@ Each trial's reproducibility footprint:
 4. **Rust deps:** `Cargo.lock` (when crate exists)
 5. **Data:** composite `data_hash` = SHA-256 over sorted per-partition byte hashes + `logical_hash` (sorted canonical column projection); both stored
 6. **Config:** per-layer + root `*_cfg_hash` (D17)
-7. **Seeds:** `SeedSequence(entropy)` per run; `entropy_hex` persisted; `.spawn()` derives per-component seeds (`split_seed`, `cv_seed`, `sampler_seed`, `xgb_seed`); `OMP_NUM_THREADS` pinned
-8. **Hardware:** `gpu_model`, `driver_version`, `cuda_runtime_version`, `xgboost_version`
+7. **Seeds (per PR-013):** `make_seed_bag(master_entropy=cfg.tuning.entropy, trial_number=trial.number)` derives a per-trial `SeedBag` via `SeedSequence(entropy=master, spawn_key=(trial_number,))` → `.generate_state(4)` for a stable per-trial entropy → fresh `SeedSequence` → `.spawn(4)` → four `int32`-safe child seeds (`split_seed`, `cv_seed`, `sampler_seed`, `xgb_seed`). The per-trial `entropy_hex` is recorded; `make_seed_bag_from_hex` reconstructs an identical bag without needing the master or trial number — the contract PR-010's `registry/promote.py` relies on for deterministic re-fit at promotion. `OMP_NUM_THREADS` pinned via PR-011.
+8. **Hardware (per PR-013):** required `xgboost_version` (`xgboost.__version__`) + `cuda_runtime_version` (`xgboost.build_info()["CUDA_VERSION"]`); optional `gpu_model` + `driver_version` (from `nvidia-smi`, GPU-only)
 
 XGBoost GPU `hist` is **near-deterministic, not bit-exact across hardware**. Multi-GPU is explicitly non-deterministic. We accept this as a documented limitation; version-logging lets us attribute drift if it appears.
 

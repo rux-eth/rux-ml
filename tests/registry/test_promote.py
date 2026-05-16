@@ -13,6 +13,8 @@ import pytest
 import xgboost as xgb
 from sklearn.pipeline import Pipeline
 
+from rux_ml._internal.env import EnvironmentVersions
+from rux_ml._internal.seeds import SeedBag
 from rux_ml.config import (
     DataConfig,
     FeaturesConfig,
@@ -50,14 +52,22 @@ def _make_cfg(tmp_path: Path, source: Path, registry_root: Path) -> RuxMLConfig:
     )
 
 
-def _populate_trial(cfg: RuxMLConfig) -> tuple[str, int]:
+def _populate_trial(
+    cfg: RuxMLConfig, bag: SeedBag, versions: EnvironmentVersions
+) -> tuple[str, int]:
     """Create a one-off trial with full provenance; return (study_name, trial_number)."""
     assert cfg.data.source_path is not None
     hashes = data_hashes(cfg.data.source_path)
     with one_off_run(cfg, problem="churn_v1", study="wide") as run:
-        TrialAttrs.from_cfg(cfg, hashes, metric="auc", best_iteration=4, peak_rss_mb=0.0).record(
-            run.trial
-        )
+        TrialAttrs.from_cfg(
+            cfg,
+            hashes,
+            metric="auc",
+            best_iteration=4,
+            peak_rss_mb=0.0,
+            bag=bag,
+            versions=versions,
+        ).record(run.trial)
         run.tell(0.91)
     return run.study.study_name, run.trial.number
 
@@ -75,9 +85,13 @@ def synth_workdir(tmp_path: Path) -> tuple[Path, RuxMLConfig]:
     return tmp_path, cfg
 
 
-def test_promote_writes_bundle_and_champion(synth_workdir: tuple[Path, RuxMLConfig]) -> None:
+def test_promote_writes_bundle_and_champion(
+    synth_workdir: tuple[Path, RuxMLConfig],
+    seed_bag: SeedBag,
+    env_versions: EnvironmentVersions,
+) -> None:
     _tmp_path, cfg = synth_workdir
-    study_name, trial_number = _populate_trial(cfg)
+    study_name, trial_number = _populate_trial(cfg, seed_bag, env_versions)
 
     version = promote(cfg, problem="churn_v1", study_name=study_name, trial_number=trial_number)
 
@@ -96,9 +110,11 @@ def test_promote_writes_bundle_and_champion(synth_workdir: tuple[Path, RuxMLConf
 
 def test_load_model_returns_pipeline_and_booster_and_predict_works(
     synth_workdir: tuple[Path, RuxMLConfig],
+    seed_bag: SeedBag,
+    env_versions: EnvironmentVersions,
 ) -> None:
     _tmp_path, cfg = synth_workdir
-    study_name, trial_number = _populate_trial(cfg)
+    study_name, trial_number = _populate_trial(cfg, seed_bag, env_versions)
     promote(cfg, problem="churn_v1", study_name=study_name, trial_number=trial_number)
 
     pipeline, booster = load_model("churn_v1", registry_root=cfg.registry.root)
@@ -116,9 +132,13 @@ def test_load_model_returns_pipeline_and_booster_and_predict_works(
     assert preds.shape == (5,)
 
 
-def test_load_model_with_explicit_version(synth_workdir: tuple[Path, RuxMLConfig]) -> None:
+def test_load_model_with_explicit_version(
+    synth_workdir: tuple[Path, RuxMLConfig],
+    seed_bag: SeedBag,
+    env_versions: EnvironmentVersions,
+) -> None:
     _tmp_path, cfg = synth_workdir
-    study_name, trial_number = _populate_trial(cfg)
+    study_name, trial_number = _populate_trial(cfg, seed_bag, env_versions)
     version = promote(cfg, problem="churn_v1", study_name=study_name, trial_number=trial_number)
 
     pipeline, booster = load_model("churn_v1", version=version, registry_root=cfg.registry.root)
@@ -146,9 +166,13 @@ def test_promote_refuses_trial_with_missing_provenance(
         promote(cfg, problem="churn_v1", study_name="bad_study", trial_number=0)
 
 
-def test_rollback_atomically_updates_champion(synth_workdir: tuple[Path, RuxMLConfig]) -> None:
+def test_rollback_atomically_updates_champion(
+    synth_workdir: tuple[Path, RuxMLConfig],
+    seed_bag: SeedBag,
+    env_versions: EnvironmentVersions,
+) -> None:
     _tmp_path, cfg = synth_workdir
-    study_name, trial_number = _populate_trial(cfg)
+    study_name, trial_number = _populate_trial(cfg, seed_bag, env_versions)
     v1 = promote(cfg, problem="churn_v1", study_name=study_name, trial_number=trial_number)
 
     # Manually fabricate v2 = v1 with a different version-id, copying the bundle on disk.
