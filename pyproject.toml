@@ -18,6 +18,9 @@ dependencies = [
     "polars>=1.40",
     "xgboost>=3.1",
     "numpy>=2.0",
+    "scikit-learn>=1.4",
+    "category-encoders>=2.6",
+    "pyarrow>=17",
 ]
 
 [project.scripts]
@@ -29,6 +32,7 @@ dev = [
     "pytest-xdist>=3.6",
     "ruff>=0.6",
     "basedpyright>=1.18",
+    "hypothesis>=6",
 ]
 
 [tool.ruff]
@@ -57,6 +61,7 @@ ignore = [
     "TC001",    # don't bother moving imports into TYPE_CHECKING in tests
     "TC002",
     "TC003",
+    "SLF001",   # tests may access _private helpers from the module under test
 ]
 # Typer uses `inspect.signature(..., eval_str=True)` and resolves annotations
 # at runtime to wire CLI parameters. Moving `typer` / `pathlib.Path` /
@@ -72,6 +77,18 @@ include = ["src", "tests"]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
 reportMissingTypeStubs = false
+
+# sklearn / category_encoders / hypothesis ship limited type info; tests that
+# exercise them produce noisy "Unknown" reports that don't reflect real bugs.
+# Library code in src/ stays strict; tests are relaxed for those rules only.
+[[tool.basedpyright.executionEnvironments]]
+root = "tests"
+reportUnknownVariableType = false
+reportUnknownMemberType = false
+reportUnknownArgumentType = false
+reportUnknownParameterType = false
+reportUnknownLambdaType = false
+reportPrivateUsage = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

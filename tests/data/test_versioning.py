@@ -8,7 +8,10 @@ from unittest.mock import patch
 
 import polars as pl
 import pytest
+import xxhash
 
+from rux_ml._internal import hashing
+from rux_ml.data.loaders import load_parquet, materialize
 from rux_ml.data.versioning import (
     compute_data_hash,
     list_manifests,
@@ -54,9 +57,7 @@ def test_logical_hash_invariant_to_row_order(
 def test_snapshot_writes_manifest_and_hardlinks(
     parquet_file: Path, cas_root: Path, manifests_root: Path
 ) -> None:
-    manifest = snapshot(
-        "tiny", parquet_file, cas_root=cas_root, manifests_root=manifests_root
-    )
+    manifest = snapshot("tiny", parquet_file, cas_root=cas_root, manifests_root=manifests_root)
     # Manifest file lives at manifests/<name>/<version_id>.json
     manifest_path = manifests_root / "tiny" / f"{manifest.version_id}.json"
     assert manifest_path.exists()
@@ -86,9 +87,7 @@ def test_list_manifests_filters_by_name(
     manifests_root: Path,
 ) -> None:
     snapshot("alpha", parquet_file, cas_root=cas_root, manifests_root=manifests_root)
-    snapshot(
-        "beta", shuffled_parquet_file, cas_root=cas_root, manifests_root=manifests_root
-    )
+    snapshot("beta", shuffled_parquet_file, cas_root=cas_root, manifests_root=manifests_root)
     all_m = list_manifests(manifests_root)
     assert len(all_m) == 2
     only_alpha = list_manifests(manifests_root, name="alpha")
@@ -108,12 +107,11 @@ def test_link_falls_back_to_copy_on_exdev(
     def fake_link(src: object, dst: object) -> None:
         raise OSError(errno.EXDEV, "Invalid cross-device link")
 
-    with patch("rux_ml.data.versioning.os.link", side_effect=fake_link), pytest.warns(
-        UserWarning, match="cross-device"
+    with (
+        patch("rux_ml.data.versioning.os.link", side_effect=fake_link),
+        pytest.warns(UserWarning, match="cross-device"),
     ):
-        m = snapshot(
-            "tiny", parquet_file, cas_root=cas_root, manifests_root=manifests_root
-        )
+        m = snapshot("tiny", parquet_file, cas_root=cas_root, manifests_root=manifests_root)
     # The CAS file exists (via copy fallback)
     assert Path(m.cas_files[0]).exists()
 
@@ -142,19 +140,14 @@ def test_xxhash_is_python_binding_not_rust(
     parquet_file: Path,
 ) -> None:
     """Per D13: use mature Python bindings before reaching for custom Rust."""
-    import xxhash
-
+    _ = parquet_file
     assert hasattr(xxhash, "xxh3_64")
     # And our hashing module uses it (no custom Rust crate)
-    from rux_ml._internal import hashing
-
     assert hashing.xxh3_64_file.__module__ == "rux_ml._internal.hashing"
 
 
 def test_polars_dataframes_are_returned(tmp_path: Path, tiny_df: pl.DataFrame) -> None:
     """Smoke check: lazy/eager Polars APIs still work for our patterns."""
-    from rux_ml.data.loaders import load_parquet, materialize
-
     p = tmp_path / "x.parquet"
     tiny_df.write_parquet(p)
     lf = load_parquet(p)

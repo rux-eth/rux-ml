@@ -14,16 +14,19 @@ import hashlib
 import json
 import os
 import shutil
-from collections.abc import Iterable
+import warnings
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import polars as pl
 from pydantic import BaseModel, ConfigDict
 
 from rux_ml._internal.hashing import canonical_json, xxh3_64_file
 from rux_ml.data.loaders import iter_parquet_files
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 class Manifest(BaseModel):
@@ -73,9 +76,7 @@ def _logical_hash(files: list[Path]) -> tuple[str, int, dict[str, str]]:
     schema_map = {name: str(schema_obj[name]) for name in cols}
 
     row_h = (
-        lf.select(pl.struct(cols).hash(seed=0).alias("_h"))
-        .sort("_h")
-        .collect(engine="streaming")
+        lf.select(pl.struct(cols).hash(seed=0).alias("_h")).sort("_h").collect(engine="streaming")
     )
     arr = row_h["_h"].to_numpy()
     digest = hashlib.sha256(arr.tobytes()).hexdigest()
@@ -118,8 +119,6 @@ def _link_or_copy(src: Path, dst: Path) -> None:
     except OSError as exc:
         if exc.errno != errno.EXDEV:
             raise
-        import warnings
-
         warnings.warn(
             f"cross-device link from {src} to {dst}; falling back to copy",
             stacklevel=2,
@@ -196,9 +195,7 @@ def read_manifest(path: Path) -> Manifest:
     return Manifest.model_validate(raw)
 
 
-def list_manifests(
-    manifests_root: Path, *, name: str | None = None
-) -> list[Manifest]:
+def list_manifests(manifests_root: Path, *, name: str | None = None) -> list[Manifest]:
     """Return all manifests under ``manifests_root``, optionally filtered by name."""
     root = Path(manifests_root)
     if not root.exists():

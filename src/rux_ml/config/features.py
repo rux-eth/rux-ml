@@ -1,10 +1,20 @@
-"""Feature-engineering layer config (per D4)."""
-
-from typing import Any
+"""Feature-engineering layer config (per D4 + PR-005 narrowing)."""
 
 from pydantic import Field
 
 from rux_ml.config._strict_model import StrictModel
+
+
+class FeaturesSpec(StrictModel):
+    """Typed feature spec consumed by ``rux_ml.features.make_features``.
+
+    PR-005 narrows the previous ``dict[str, Any]`` placeholder into this typed
+    schema. Stays minimal for v0 — derived columns and stateful sklearn steps
+    can be added when a concrete use case demands them.
+    """
+
+    numeric_columns: list[str] = Field(default_factory=list)
+    categorical_columns: list[str] = Field(default_factory=list)
 
 
 class FeaturesConfig(StrictModel):
@@ -14,5 +24,4 @@ class FeaturesConfig(StrictModel):
     # NestedCVWrapper).
     categorical_low_card_threshold: int | None = None
 
-    # Placeholder spec dict; PR-005 will narrow this into a typed schema.
-    spec: dict[str, Any] = Field(default_factory=dict)
+    spec: FeaturesSpec = Field(default_factory=FeaturesSpec)

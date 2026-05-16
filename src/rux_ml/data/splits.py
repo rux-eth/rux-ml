@@ -8,9 +8,12 @@ so PR-013 can plug a derived seed in unchanged.
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
-import polars as pl
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    import polars as pl
 
 _TOL = 1e-6
 
