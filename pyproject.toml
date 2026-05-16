@@ -102,5 +102,6 @@ markers = [
     "slow: takes more than ~5s (excluded from default run)",
     "golden: golden-dataset regression test (excluded from default run)",
     "integration: multi-component integration test",
+    "docker: requires Docker daemon + NVIDIA Container Toolkit (excluded from default run; set RUXML_RUN_DOCKER_TESTS=1 to opt in)",
 ]
-addopts = "-m 'not gpu and not slow and not golden'"
+addopts = "-m 'not gpu and not slow and not golden and not docker'"

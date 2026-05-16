@@ -1,0 +1,75 @@
+# Files and directories excluded from the Docker build context.
+# Anything not needed by the Dockerfile's COPY steps belongs here — smaller
+# context = faster builds + smaller image-layer churn on rebuild.
+
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# CI / GH metadata
+.github
+
+# Python ecosystem
+__pycache__
+*.py[codz]
+.venv
+.python-version
+*.egg-info
+build
+dist
+
+# Tooling caches
+.pytest_cache
+.ruff_cache
+.basedpyright_cache
+.mypy_cache
+.hypothesis
+.coverage*
+htmlcov
+
+# Editors / OS
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Rust build outputs (when first crate lands per D13)
+target
+
+# Workbench runtime dirs (host-mounted at run-time; not baked into image)
+/studies
+/registry
+/artifacts
+/data
+/logs
+mlruns
+wandb
+*.db
+*.sqlite
+*.sqlite3
+*.pkl
+*.ubj
+*.onnx
+*.safetensors
+
+# Container build artifacts
+.docker-image-digest
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# Tests / docs / PR prose — not needed at runtime in the image
+tests
+docs
+prs
+PROCEDURE-*.md
+CLAUDE.md
+
+# Environment files
+.env
+.env.local
+.env.*.local

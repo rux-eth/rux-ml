@@ -249,6 +249,26 @@ The parent-side dispatcher uses a manual `for _ in range(n_trials): subprocess.r
 
 ---
 
+## Container conventions (per PR-012)
+
+The workbench ships a single GPU-enabled image, single Compose service. Choices that future container changes should respect:
+
+- **Both base images are digest-pinned** (`docs/CONSTRAINTS.md` "Container Digest Pinning" — NON-NEGOTIABLE). This includes the NVIDIA CUDA base (`nvidia/cuda:12.4.1-devel-ubuntu22.04@sha256:...`) **and** the uv binary copy-in stage (`ghcr.io/astral-sh/uv:0.11.14@sha256:...`). Tags can be rebuilt or deleted; digests are immutable. New digests are resolved via the registry HTTP API (`Docker-Content-Digest` header on the manifest endpoint) or, on a host with Docker, `docker buildx imagetools inspect <tag>`.
+- **uv-managed Python, not the deadsnakes PPA.** `uv python install 3.12` is Astral's current Docker recipe; it avoids a third-party apt repository and keeps Python a single uv-controlled artifact for both build and runtime.
+- **`uv sync --locked`, not `--frozen`.** `--locked` is the current Astral canonical (slightly stricter "lockfile must exist and not need updating" check); `--frozen` still works but the docs example uses `--locked`. Two-step pattern in the Dockerfile: deps-only layer (`uv sync --locked --no-install-project --no-dev`) for cacheability, then full sync after `COPY src/`.
+- **Compose GPU passthrough uses `deploy.resources.reservations.devices`**, not the legacy `gpus: all` service key (which Docker no longer documents as of 2026). The block specifies `driver: nvidia`, `count: 1`, `capabilities: [gpu]`. The CLI flag `--gpus all` still works for `docker run` / `docker compose run`.
+- **Memory caps live in Compose**: `mem_limit: 32g` (hard cap via cgroup v2 `memory.max`) + `mem_reservation: 28g` (soft cap). The 28 GB soft cap matches `MemoryConfig.watchdog_threshold_gb` (per D10) so the in-process psutil watchdog and the kernel agree on what "memory pressure" means.
+- **`tini` is PID 1** so SIGTERM/SIGINT forward to the `rux-ml` process and to subprocess-per-trial children spawned via `python -m rux_ml._internal.trial_runner` (PR-008 spawn-semantics requirement).
+- **Non-root `rux` user (uid 1000)** so host-bind-mounted runtime dirs (`./studies`, `./registry`, `./data`, `./logs`) round-trip ownership to a typical host user.
+- **Rust toolchain installed but unused at v0.** D1 mandated installing `rustup` + stable + maturin in the image even before the first crate lands (per D13's profile-driven trigger). The toolchain is installed to `/opt/cargo` + `/opt/rustup` (world-readable); maturin is `uv tool install`'d for symmetry with the `uv run maturin develop --uv` dev loop.
+- **Build-time digest capture**: `make docker-build` writes the local image ID to `.docker-image-digest` via `docker image inspect rux-ml:local --format='{{.Id}}'`. This file is gitignored; PR-013 wires its contents into `TrialAttrs.image_digest`.
+- **`.dockerignore` is the canonical build-context filter.** Workbench runtime dirs (`/studies`, `/registry`, `/data`, `/logs`), Python caches (`.venv`, `.pytest_cache`, `.ruff_cache`, `.basedpyright_cache`, `.hypothesis`), and `.git` are all excluded — none of them should ever be baked into a layer.
+- **`xxhash` is NOT an apt dep.** The Python `xxhash>=3.7` wheel bundles its own C extension; system `xxhash` is unused and was dropped from the spec.
+
+Container smoke tests are gated behind `RUXML_RUN_DOCKER_TESTS=1` + a working `docker` binary (`@pytest.mark.docker`); the static regression gates in `tests/container/test_container_static.py` run unconditionally and protect the Dockerfile / Compose / `.dockerignore` from drift without needing Docker.
+
+---
+
 ## Seed management conventions (per PR-013)
 
 Reproducibility-grade seed handling lives in `src/rux_ml/_internal/seeds.py`. Future PRs that introduce new randomized components should plumb through the `SeedBag` rather than adding a new top-level seed field.
