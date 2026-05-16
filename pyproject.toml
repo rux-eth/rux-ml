@@ -17,8 +17,8 @@ dependencies = [
     "xxhash>=3.7",
 ]
 
-# Note: [project.scripts] entry point lands in PR-003 (CLI skeleton),
-# once `rux_ml.cli:app` actually exists.
+[project.scripts]
+rux-ml = "rux_ml.cli:app"
 
 [dependency-groups]
 dev = [
@@ -52,6 +52,14 @@ ignore = [
 "tests/**/*.py" = [
     "PLR2004",  # magic numbers OK in tests
     "TC001",    # don't bother moving imports into TYPE_CHECKING in tests
+    "TC002",
+    "TC003",
+]
+# Typer uses `inspect.signature(..., eval_str=True)` and resolves annotations
+# at runtime to wire CLI parameters. Moving `typer` / `pathlib.Path` /
+# `typer.Context` into TYPE_CHECKING breaks parameter binding with NameError.
+"src/rux_ml/cli/**/*.py" = [
+    "TC001",
     "TC002",
     "TC003",
 ]
