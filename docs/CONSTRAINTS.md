@@ -68,13 +68,65 @@ State drifts. Research must be validated before code.
 
 ## Domain Constraints
 
-<!-- Define your project-specific non-negotiables here. -->
-<!-- These are the rules that, if violated, would make the system fundamentally broken. -->
-<!-- Examples: -->
-<!-- - No unauthorized access to user data -->
-<!-- - All monetary calculations use decimal, never floating point -->
-<!-- - Every API endpoint must be authenticated -->
-<!-- - No external network calls during unit tests -->
+These are the project-specific non-negotiables established during the design session (2026-05-14 → 2026-05-15). See `docs/DESIGN-log.md` for the research trail behind each.
 
-<!-- Project staleness threshold (for PR research time-decay): -->
-<!-- Example: "Research is considered stale after 30 days for this project" -->
+### No Web UI / No Server (NON-NEGOTIABLE)
+
+The workbench runs on a single machine and is operated via CLI (`rux-ml`) and Python imports. No long-running server processes, no web dashboards, no MLflow UI, no Optuna dashboard, no Aim UI.
+
+**Implication:** any candidate library that requires a server to be useful is disqualified (lakeFS, Pachyderm, full MLflow Tracking server, Aim UI, etc.). Libraries with optional server modes are acceptable when their headless/CLI/Python path is the primary one.
+
+### Single-GPU, Sequential Trials (NON-NEGOTIABLE)
+
+HPO trials run **sequentially** with `n_jobs=1`. XGBoost `device="cuda"` saturates the RTX 4090; concurrent trials cause OOM and contention. Multi-GPU code paths are out of scope.
+
+### CUDA + `fork` is Forbidden (NON-NEGOTIABLE)
+
+Any subprocess that uses CUDA must be created with `spawn` start method (or via `subprocess.run` of a sibling script). The CUDA runtime cannot be re-initialized in a forked process. Subprocess-per-trial isolation (per D10/D16) uses `subprocess.run` of `python -m rux_ml._internal.trial_runner`.
+
+### Tolerance-Based Golden Tests Only (NON-NEGOTIABLE)
+
+XGBoost GPU `hist` is near-deterministic but not bit-exact across hardware/CUDA versions. Golden regression tests must use `np.testing.assert_allclose` with explicit `atol`/`rtol` plus metric-tolerance bands. **Exact-hash regression tests are forbidden** for any GPU-trained model output — they will break the first time CUDA/sklearn/XGBoost is upgraded.
+
+### Zero Hardcoded Parameters (NON-NEGOTIABLE — reinforces structural rule)
+
+Every value that could vary between datasets, problems, environments, or experiments lives in TOML config. Per-layer Pydantic models in `src/rux_ml/config/` are the single source of truth. CLI dot-path overrides (`--training.learning_rate=0.05`) and env vars (`RUXML_TRAINING__LEARNING_RATE=0.05`) are the only acceptable runtime overrides.
+
+### Per-Trial Provenance Triple (NON-NEGOTIABLE)
+
+Every Optuna trial — sweep or one-off — records the following in `trial.set_user_attr(...)`:
+
+- `data_hash` — composite hash of dataset bytes + canonical projection (per D9)
+- `data_cfg_hash`, `features_cfg_hash`, `training_cfg_hash`, `tuning_cfg_hash` — per-layer config hashes
+- `root_cfg_hash` — full config hash (excluding elided fields)
+- `git_sha` — code version
+- `entropy_hex` — `SeedSequence` entropy (per D9)
+- `image_digest` — container `@sha256:...` digest
+- `xgboost_version`, `cuda_runtime_version`, `gpu_model`, `driver_version`
+- `omp_threads`, `peak_rss_mb`
+
+Missing any of these breaks reproducibility and the trial must not be promoted to the registry.
+
+### Reuse Over Reinvent (NON-NEGOTIABLE)
+
+Custom code (Python or Rust) must only be written when no mature, battle-tested library covers the need. This applies to Rust+PyO3 explicitly — the first custom Rust crate lands only when a profile shows a Python hot path consuming >5% of a real workbench task. Polars expression plugins (`pyo3-polars`) are the documented escape hatch for row-dependent feature transforms.
+
+### No Phantom Implementations — Reaffirmed for ML
+
+Stub model factories, unused config fields, untested transformers, and "TODO: actually train the model" placeholders are all phantom implementations. Every PR must include a test that exercises actual behavior end-to-end through the layer it touches.
+
+### Two-File Model Bundle (NON-NEGOTIABLE)
+
+Promoted models are stored as **two files plus a manifest**: `pipeline.skops` (sklearn FE Pipeline via skops.io) + `model.ubj` (XGBoost Booster via `save_model`) + `manifest.json` (Pydantic-validated). Combined pickles are forbidden — they tie the XGBoost booster to Python/sklearn versions unnecessarily.
+
+### Container Digest Pinning (NON-NEGOTIABLE)
+
+The Docker base image must be pinned by `@sha256:...` digest, not by tag. NVIDIA deletes EoL CUDA image tags. The pinned digest is recorded per-trial in `image_digest`.
+
+---
+
+## Project Staleness Threshold
+
+**Research is considered stale after 60 days for this project.**
+
+Any PR marked `fully-researched` or `state-assessed` more than 60 days before implementation begins must re-run Phase 1 (State Assessment) per `PROCEDURE-pr-research.md`. The 60-day choice is **BEST-GUESS** (no specific source) and explicitly acknowledged by the user during Phase 1 of the design session; revisit if it produces too many re-runs (lower) or too many drift surprises (raise).
