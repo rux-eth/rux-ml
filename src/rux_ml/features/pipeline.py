@@ -37,9 +37,14 @@ if TYPE_CHECKING:
     from rux_ml.config import FeaturesConfig, FeaturesSpec
 
 
-def _polars_select_then_pandas(df: pl.DataFrame, cfg: FeaturesConfig) -> pd.DataFrame:
-    """Stateless Polars block, returning pandas so legacy sklearn transformers work."""
-    return select_columns(df, cfg.spec).to_pandas()
+def _polars_select_then_pandas(df: pl.DataFrame, spec: FeaturesSpec) -> pd.DataFrame:
+    """Stateless Polars block, returning pandas so legacy sklearn transformers work.
+
+    Takes ``spec`` (not the full ``FeaturesConfig``) as a kw-arg so the function
+    stays module-level — required for ``skops.io`` serialization of the
+    surrounding ``FunctionTransformer`` (per PR-010 bundle round-trip).
+    """
+    return select_columns(df, spec).to_pandas()
 
 
 def _to_polars(x: Any) -> pl.DataFrame:
@@ -180,12 +185,18 @@ def make_features(
         raise ValueError(msg)
     router = build_column_transformer(cardinalities or {}, cfg)
 
-    def _select(df: pl.DataFrame) -> pd.DataFrame:
-        return _polars_select_then_pandas(df, cfg)
-
     return Pipeline(
         steps=[
-            ("polars_select", FunctionTransformer(func=_select, validate=False)),
+            (
+                "polars_select",
+                # `func` is module-level + `kw_args` carries ``spec`` so skops can
+                # round-trip the FunctionTransformer (closures aren't serializable).
+                FunctionTransformer(
+                    func=_polars_select_then_pandas,
+                    kw_args={"spec": cfg.spec},
+                    validate=False,
+                ),
+            ),
             ("column_router", router),
             ("to_polars", FunctionTransformer(func=_to_polars, validate=False)),
         ]
