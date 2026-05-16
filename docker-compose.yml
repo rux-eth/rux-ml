@@ -1,0 +1,38 @@
+# rux-ml — single-service Compose file for the GPU workbench (per PR-012).
+#
+# GPU passthrough uses `deploy.resources.reservations.devices` (Compose v2
+# canonical syntax — supersedes the legacy `gpus: all` service key, which
+# Docker no longer documents).
+#
+# Memory caps follow D10:
+#   mem_limit:       32 GB  — cgroup-enforced hard cap (kernel kills on OOM)
+#   mem_reservation: 28 GB  — soft cap; matches the in-process psutil
+#                             watchdog threshold in MemoryConfig
+#
+# Volume mounts: every runtime-mutable directory is bind-mounted from host
+# so trials, registry artifacts, and logs persist outside the container.
+
+services:
+  rux-ml:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: rux-ml:local
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    mem_limit: 32g
+    mem_reservation: 28g
+    shm_size: 4g
+    environment:
+      WORKBENCH_HOME: /workbench
+    volumes:
+      - ./configs:/workbench/configs
+      - ./studies:/workbench/studies
+      - ./registry:/workbench/registry
+      - ./data:/workbench/data
+      - ./logs:/workbench/logs

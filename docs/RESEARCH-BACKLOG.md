@@ -32,7 +32,7 @@ All 14 v0 PRs are Tier 1 — every architectural choice was research-backed duri
 | [PR-009](../prs/PR-009-run-logging.md) | Run logging | `design-research ✓` (D7, D11) | `state-assessed 2026-05-16` (zero substantive drift; sub-decisions A1/B1/C1/D1/E1 locked-in: replace `build_user_attrs` with `TrialAttrs.from_cfg().record()`, include `metric`+`best_iteration`, `one_off_run` context manager, Polars-first query returns, `trial.number` scoped to `--study`) | `implementation-cleared 2026-05-16` |
 | [PR-010](../prs/PR-010-model-registry.md) | Model registry | `design-research ✓` (D8) | `state-assessed 2026-05-16` (zero substantive drift; sub-decisions A1/B1/C1/D1/E1 locked-in: re-fit at promote, strict inference-deps separation, `v_{date}_{short_hash}` version-id, atomic champion.json via tmp+os.replace) | `implementation-cleared 2026-05-16` |
 | [PR-011](../prs/PR-011-memory-and-threading.md) | Memory & threading | `design-research ✓` (D10) | `state-assessed 2026-05-16` (zero substantive drift; A1/B1/C1/D1/E1 locked-in: extract `pin_threads` to `_internal/env.py`, parent CLI verbs self-pin, observational watchdog + post-fit-check, `peak_rss_mb` tightened to required on `TrialAttrs`, background thread) | `implementation-cleared 2026-05-16` |
-| [PR-012](../prs/PR-012-container.md) | Container | `design-research ✓` (D1, D9, D10) | — | — |
+| [PR-012](../prs/PR-012-container.md) | Container | `design-research ✓` (D1, D9, D10) | `state-assessed 2026-05-16` (3 AMENDs: Compose `gpus: all` → `deploy.resources.reservations.devices`; `uv sync --frozen` → `--locked`; uv image pinned to `ghcr.io/astral-sh/uv:0.11.14@sha256:1025...`; mechanical: drop `xxhash` apt dep, add `curl` + `.dockerignore`) | `implementation-cleared 2026-05-16` |
 | [PR-013](../prs/PR-013-seed-management.md) | Seed management | `design-research ✓` (D9) | — | — |
 | [PR-014](../prs/PR-014-golden-tests.md) | Golden regression test infrastructure | `design-research ✓` (D12) | — | — |
 
@@ -70,7 +70,8 @@ These are the PR-specific things state assessment should verify (highlights only
 - **PR-009** — `study.ask()` + `study.tell()` API; `trials_dataframe()` includes `user_attrs` columns.
 - **PR-010** — XGBoost `Booster.save_model("...ubj")` and `load_model(...)` unchanged; `skops.io.dump` / `load` API current; no new sklearn version-incompatibility warnings.
 - **PR-011** — `psutil.Process.memory_info().rss` still canonical; `threadpoolctl` cross-runtime limitation status (if it has been resolved, simplify).
-- **PR-012** — Look up the current digest of `nvidia/cuda:12.4.1-devel-ubuntu22.04` (NVIDIA may have rebuilt the image); verify XGBoost CI is still on CUDA 12.4 (or update with documented justification); NVIDIA Container Toolkit installation steps for any 2026 changes.
+- **PR-012** — RESOLVED 2026-05-16. Base image digest captured (`sha256:5645fec...e9749`); XGBoost CI still on CUDA 12.4 (CUDA 13 added as additive variant — see CUDA-13 note below); Compose v2 GPU syntax changed (`gpus: all` → `deploy.resources.reservations.devices`); uv `--frozen` → `--locked`. All amendments incorporated.
+- **CUDA-13 watch (added 2026-05-16)** — XGBoost CI added CUDA 13 variant alongside CUDA 12 (`build-cuda.sh --cuda-version <12|13>`) as of 2026-05. No federated/RMM support in 13 lane yet. Revisit container base at PR-012 + 6 months (2026-11-16) — if CUDA 12 is sunset by then, plan a base-image bump PR.
 - **PR-013** — `numpy.random.SeedSequence.spawn` API unchanged; XGBoost `random_state` still flows through the sklearn wrapper; GPU determinism behavior has not regressed.
 - **PR-014** — `np.testing.assert_allclose` behavior on `atol`/`rtol` unchanged; pinned XGBoost / sklearn / Polars versions in the fixture manifest still installable.
 
