@@ -27,7 +27,7 @@ Full PR descriptions live in `prs/`. This file is the index.
 
 | PR | Description | Status | Depends on |
 |----|-------------|--------|------------|
-| [PR-006](../prs/PR-006-training-layer.md) | Training layer — `Trainer` `typing.Protocol` + `make_trainer(cfg)` factory + sklearn estimator wrapper for `XGBClassifier`/`XGBRegressor` + metric registry + ingest-path decision rule (QuantileDMatrix vs ExtMemQuantileDMatrix); CLI: `rux-ml train` for a single baseline run | `[ ]` | PR-005 |
+| [PR-006](../prs/PR-006-training-layer.md) | Training layer — `Trainer` `typing.Protocol` + `make_trainer(cfg)` factory + sklearn estimator wrapper for `XGBClassifier`/`XGBRegressor` + metric registry + ingest-path decision rule (QuantileDMatrix vs ExtMemQuantileDMatrix); CLI: `rux-ml train` for a single baseline run | `[x]` | PR-005 |
 
 ## Phase C.5: CV strategy (Tier-2 — blocks all HPO work)
 
