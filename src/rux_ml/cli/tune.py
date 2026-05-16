@@ -1,14 +1,19 @@
-"""``rux-ml tune`` verb group — Optuna sweeps (real bodies landed in PR-007).
+"""``rux-ml tune`` verb group — Optuna sweeps.
 
-Sequential trials, in-process, SQLite-backed (subprocess-per-trial isolation
-lands in PR-008). Per PR-007 Tier-2 research:
+Sequential trials, SQLite-backed. ``cfg.tuning.trial_isolation`` (PR-008)
+selects the dispatch path:
 
-- Objective is **K-fold CV-mean** consuming PR-015's Splitter (see
-  ``tuning/objective.py``); per-fold scores reported for ``WilcoxonPruner``.
-- Sampler default is ``TPESampler``; pruner default is ``WilcoxonPruner``.
-- ``BoTorchSampler`` not offered (Optuna 3.6 deprecation); HEBO is opt-in via
-  ``optunahub`` + ``hebo`` (sampler factory raises a clear ``ImportError``
-  pointing at the install command when selected without those deps).
+- ``"subprocess"`` (default per D10/D16) — parent loops ``n_trials`` times
+  invoking ``python -m rux_ml._internal.trial_runner`` via ``subprocess.run``
+  with spawn semantics (CUDA + fork is forbidden per ``docs/CONSTRAINTS.md``).
+  Storage coordinates state across children.
+- ``"in_process"`` — parent runs ``study.optimize(objective, n_trials=N)``
+  directly. Faster startup; Python may not reclaim RAM between trials
+  (Optuna #1178). Useful for debugging.
+
+Per PR-007 Tier-2 research, the objective is **K-fold CV-mean** consuming
+PR-015's Splitter; default sampler is ``TPESampler``; default pruner is
+``WilcoxonPruner``.
 """
 
 from __future__ import annotations
@@ -22,7 +27,13 @@ from rux_ml.cli._shared import get_options
 from rux_ml.config import RuxMLConfig
 from rux_ml.runs import study_name
 from rux_ml.training import optuna_direction
-from rux_ml.tuning import build_objective, create_or_load, make_pruner, make_sampler
+from rux_ml.tuning import (
+    build_objective,
+    create_or_load,
+    make_pruner,
+    make_sampler,
+    run_subprocess_trial,
+)
 
 app = typer.Typer(
     name="tune",
@@ -31,7 +42,9 @@ app = typer.Typer(
 )
 
 
-def _load_cfg(ctx: typer.Context) -> tuple[RuxMLConfig, str | None, str | None]:
+def _load_cfg(
+    ctx: typer.Context,
+) -> tuple[RuxMLConfig, str | None, str | None, dict[str, object]]:
     opts = get_options(ctx)
     cfg = RuxMLConfig.from_layers(
         opts.config,
@@ -39,7 +52,7 @@ def _load_cfg(ctx: typer.Context) -> tuple[RuxMLConfig, str | None, str | None]:
         study=opts.study,
         overrides=opts.overrides,
     )
-    return cfg, opts.problem, opts.study
+    return cfg, opts.problem, opts.study, dict(opts.overrides)
 
 
 def _resolve_study_name(
@@ -63,6 +76,42 @@ def _open_study(cfg: RuxMLConfig, name: str) -> optuna.Study:
     )
 
 
+def _run_trials(
+    ctx: typer.Context,
+    cfg: RuxMLConfig,
+    problem: str | None,
+    study_layer: str | None,
+    overrides: dict[str, object],
+    study_obj: optuna.Study,
+    name: str,
+    n_trials: int,
+) -> None:
+    """Dispatch trials per ``cfg.tuning.trial_isolation``."""
+    opts = get_options(ctx)
+    if cfg.tuning.trial_isolation == "in_process":
+        objective = build_objective(cfg)
+        study_obj.optimize(objective, n_trials=n_trials)
+        return
+
+    # Subprocess path: parent loop, each iteration spawns a fresh child.
+    for i in range(n_trials):
+        typer.echo(f"  [trial {i + 1}/{n_trials}] dispatching subprocess child...", err=True)
+        rc = run_subprocess_trial(
+            cfg=cfg,
+            cfg_path=opts.config,
+            problem=problem,
+            study_layer=study_layer,
+            study_name=name,
+            overrides=overrides,
+        )
+        if rc != 0:
+            typer.echo(
+                f"  [trial {i + 1}/{n_trials}] child exited with code {rc}; "
+                f"continuing to next trial",
+                err=True,
+            )
+
+
 @app.command(name="start")
 def start(
     ctx: typer.Context,
@@ -76,18 +125,21 @@ def start(
     n_trials: Annotated[int, typer.Option("--n-trials", "-n", min=1)] = 50,
 ) -> None:
     """Create or load a study and run N trials."""
-    cfg, problem, study = _load_cfg(ctx)
-    name = _resolve_study_name(study_name_arg, cfg, problem, study)
+    cfg, problem, study_layer, overrides = _load_cfg(ctx)
+    name = _resolve_study_name(study_name_arg, cfg, problem, study_layer)
     study_obj = _open_study(cfg, name)
     typer.echo(f"study:    {name}")
     typer.echo(f"storage:  {cfg.runs.storage_url}")
     typer.echo(f"sampler:  {cfg.tuning.sampler}    pruner: {cfg.tuning.pruner}")
-    typer.echo(f"n_trials: {n_trials}")
-    objective = build_objective(cfg)
-    study_obj.optimize(objective, n_trials=n_trials)
-    typer.echo(f"\nbest value ({cfg.training.metric}): {study_obj.best_value:.6f}")
-    typer.echo(f"best trial:  #{study_obj.best_trial.number}")
-    typer.echo(f"best params: {study_obj.best_trial.params}")
+    typer.echo(f"isolation: {cfg.tuning.trial_isolation}    n_trials: {n_trials}")
+    _run_trials(ctx, cfg, problem, study_layer, overrides, study_obj, name, n_trials)
+    # Reload to see the children's writes (subprocess path); harmless on in-process.
+    study_obj = optuna.load_study(study_name=name, storage=cfg.runs.storage_url)
+    completed = [t for t in study_obj.trials if t.state == optuna.trial.TrialState.COMPLETE]
+    if completed:
+        typer.echo(f"\nbest value ({cfg.training.metric}): {study_obj.best_value:.6f}")
+        typer.echo(f"best trial:  #{study_obj.best_trial.number}")
+        typer.echo(f"best params: {study_obj.best_trial.params}")
 
 
 @app.command(name="resume")
@@ -97,14 +149,19 @@ def resume(
     n_trials: Annotated[int, typer.Option("--n-trials", "-n", min=1)] = 50,
 ) -> None:
     """Add N more trials to an existing study (idempotent ``load_if_exists=True``)."""
-    cfg, _, _ = _load_cfg(ctx)
+    cfg, problem, study_layer, overrides = _load_cfg(ctx)
     study_obj = _open_study(cfg, study_name_arg)
     typer.echo(f"resuming study {study_name_arg} ({len(study_obj.trials)} existing trials)")
-    objective = build_objective(cfg)
-    study_obj.optimize(objective, n_trials=n_trials)
+    typer.echo(f"isolation: {cfg.tuning.trial_isolation}    n_trials: {n_trials}")
+    _run_trials(
+        ctx, cfg, problem, study_layer, overrides, study_obj, study_name_arg, n_trials
+    )
+    study_obj = optuna.load_study(study_name=study_name_arg, storage=cfg.runs.storage_url)
+    completed = [t for t in study_obj.trials if t.state == optuna.trial.TrialState.COMPLETE]
+    best_value = study_obj.best_value if completed else float("nan")
     typer.echo(
         f"\ntotal trials: {len(study_obj.trials)} "
-        f"(best {cfg.training.metric}={study_obj.best_value:.6f})"
+        f"(best {cfg.training.metric}={best_value:.6f})"
     )
 
 
@@ -114,7 +171,7 @@ def status(
     study_name_arg: Annotated[str, typer.Argument(metavar="STUDY_NAME")],
 ) -> None:
     """Print progress, current best, and best trial's user_attrs."""
-    cfg, _, _ = _load_cfg(ctx)
+    cfg, _, _, _ = _load_cfg(ctx)
     try:
         study_obj = optuna.load_study(study_name=study_name_arg, storage=cfg.runs.storage_url)
     except KeyError as exc:
@@ -145,7 +202,7 @@ def retry_trial(
     trial_id: Annotated[int, typer.Argument()],
 ) -> None:
     """Re-enqueue a failed trial with its original params via ``study.add_trial``."""
-    cfg, _, _ = _load_cfg(ctx)
+    cfg, _, _, _ = _load_cfg(ctx)
     try:
         study_obj = optuna.load_study(study_name=study_name_arg, storage=cfg.runs.storage_url)
     except KeyError as exc:

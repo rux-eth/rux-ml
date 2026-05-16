@@ -28,7 +28,7 @@ All 14 v0 PRs are Tier 1 — every architectural choice was research-backed duri
 | [PR-004](../prs/PR-004-data-layer.md) | Data layer | `design-research ✓` (D3, D9, D14) | `state-assessed 2026-05-16` (zero drift; one doc note: hardlink EXDEV fallback) | `implementation-cleared 2026-05-16` |
 | [PR-005](../prs/PR-005-features-layer.md) | Features layer | `design-research ✓` (D4, D12) | `state-assessed 2026-05-16` (zero drift; local-only Phase 1) | `implementation-cleared 2026-05-16` |
 | [PR-006](../prs/PR-006-training-layer.md) | Training layer | `design-research ✓` (D5, D3, D7) | `state-assessed 2026-05-16` (zero substantive drift; mechanical additions: `MemoryConfig.cache_host_ratio`, `_internal/git.git_sha`, `optuna>=4` dep) | `implementation-cleared 2026-05-16` |
-| [PR-008](../prs/PR-008-subprocess-isolation.md) | Subprocess-per-trial isolation | `design-research ✓` (D10, D16) | — | — |
+| [PR-008](../prs/PR-008-subprocess-isolation.md) | Subprocess-per-trial isolation | `design-research ✓` (D10, D16) | `state-assessed 2026-05-16` (zero substantive drift; sub-decisions A1/B1/C1/D1 locked-in: manual-loop parent dispatch + JSON override path + `trial_timeout_s` knob + Data Flow diagram correction) | `implementation-cleared 2026-05-16` |
 | [PR-009](../prs/PR-009-run-logging.md) | Run logging | `design-research ✓` (D7, D11) | — | — |
 | [PR-010](../prs/PR-010-model-registry.md) | Model registry | `design-research ✓` (D8) | — | — |
 | [PR-011](../prs/PR-011-memory-and-threading.md) | Memory & threading | `design-research ✓` (D10) | — | — |

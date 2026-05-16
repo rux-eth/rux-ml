@@ -54,50 +54,37 @@ CLI: rux-ml tune start \
     │     name="churn_xgb_wide_<study_id>",
     │     storage="sqlite:///studies/studies.db",
     │     load_if_exists=True)
-    └─ study.optimize(_spawn_trial_dispatcher, n_trials=50)
-         │
-         for each trial:
-           _spawn_trial_dispatcher(trial):
-             subprocess.run([
-               "python", "-m", "rux_ml._internal.trial_runner",
-               "--study",  study_name,
-               "--storage", storage_url,
-               "--config", toml_path,
-               "--trial-id", str(trial._trial_id),
-               "--overrides-json", json_overrides_path,
-             ], check=False)
-             # parent reads final score from study after subprocess exits
+    └─ for i in range(n_trials=50):           # parent doesn't use study.optimize;
+         subprocess.run([                       # see PR-008 sub-decision A1
+           sys.executable, "-m", "rux_ml._internal.trial_runner",
+           "--config", toml_path,
+           "--problem", problem,                # passes through CLI --problem
+           "--study", study_layer,              # passes through CLI --study (config overlay)
+           "--study-name", optuna_study_name,
+           "--overrides-json", tmp_json_path,   # CLI --set overrides serialised here
+         ], check=False, timeout=cfg.tuning.trial_timeout_s)
+         # Child runs its own study.optimize(..., n_trials=1) and writes to storage.
+         # SQLite coordinates state across children (D6 sequential trials).
          ▼
   CHILD PROCESS (fresh interpreter — spawn semantics; CUDA init OK)
-  trial_runner.main():
-    ├─ pin OMP_NUM_THREADS=24, OPENBLAS_NUM_THREADS=1, MKL_NUM_THREADS=1
-    ├─ start psutil watchdog at MemoryConfig.watchdog_threshold_gb (default 28 GB)
-    ├─ base_cfg = RuxMLConfig(...)  (re-runs pydantic-settings with same TOML stack)
-    ├─ study = optuna.load_study(study_name, storage)
-    ├─ trial = study.ask() (or load specific trial_id)
-    ├─ overrides = walk_search_space(base_cfg.search_space, trial)
-    │     # for k, spec in cfg.search_space.items():
-    │     #   overrides[k] = trial.suggest_<spec.type>(k, ...)
-    ├─ trial_cfg = base_cfg.model_copy(update=overrides, deep=True)
-    ├─ record provenance triple in user_attrs:
-    │     data_hash, data_cfg_hash, features_cfg_hash, training_cfg_hash,
-    │     tuning_cfg_hash, root_cfg_hash, git_sha, entropy_hex,
-    │     image_digest, xgboost_version, cuda_runtime_version,
-    │     gpu_model, driver_version, omp_threads
-    ├─ data     = make_data(trial_cfg)
-    ├─ pipeline = make_features(trial_cfg)
-    ├─ trainer  = make_trainer(trial_cfg)   # sklearn estimator API
-    ├─ pipeline.fit(data.X_train, data.y_train)
-    ├─ trainer.fit(
-    │     pipeline.transform(data.X_train), data.y_train,
-    │     eval_set=[(pipeline.transform(data.X_val), data.y_val)],
-    │     callbacks=[XGBoostPruningCallback(trial, "validation_0-<metric>")])
-    ├─ optuna.artifacts.upload_artifact(study, trial,
-    │     {"pipeline.skops", "model.ubj", "feature_importance.json", ...})
-    ├─ score = compute_score(trainer, data.X_val, data.y_val)
-    ├─ trial.set_user_attr("peak_rss_mb", watchdog.peak_mb)
-    └─ study.tell(trial, score)  →  exit
-       (psutil trip during run → raise MemoryPressureError → optuna.TrialPruned)
+  rux_ml._internal.trial_runner.main():
+    ├─ argparse (stdlib only — no heavy imports yet)
+    ├─ overrides = json.loads(overrides_json)
+    ├─ base_cfg = RuxMLConfig.from_layers(...)  (light: pydantic + tomllib)
+    ├─ pin env vars from cfg.memory BEFORE numpy/polars/sklearn/xgboost import:
+    │     OMP_NUM_THREADS, OPENBLAS_NUM_THREADS, MKL_NUM_THREADS, POLARS_MAX_THREADS
+    ├─ lazy-import: rux_ml.tuning + rux_ml.training + heavy libs
+    ├─ start psutil watchdog (PR-011 — deferred)
+    ├─ study = tuning.create_or_load(name, storage, sampler, pruner, direction, load_if_exists=True)
+    ├─ study.optimize(build_objective(cfg), n_trials=1)
+    │   # build_objective (PR-007) runs K-fold CV-mean per cfg.cv:
+    │   #   walk_search_space → overrides → trial_cfg = RuxMLConfig.model_validate(deep-merged)
+    │   #   record 8-layer user_attrs via runs.provenance.build_user_attrs
+    │   #   make_splitter(cfg.cv, seed=cfg.tuning.entropy); ExtMem-compat gate
+    │   #   for fold in folds: fit features + trainer, score, trial.report(score, fold_idx)
+    │   #   if trial.should_prune(): raise optuna.TrialPruned
+    │   #   return statistics.fmean(fold_scores) → study.tell internally
+    └─ exit cleanly (psutil trip in PR-011 → MemoryPressureError → optuna.TrialPruned)
 
 After study completes — promotion is an explicit step:
 

@@ -15,6 +15,7 @@ Per D6 + D16 + PR-007 Tier-2 research (locked-in 2026-05-16):
 - Subprocess-per-trial isolation deferred to PR-008.
 """
 
+from rux_ml.tuning.isolation import run_subprocess_trial
 from rux_ml.tuning.objective import build_objective, walk_search_space
 from rux_ml.tuning.pruners import make_pruner
 from rux_ml.tuning.samplers import make_sampler
@@ -25,5 +26,6 @@ __all__ = [
     "create_or_load",
     "make_pruner",
     "make_sampler",
+    "run_subprocess_trial",
     "walk_search_space",
 ]
