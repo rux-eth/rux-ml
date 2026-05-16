@@ -15,6 +15,9 @@ dependencies = [
     "pydantic>=2.6",
     "pydantic-settings>=2.6",
     "xxhash>=3.7",
+    "polars>=1.40",
+    "xgboost>=3.1",
+    "numpy>=2.0",
 ]
 
 [project.scripts]

@@ -33,12 +33,13 @@ htmlcov/
 # Rust (when first crate lands per D13)
 target/
 
-# ML workbench runtime dirs
-studies/
-registry/
-artifacts/
-data/
-logs/
+# ML workbench runtime dirs (anchored to repo root so package
+# subpackages like src/rux_ml/data/ and tests/data/ are NOT ignored)
+/studies/
+/registry/
+/artifacts/
+/data/
+/logs/
 
 # Common ML clutter
 mlruns/
