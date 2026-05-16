@@ -172,6 +172,7 @@ Per D13, no Rust at v0. When the first crate lands:
 - `basedpyright` (strict defaults) for type checking — replaces the original mypy choice per PR-001 Phase 1 amendment ([2026 type-checker comparison](https://www.danilchenko.dev/posts/ty-vs-mypy-vs-pyright/))
 - Line length: project default (88 / 100 — pick one in PR-001 and stay consistent)
 - Imports: external → internal → relative, ruff-sorted
+- **CLI subpackage exception (`src/rux_ml/cli/**`):** ruff's `TC001/TC002/TC003` (move imports into `TYPE_CHECKING`) is disabled. Reason: Typer uses `inspect.signature(..., eval_str=True)` at command-registration time, and string annotations like `"typer.Context"` fail with `NameError` if the underlying module isn't importable at runtime. Configured in `pyproject.toml` `[tool.ruff.lint.per-file-ignores]`.
 
 ---
 
