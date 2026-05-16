@@ -39,7 +39,11 @@ All 14 v0 PRs are Tier 1 — every architectural choice was research-backed duri
 
 ## Tier 2 — Research-Pending
 
-None at v0. New PRs created later (e.g., a PR adding the first Rust crate per D13's profile-driven trigger) start as Tier 2 unless they explicitly inherit prior research.
+| PR | Title | Design research | Required research topics |
+|----|-------|-----------------|--------------------------|
+| [PR-015](../prs/PR-015-cv-strategy.md) | CV strategy — Splitter Protocol + library research + splits.py rewrite | `design-research ✗` (not in D1–D17; surfaced 2026-05-16 from user direction) | (1) library choice per CV family (sklearn / mlxtend / custom CPCV); (2) data-leakage prevention per strategy (time-leakage, group-leakage, embargo for CPCV); (3) parallelism interactions with D6 `n_jobs=1` + D10 subprocess-per-trial + thread pinning; (4) API ergonomics (Polars vs pandas input; configuration composition with `cfg.search_space`). See `prs/PR-015-cv-strategy.md` `## Research backing` for the full scope. |
+
+Future PRs added later (e.g., a PR adding the first Rust crate per D13's profile-driven trigger) start as Tier 2 unless they explicitly inherit prior research.
 
 ---
 
@@ -49,7 +53,7 @@ Per the time-decay policy in `PROCEDURE-pr-research.md`, any PR marked `fully-re
 
 **Project staleness threshold:** **60 days** (recorded in `docs/CONSTRAINTS.md`; BEST-GUESS, user-acknowledged).
 
-**Currently watching:** all 14 v0 PRs. Design-time research was completed 2026-05-14 → 2026-05-15. Each PR's state assessment must complete by **2026-07-14** to avoid re-research; PRs implemented after that date must re-run Phase 1.
+**Currently watching:** the unmerged Tier-1 PRs (PR-006 through PR-014). Design-time research was completed 2026-05-14 → 2026-05-15. Each PR's state assessment must complete by **2026-07-14** to avoid re-research; PRs implemented after that date must re-run Phase 1. PR-015 (Tier-2) does NOT inherit the design-time staleness window — its `state-assessed` date will start the clock from whenever its full 5-phase research completes.
 
 ### Per-PR drift-risk notes
 
