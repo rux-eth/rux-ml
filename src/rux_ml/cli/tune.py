@@ -24,6 +24,7 @@ import optuna
 import typer
 
 from rux_ml._internal.env import pin_threads
+from rux_ml._internal.seeds import make_seed_bag
 from rux_ml.cli._shared import get_options
 from rux_ml.config import RuxMLConfig
 from rux_ml.runs import study_name
@@ -67,10 +68,13 @@ def _resolve_study_name(
 
 
 def _open_study(cfg: RuxMLConfig, name: str) -> optuna.Study:
+    # PR-013: study-level bag (trial_number=0 sentinel) supplies the sampler
+    # seed. Per-trial bags (trial_number=actual) live inside the objective.
+    study_bag = make_seed_bag(master_entropy=cfg.tuning.entropy, trial_number=0)
     return create_or_load(
         name=name,
         storage=cfg.runs.storage_url,
-        sampler=make_sampler(cfg.tuning, seed=cfg.tuning.entropy),
+        sampler=make_sampler(cfg.tuning, seed=study_bag.sampler_seed),
         pruner=make_pruner(cfg.tuning),
         direction=optuna_direction(cfg.training.metric),
         load_if_exists=True,

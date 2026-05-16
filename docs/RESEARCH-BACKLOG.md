@@ -33,7 +33,7 @@ All 14 v0 PRs are Tier 1 — every architectural choice was research-backed duri
 | [PR-010](../prs/PR-010-model-registry.md) | Model registry | `design-research ✓` (D8) | `state-assessed 2026-05-16` (zero substantive drift; sub-decisions A1/B1/C1/D1/E1 locked-in: re-fit at promote, strict inference-deps separation, `v_{date}_{short_hash}` version-id, atomic champion.json via tmp+os.replace) | `implementation-cleared 2026-05-16` |
 | [PR-011](../prs/PR-011-memory-and-threading.md) | Memory & threading | `design-research ✓` (D10) | `state-assessed 2026-05-16` (zero substantive drift; A1/B1/C1/D1/E1 locked-in: extract `pin_threads` to `_internal/env.py`, parent CLI verbs self-pin, observational watchdog + post-fit-check, `peak_rss_mb` tightened to required on `TrialAttrs`, background thread) | `implementation-cleared 2026-05-16` |
 | [PR-012](../prs/PR-012-container.md) | Container | `design-research ✓` (D1, D9, D10) | — | — |
-| [PR-013](../prs/PR-013-seed-management.md) | Seed management | `design-research ✓` (D9) | — | — |
+| [PR-013](../prs/PR-013-seed-management.md) | Seed management | `design-research ✓` (D9) | `state-assessed 2026-05-16` (zero substantive drift; sub-decisions A1/B1/C1/D1/E1/F1/G1/H1 locked-in: per-trial `SeedSequence(entropy=master, spawn_key=(trial.number,))`, required `entropy_hex`+`image_digest`+`xgboost_version`+`cuda_runtime_version`+`omp_threads`, `make_trainer(cfg, *, seed=…)` plumbing, promote re-fit reconstructs the trial bag from its `entropy_hex`; mechanical: `xgboost.config_context()` → `xgboost.build_info()` for CUDA build metadata; H1 keeps `NestedCVWrapper` `random_state=0` out of scope) | `implementation-cleared 2026-05-16` |
 | [PR-014](../prs/PR-014-golden-tests.md) | Golden regression test infrastructure | `design-research ✓` (D12) | — | — |
 
 ## Tier 2 — Research-Pending
@@ -71,7 +71,7 @@ These are the PR-specific things state assessment should verify (highlights only
 - **PR-010** — XGBoost `Booster.save_model("...ubj")` and `load_model(...)` unchanged; `skops.io.dump` / `load` API current; no new sklearn version-incompatibility warnings.
 - **PR-011** — `psutil.Process.memory_info().rss` still canonical; `threadpoolctl` cross-runtime limitation status (if it has been resolved, simplify).
 - **PR-012** — Look up the current digest of `nvidia/cuda:12.4.1-devel-ubuntu22.04` (NVIDIA may have rebuilt the image); verify XGBoost CI is still on CUDA 12.4 (or update with documented justification); NVIDIA Container Toolkit installation steps for any 2026 changes.
-- **PR-013** — `numpy.random.SeedSequence.spawn` API unchanged; XGBoost `random_state` still flows through the sklearn wrapper; GPU determinism behavior has not regressed.
+- **PR-013** — RESOLVED 2026-05-16. `numpy.random.SeedSequence.spawn` API unchanged; XGBoost `random_state` still flows through the sklearn wrapper. `xgboost.config_context()` superseded by `xgboost.build_info()` for build metadata (mechanical rename — confirmed via PR-012 container smoke output `CUDA_VERSION: [12, 9]`). GPU determinism contract from D9 (near-deterministic, not bit-exact across hardware) unchanged.
 - **PR-014** — `np.testing.assert_allclose` behavior on `atol`/`rtol` unchanged; pinned XGBoost / sklearn / Polars versions in the fixture manifest still installable.
 
 ---

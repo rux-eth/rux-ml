@@ -26,6 +26,7 @@ import importlib.metadata as _metadata
 from typing import TYPE_CHECKING, Any, cast
 
 from rux_ml._internal.hashing import sha256_canonical
+from rux_ml._internal.seeds import SeedBag, make_seed_bag_from_hex
 from rux_ml.config import RuxMLConfig
 from rux_ml.data import load_parquet, materialize, train_val_test_split
 from rux_ml.features import cardinalities_from, make_features
@@ -45,10 +46,6 @@ if TYPE_CHECKING:
     import polars as pl
     import xgboost as xgb
     from sklearn.pipeline import Pipeline
-
-
-# Same default split seed as ``cli/train.py``; PR-013 will replace via SeedSequence.
-_DEFAULT_SPLIT_SEED = 0
 
 
 def _unflatten(flat: dict[str, Any]) -> dict[str, Any]:
@@ -92,19 +89,25 @@ def _apply_trial_params(base_cfg: RuxMLConfig, params: dict[str, Any]) -> RuxMLC
     return RuxMLConfig.model_validate(merged)
 
 
-def _refit(cfg: RuxMLConfig) -> tuple[Pipeline, xgb.Booster]:
+def _refit(cfg: RuxMLConfig, *, bag: SeedBag) -> tuple[Pipeline, xgb.Booster]:
     """Final-fit reproduction of the trial's pipeline + booster.
 
     Uses the train fold for fitting and the val fold for XGBoost-internal
     early stopping (matches ``cli/train.py``'s 1-trial fit shape). The test
     fold is unused — held out for future golden-regression evaluation (PR-014).
+
+    ``bag`` (PR-013) carries the originating trial's ``split_seed`` +
+    ``xgb_seed`` reconstructed from its ``entropy_hex``. Without this, the
+    promotion re-fit would use different seeds than the trial's evaluation,
+    so the registered bundle would not match the metrics recorded in
+    ``user_attrs`` — silent reproducibility breakage.
     """
     if cfg.data.source_path is None or cfg.data.target_column is None:
         msg = "promote requires data.source_path and data.target_column"
         raise ValueError(msg)
 
     df = materialize(load_parquet(cfg.data.source_path))
-    splits = train_val_test_split(df, ratios=cfg.data.split_ratios, seed=_DEFAULT_SPLIT_SEED)
+    splits = train_val_test_split(df, ratios=cfg.data.split_ratios, seed=bag.split_seed)
     x_train = splits["train"].drop(cfg.data.target_column)
     y_train = splits["train"][cfg.data.target_column]
     x_val = splits["val"].drop(cfg.data.target_column)
@@ -116,7 +119,7 @@ def _refit(cfg: RuxMLConfig) -> tuple[Pipeline, xgb.Booster]:
     x_train_t = cast("pl.DataFrame", pipeline.transform(x_train))  # pyright: ignore[reportUnknownMemberType]
     x_val_t = cast("pl.DataFrame", pipeline.transform(x_val))  # pyright: ignore[reportUnknownMemberType]
 
-    trainer = make_trainer(cfg.training)
+    trainer = make_trainer(cfg.training, seed=bag.xgb_seed)
     trainer.fit(
         x_train_t.to_pandas(),
         y_train.to_numpy(),
@@ -235,8 +238,11 @@ def promote(
     # 3. Apply trial.params to base_cfg.
     trial_cfg = _apply_trial_params(base_cfg, run.params)
 
-    # 4. Re-fit pipeline + booster.
-    pipeline, booster = _refit(trial_cfg)
+    # 4. Re-fit pipeline + booster — PR-013 reconstructs the original trial's
+    # SeedBag from its recorded ``entropy_hex`` so the promoted bundle uses
+    # the SAME split + xgb_seed the trial reported metrics for.
+    bag = make_seed_bag_from_hex(attrs.entropy_hex)
+    pipeline, booster = _refit(trial_cfg, bag=bag)
 
     # 5. Compose manifest.
     metric_value = run.value if run.value is not None else 0.0

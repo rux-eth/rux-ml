@@ -34,7 +34,9 @@ from typing import TYPE_CHECKING, Any, cast
 import optuna
 from xgboost import ExtMemQuantileDMatrix
 
+from rux_ml._internal.env import EnvironmentVersions, get_versions
 from rux_ml._internal.memory import MemoryPressureError, Watchdog
+from rux_ml._internal.seeds import SeedBag, make_seed_bag
 from rux_ml.config import (
     CatSpec,
     FloatSpec,
@@ -176,8 +178,14 @@ def _fold_scores(
     splitter: Any,
     groups: Any,
     trial: optuna.Trial,
+    bag: SeedBag,
 ) -> list[float]:
-    """Iterate folds, fit per-fold, score, report, and respect pruning."""
+    """Iterate folds, fit per-fold, score, report, and respect pruning.
+
+    ``bag.xgb_seed`` (PR-013) plumbs into ``make_trainer`` so every fold's
+    XGBoost RNG is pinned. ``bag.cv_seed`` already lives in the ``splitter``
+    constructed upstream.
+    """
     scores: list[float] = []
     for fold_idx, (train_idx, test_idx) in enumerate(
         splitter.split(x_full, y_full, groups=groups)
@@ -198,7 +206,7 @@ def _fold_scores(
 
         # Trainer fit per fold. XGBoost-internal early_stopping_rounds runs against the
         # held-out fold val (= test fold here). No XGBoostPruningCallback (Optuna #3203).
-        trainer = make_trainer(cfg.training)
+        trainer = make_trainer(cfg.training, seed=bag.xgb_seed)
         x_tr_pd = x_tr_t.to_pandas()
         x_te_pd = x_te_t.to_pandas()
         trainer.fit(
@@ -222,13 +230,17 @@ def _record_attrs(
     trial_cfg: RuxMLConfig,
     hashes: dict[str, str],
     peak_rss_mb: float,
+    bag: SeedBag,
+    versions: EnvironmentVersions,
 ) -> None:
-    """Record the per-trial provenance triple including PR-011's ``peak_rss_mb``."""
+    """Record the per-trial provenance triple including PR-013's seed + version block."""
     TrialAttrs.from_cfg(
         trial_cfg,
         hashes,
         metric=trial_cfg.training.metric,
         peak_rss_mb=peak_rss_mb,
+        bag=bag,
+        versions=versions,
     ).record(trial)
 
 
@@ -248,12 +260,27 @@ def build_objective(base_cfg: RuxMLConfig) -> Callable[[optuna.Trial], float]:
     x_full, y_full = _strip_target(df_full, target_col)
     hashes = data_hashes(source_path)
 
+    # PR-013: capture environment versions once per subprocess. Each subprocess
+    # runs n_trials=1 (per PR-008), so this is effectively per-trial — but
+    # placing it outside the closure makes the cost explicit: one xgboost import
+    # + one pair of nvidia-smi invocations per subprocess.
+    versions = get_versions(base_cfg.memory)
+
     def objective(trial: optuna.Trial) -> float:
         overrides = walk_search_space(base_cfg.search_space, trial)
         trial_cfg = _apply_overrides(base_cfg, overrides)
 
-        # Build the Splitter per PR-015; resolve `groups` from the data layer if needed.
-        splitter = make_splitter(trial_cfg.cv, seed=trial_cfg.tuning.entropy)
+        # PR-013: derive a per-trial SeedBag from the study master + trial.number.
+        # ``trial.number`` is stable per study; identical (master, number) pairs
+        # reproduce the same bag.
+        bag = make_seed_bag(
+            master_entropy=trial_cfg.tuning.entropy,
+            trial_number=trial.number,
+        )
+
+        # Build the Splitter per PR-015 using the per-trial cv seed (was the master
+        # entropy in PR-007; PR-013 spawns a distinct cv_seed per trial).
+        splitter = make_splitter(trial_cfg.cv, seed=bag.cv_seed)
         groups = None
         if isinstance(trial_cfg.cv, GroupKFoldCV):
             groups_column = trial_cfg.cv.groups_column
@@ -277,11 +304,11 @@ def build_objective(base_cfg: RuxMLConfig) -> Callable[[optuna.Trial], float]:
             sample_hz=trial_cfg.memory.watchdog_sample_hz,
         ) as wd:
             try:
-                scores = _fold_scores(trial_cfg, x_full, y_full, splitter, groups, trial)
+                scores = _fold_scores(trial_cfg, x_full, y_full, splitter, groups, trial, bag)
             except MemoryPressureError:
                 raise optuna.TrialPruned from None
             finally:
-                _record_attrs(trial, trial_cfg, hashes, wd.peak_mb)
+                _record_attrs(trial, trial_cfg, hashes, wd.peak_mb, bag, versions)
 
         if wd.tripped:
             raise optuna.TrialPruned

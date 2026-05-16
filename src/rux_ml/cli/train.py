@@ -1,9 +1,10 @@
-"""``rux-ml train`` — single baseline training end-to-end (per PR-006 + D7).
+"""``rux-ml train`` — single baseline training end-to-end (per PR-006 + D7 + PR-013).
 
 Wraps a one-off training as a 1-trial Optuna study so the same SQLite store
-holds both sweeps and baselines (per D7). The provenance triple subset
-recorded here is the PR-006 minimum (config hashes + ``data_hash`` +
-``git_sha``); ``entropy_hex`` + the full environment block land in PR-013.
+holds both sweeps and baselines (per D7). The provenance triple now includes
+the full PR-013 environment block (``entropy_hex``, ``image_digest``, library
++ CUDA versions, ``omp_threads``) alongside the PR-006 minimum (config hashes
++ ``data_hash`` + ``git_sha``) and the PR-011 ``peak_rss_mb``.
 
 PR-009 refactored this to use the shared ``runs.ask_tell.one_off_run``
 context manager and ``runs.attrs.TrialAttrs.from_cfg(...).record(trial)`` so
@@ -19,8 +20,9 @@ import optuna
 import polars as pl
 import typer
 
-from rux_ml._internal.env import pin_threads
+from rux_ml._internal.env import EnvironmentVersions, get_versions, pin_threads
 from rux_ml._internal.memory import MemoryPressureError, Watchdog
+from rux_ml._internal.seeds import SeedBag, make_seed_bag
 from rux_ml.cli._shared import get_options
 from rux_ml.config import RuxMLConfig
 from rux_ml.data import load_parquet, materialize, train_val_test_split
@@ -37,8 +39,6 @@ from rux_ml.training import (
     optuna_direction,
     select_ingest,
 )
-
-_DEFAULT_SPLIT_SEED = 0  # PR-013 will replace with SeedSequence-derived per-component seeds.
 
 
 def _require(cfg: RuxMLConfig) -> tuple[Path, str]:
@@ -57,10 +57,17 @@ def _strip_target(df: pl.DataFrame, target_col: str) -> tuple[pl.DataFrame, pl.S
 
 
 def _fit_and_score(
-    cfg: RuxMLConfig, source_path: Path, target_col: str
+    cfg: RuxMLConfig, source_path: Path, target_col: str, bag: SeedBag
 ) -> tuple[float, int | None]:
+    """Fit + score one baseline using PR-013-derived seeds for split + trainer.
+
+    The one-off baseline shares the data-fold layout with the registry-side
+    re-fit at promote time (both consume ``train_val_test_split`` with the
+    same ``bag.split_seed``), so a promoted bundle reproduces the exact
+    baseline configuration the user saw at training.
+    """
     df = materialize(load_parquet(source_path))
-    splits = train_val_test_split(df, ratios=cfg.data.split_ratios, seed=_DEFAULT_SPLIT_SEED)
+    splits = train_val_test_split(df, ratios=cfg.data.split_ratios, seed=bag.split_seed)
     x_train, y_train = _strip_target(splits["train"], target_col)
     x_val, y_val = _strip_target(splits["val"], target_col)
 
@@ -81,7 +88,7 @@ def _fit_and_score(
     dmatrix_cls = select_ingest(estimate_x_bytes(x_train_t), cfg.data)
     typer.echo(f"  ingest path: {dmatrix_cls.__name__}", err=True)
 
-    trainer = make_trainer(cfg.training)
+    trainer = make_trainer(cfg.training, seed=bag.xgb_seed)
     x_train_pd = x_train_t.to_pandas()
     x_val_pd = x_val_t.to_pandas()
     trainer.fit(
@@ -93,6 +100,27 @@ def _fit_and_score(
     score = compute_score(cfg.training.metric, trainer, x_val_pd, y_val.to_numpy())
     best_iter = getattr(trainer, "best_iteration", None)
     return score, int(best_iter) if best_iter is not None else None
+
+
+def _record_attrs(
+    cfg: RuxMLConfig,
+    hashes: dict[str, str],
+    *,
+    bag: SeedBag,
+    versions: EnvironmentVersions,
+    peak_rss_mb: float,
+    best_iteration: int | None,
+    trial: optuna.Trial,
+) -> None:
+    TrialAttrs.from_cfg(
+        cfg,
+        hashes,
+        metric=cfg.training.metric,
+        peak_rss_mb=peak_rss_mb,
+        bag=bag,
+        versions=versions,
+        best_iteration=best_iteration,
+    ).record(trial)
 
 
 def run_command(ctx: typer.Context) -> None:
@@ -110,6 +138,7 @@ def run_command(ctx: typer.Context) -> None:
 
     source_path, target_col = _require(cfg)
     hashes = data_hashes(source_path)
+    versions = get_versions(cfg.memory)
 
     with one_off_run(
         cfg,
@@ -117,26 +146,40 @@ def run_command(ctx: typer.Context) -> None:
         study=opts.study,
         direction=optuna_direction(cfg.training.metric),
     ) as run:
+        # PR-013: derive per-trial bag using the one-off trial's number
+        # (typically 0 in a fresh study; non-zero when --study targets an
+        # existing study and one_off_run appends a new trial). The bag is
+        # stable for (master_entropy, trial.number) so reruns are reproducible.
+        bag = make_seed_bag(master_entropy=cfg.tuning.entropy, trial_number=run.trial.number)
+
         # PR-011: watchdog wraps the fit; tripped → pruned.
         with Watchdog(
             threshold_gb=cfg.memory.watchdog_threshold_gb,
             sample_hz=cfg.memory.watchdog_sample_hz,
         ) as wd:
             try:
-                score, best_iter = _fit_and_score(cfg, source_path, target_col)
+                score, best_iter = _fit_and_score(cfg, source_path, target_col, bag)
             except MemoryPressureError:
-                TrialAttrs.from_cfg(
-                    cfg, hashes, metric=cfg.training.metric, peak_rss_mb=wd.peak_mb
-                ).record(run.trial)
+                _record_attrs(
+                    cfg,
+                    hashes,
+                    bag=bag,
+                    versions=versions,
+                    peak_rss_mb=wd.peak_mb,
+                    best_iteration=None,
+                    trial=run.trial,
+                )
                 raise optuna.TrialPruned from None
 
-        TrialAttrs.from_cfg(
+        _record_attrs(
             cfg,
             hashes,
-            metric=cfg.training.metric,
-            best_iteration=best_iter,
+            bag=bag,
+            versions=versions,
             peak_rss_mb=wd.peak_mb,
-        ).record(run.trial)
+            best_iteration=best_iter,
+            trial=run.trial,
+        )
         if wd.tripped:
             # Threshold crossed during the fit even though the fit completed —
             # mark the trial pruned so it doesn't pollute the best-trial pool.
@@ -148,5 +191,6 @@ def run_command(ctx: typer.Context) -> None:
         typer.echo(f"  trial:    {run.trial.number}")
         typer.echo(f"  storage:  {cfg.runs.storage_url}")
         typer.echo(f"  peak_rss_mb: {wd.peak_mb:.1f}")
+        typer.echo(f"  entropy_hex: {bag.entropy_hex}")
         if best_iter is not None:
             typer.echo(f"  best_iter: {best_iter}")
