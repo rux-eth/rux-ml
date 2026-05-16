@@ -169,7 +169,7 @@ Per D13, no Rust at v0. When the first crate lands:
 ## Code Style
 
 - `ruff` for linting + formatting (config in `pyproject.toml`)
-- `mypy --strict` (or `basedpyright`) for type checking
+- `basedpyright` (strict defaults) for type checking — replaces the original mypy choice per PR-001 Phase 1 amendment ([2026 type-checker comparison](https://www.danilchenko.dev/posts/ty-vs-mypy-vs-pyright/))
 - Line length: project default (88 / 100 — pick one in PR-001 and stay consistent)
 - Imports: external → internal → relative, ruff-sorted
 
