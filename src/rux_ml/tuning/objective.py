@@ -10,7 +10,7 @@ Two public functions:
   is **K-fold CV-mean** per the PR-007 Tier-2 research:
   1. ``walk_search_space`` for overrides -> deep-merged into ``base_cfg`` ->
      ``RuxMLConfig.model_validate`` -> fresh ``trial_cfg``.
-  2. Per-trial ``user_attrs`` recorded via ``runs.provenance.build_user_attrs``.
+  2. Per-trial ``user_attrs`` recorded via ``TrialAttrs.from_cfg(...).record(trial)``.
   3. Data loaded once; Splitter built via PR-015's ``make_splitter`` with
      ``seed=trial_cfg.tuning.entropy`` (PR-013 will spawn a proper ``cv_seed``).
   4. ExtMem x Splitter compat checked once at the top -- incompatible pairings
@@ -47,7 +47,7 @@ from rux_ml.data import (
     materialize,
 )
 from rux_ml.features import cardinalities_from, make_features
-from rux_ml.runs import build_user_attrs, data_hashes
+from rux_ml.runs import TrialAttrs, data_hashes
 from rux_ml.training import (
     compute_score,
     estimate_x_bytes,
@@ -236,10 +236,10 @@ def build_objective(base_cfg: RuxMLConfig) -> Callable[[optuna.Trial], float]:
         overrides = walk_search_space(base_cfg.search_space, trial)
         trial_cfg = _apply_overrides(base_cfg, overrides)
 
-        # Record the per-trial provenance triple (PR-006 + PR-015 subset).
-        for key, value in build_user_attrs(trial_cfg, hashes).items():
-            trial.set_user_attr(key, value)
-        trial.set_user_attr("metric", trial_cfg.training.metric)
+        # Record the per-trial provenance triple via the PR-009 schema.
+        TrialAttrs.from_cfg(
+            trial_cfg, hashes, metric=trial_cfg.training.metric
+        ).record(trial)
 
         # Build the Splitter per PR-015; resolve `groups` from the data layer if needed.
         splitter = make_splitter(trial_cfg.cv, seed=trial_cfg.tuning.entropy)

@@ -1,9 +1,17 @@
 """Per-trial provenance helpers shared by ``cli/train.py`` and ``cli/tune.py``.
 
-Extracted from PR-006's ``cli/train.py`` private helpers during PR-007 so both
-the 1-trial baseline path and the sweep loop record the same provenance triple
-in Optuna ``user_attrs``. PR-009 (run logging) will build query/compare helpers
-on top of this surface.
+PR-007 extracted these from ``cli/train.py``'s private helpers; PR-009 then
+formalized the recording surface as :class:`rux_ml.runs.attrs.TrialAttrs`
+(the canonical write path is now ``TrialAttrs.from_cfg(cfg, hashes).record(trial)``).
+
+This module retains the **shared utilities** that don't depend on the
+``TrialAttrs`` schema itself:
+
+- ``HASH_LAYERS`` — the ordered tuple of per-layer hash names recorded in
+  every trial's ``user_attrs`` (consumed by :class:`TrialAttrs.from_cfg`).
+- ``data_hashes(source_path)`` — composite + per-component dataset hashes.
+- ``ensure_storage_parent(url)`` — SQLite parent-dir bootstrap.
+- ``study_name(cfg, problem, study)`` — template substitution.
 
 Layered above ``data``, ``config``, and ``_internal``; consumed by ``cli/`` —
 no cli imports here, per ``docs/CONVENTIONS.md`` "Module Dependency Rules".
@@ -15,8 +23,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from rux_ml._internal.git import git_sha
-from rux_ml.config import cfg_hash, layer_cfg_hash
 from rux_ml.data import compute_data_hash
 
 if TYPE_CHECKING:
@@ -82,18 +88,3 @@ def data_hashes(source_path: Path) -> dict[str, str]:
     }
 
 
-def build_user_attrs(cfg: RuxMLConfig, data_hashes_: dict[str, str]) -> dict[str, str]:
-    """Assemble the per-trial ``user_attrs`` set (PR-006 + PR-015 subset).
-
-    Records the 8 per-layer ``*_cfg_hash`` fields, the root ``root_cfg_hash``,
-    the ``git_sha``, and the composite + per-component data hashes. The full
-    provenance triple (``entropy_hex``, ``image_digest``, library/CUDA
-    versions, ``peak_rss_mb``) lands in PR-011 + PR-013.
-    """
-    attrs: dict[str, str] = {
-        f"{layer}_cfg_hash": layer_cfg_hash(cfg, layer) for layer in HASH_LAYERS
-    }
-    attrs["root_cfg_hash"] = cfg_hash(cfg)
-    attrs["git_sha"] = git_sha()
-    attrs.update(data_hashes_)
-    return attrs

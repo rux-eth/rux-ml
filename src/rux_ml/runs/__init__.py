@@ -1,22 +1,32 @@
 """Runs layer — Optuna-as-experiment-log read API + provenance recording.
 
-Per D7 / PR-009 plan. PR-007 lands the provenance subset that both the 1-trial
-``rux-ml train`` CLI (PR-006) and the sweep ``rux-ml tune`` CLI (PR-007) share.
-PR-009 builds query/compare helpers on top.
+PR-007 landed the write-side scaffolding (``runs/provenance.py``) so both
+``cli/train.py`` (1-trial baseline) and ``cli/tune.py`` (sweep) record the
+same per-trial set. PR-009 formalizes the schema (``TrialAttrs`` Pydantic
+model), adds the ``one_off_run`` context manager, and lands the query API
+that the ``runs`` CLI verb group consumes.
 """
 
+from rux_ml.runs.ask_tell import OneOffRun, one_off_run
+from rux_ml.runs.attrs import TrialAttrs
 from rux_ml.runs.provenance import (
     HASH_LAYERS,
-    build_user_attrs,
     data_hashes,
     ensure_storage_parent,
     study_name,
 )
+from rux_ml.runs.query import Run, compare_runs, list_runs, load_run
 
 __all__ = [
     "HASH_LAYERS",
-    "build_user_attrs",
+    "OneOffRun",
+    "Run",
+    "TrialAttrs",
+    "compare_runs",
     "data_hashes",
     "ensure_storage_parent",
+    "list_runs",
+    "load_run",
+    "one_off_run",
     "study_name",
 ]

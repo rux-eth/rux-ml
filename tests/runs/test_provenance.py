@@ -1,4 +1,10 @@
-"""Tests for the provenance helpers extracted in PR-007 (sub-decision D1)."""
+"""Tests for the residual provenance helpers (PR-007 → PR-009 formalization).
+
+PR-009 absorbed ``build_user_attrs`` into :class:`rux_ml.runs.attrs.TrialAttrs`;
+those tests now live in ``tests/runs/test_attrs.py``. This module covers the
+remaining utility helpers (``HASH_LAYERS``, ``data_hashes``,
+``ensure_storage_parent``, ``study_name``).
+"""
 
 from __future__ import annotations
 
@@ -7,10 +13,9 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from rux_ml.config import KFoldCV, RuxMLConfig, StratifiedKFoldCV
+from rux_ml.config import RuxMLConfig
 from rux_ml.runs.provenance import (
     HASH_LAYERS,
-    build_user_attrs,
     data_hashes,
     ensure_storage_parent,
     study_name,
@@ -42,25 +47,6 @@ def test_data_hashes_returns_all_three_components(parquet_file: Path) -> None:
     hashes = data_hashes(parquet_file)
     assert set(hashes) == {"data_hash", "data_bytes_hash", "data_logical_hash"}
     assert hashes["data_hash"] == f"{hashes['data_bytes_hash']}|{hashes['data_logical_hash']}"
-
-
-def test_build_user_attrs_includes_full_8_layer_set(parquet_file: Path) -> None:
-    cfg = RuxMLConfig()
-    hashes = data_hashes(parquet_file)
-    attrs = build_user_attrs(cfg, hashes)
-    for layer in HASH_LAYERS:
-        assert f"{layer}_cfg_hash" in attrs
-    assert "root_cfg_hash" in attrs
-    assert "git_sha" in attrs
-    assert "data_hash" in attrs
-
-
-def test_build_user_attrs_changes_when_cv_strategy_changes(parquet_file: Path) -> None:
-    hashes = data_hashes(parquet_file)
-    a = build_user_attrs(RuxMLConfig(cv=KFoldCV(n_splits=5)), hashes)
-    b = build_user_attrs(RuxMLConfig(cv=StratifiedKFoldCV(n_splits=5)), hashes)
-    assert a["cv_cfg_hash"] != b["cv_cfg_hash"]
-    assert a["root_cfg_hash"] != b["root_cfg_hash"]
 
 
 def test_ensure_storage_parent_creates_dir_for_sqlite_url(tmp_path: Path) -> None:

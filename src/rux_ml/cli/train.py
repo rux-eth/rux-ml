@@ -5,10 +5,9 @@ holds both sweeps and baselines (per D7). The provenance triple subset
 recorded here is the PR-006 minimum (config hashes + ``data_hash`` +
 ``git_sha``); ``entropy_hex`` + the full environment block land in PR-013.
 
-PR-007 extracted the provenance helpers (``HASH_LAYERS`` / ``build_user_attrs``
-/ ``data_hashes`` / ``ensure_storage_parent`` / ``study_name``) into
-:mod:`rux_ml.runs.provenance` so the sweep CLI (``rux-ml tune``) records the
-same set.
+PR-009 refactored this to use the shared ``runs.ask_tell.one_off_run``
+context manager and ``runs.attrs.TrialAttrs.from_cfg(...).record(trial)`` so
+sweep and one-off paths funnel through the same provenance recorder.
 """
 
 from __future__ import annotations
@@ -16,7 +15,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
-import optuna
 import polars as pl
 import typer
 
@@ -25,10 +23,9 @@ from rux_ml.config import RuxMLConfig
 from rux_ml.data import load_parquet, materialize, train_val_test_split
 from rux_ml.features import cardinalities_from, make_features
 from rux_ml.runs import (
-    build_user_attrs,
+    TrialAttrs,
     data_hashes,
-    ensure_storage_parent,
-    study_name,
+    one_off_run,
 )
 from rux_ml.training import (
     compute_score,
@@ -109,25 +106,23 @@ def run_command(ctx: typer.Context) -> None:
     hashes = data_hashes(source_path)
     score, best_iter = _fit_and_score(cfg, source_path, target_col)
 
-    ensure_storage_parent(cfg.runs.storage_url)
-    name = study_name(cfg, problem=opts.problem, study=opts.study)
-    study = optuna.create_study(
-        study_name=name,
-        storage=cfg.runs.storage_url,
+    with one_off_run(
+        cfg,
+        problem=opts.problem,
+        study=opts.study,
         direction=optuna_direction(cfg.training.metric),
-        load_if_exists=True,
-    )
-    trial = study.ask()
-    for key, value in build_user_attrs(cfg, hashes).items():
-        trial.set_user_attr(key, value)
-    trial.set_user_attr("metric", cfg.training.metric)
-    if best_iter is not None:
-        trial.set_user_attr("best_iteration", best_iter)
-    study.tell(trial, score)
+    ) as run:
+        TrialAttrs.from_cfg(
+            cfg,
+            hashes,
+            metric=cfg.training.metric,
+            best_iteration=best_iter,
+        ).record(run.trial)
+        run.tell(score)
 
-    typer.echo(f"score ({cfg.training.metric}): {score:.6f}")
-    typer.echo(f"  study:    {name}")
-    typer.echo(f"  trial:    {trial.number}")
-    typer.echo(f"  storage:  {cfg.runs.storage_url}")
-    if best_iter is not None:
-        typer.echo(f"  best_iter: {best_iter}")
+        typer.echo(f"score ({cfg.training.metric}): {score:.6f}")
+        typer.echo(f"  study:    {run.study.study_name}")
+        typer.echo(f"  trial:    {run.trial.number}")
+        typer.echo(f"  storage:  {cfg.runs.storage_url}")
+        if best_iter is not None:
+            typer.echo(f"  best_iter: {best_iter}")

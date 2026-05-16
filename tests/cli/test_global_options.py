@@ -68,8 +68,8 @@ def test_parse_set_overrides_rejects_empty_key() -> None:
 def test_callback_populates_global_options(runner: CliRunner) -> None:
     """Invoke with global flags + a still-stub subcommand and verify args don't crash.
 
-    Uses `runs list` (a PR-009 stub) so the callback wiring is exercised without
-    needing the heavy subcommand bodies that PR-006/PR-007 made real.
+    Uses `registry list` (a PR-010 stub) so the callback wiring is exercised
+    without needing the heavy subcommand bodies that PR-006/PR-007/PR-009 made real.
     """
     result = runner.invoke(
         app,
@@ -82,18 +82,18 @@ def test_callback_populates_global_options(runner: CliRunner) -> None:
             "tuning.n_trials=100",
             "--verbose",
             "--dry-run",
-            "runs",
+            "registry",
             "list",
         ],
     )
     assert result.exit_code == 0
-    # The stub body acknowledges the wiring; once PR-009 implements it, switch to another stub.
+    # The stub body acknowledges the wiring; once PR-010 implements it, switch to another stub.
     combined = result.stdout + (result.stderr or "")
-    assert "PR-009" in combined
+    assert "PR-010" in combined
 
 
 def test_callback_rejects_malformed_set(runner: CliRunner) -> None:
-    result = runner.invoke(app, ["--set", "no_equals_sign", "runs", "list"])
+    result = runner.invoke(app, ["--set", "no_equals_sign", "registry", "list"])
     assert result.exit_code != 0
 
 

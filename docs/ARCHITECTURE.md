@@ -26,7 +26,7 @@ The Python package is organized into layered subpackages. Dependencies flow down
 | **Features** | `src/rux_ml/features/` | sklearn `Pipeline`+`ColumnTransformer` orchestrator; Polars-expression stateless transforms wrapped in `FunctionTransformer`; `category_encoders` `NestedCVWrapper` for high-card categoricals |
 | **Training** | `src/rux_ml/training/` | `Trainer` `typing.Protocol` (sklearn API: `fit`/`predict`/`predict_proba`/`best_iteration_`); model factory (`XGBClassifier`, etc.); metric registry |
 | **Tuning** | `src/rux_ml/tuning/` | Optuna study orchestration; `objective(trial, base_cfg)`; `SearchSpec`-walker; samplers (TPE default) and pruners (Hyperband default); subprocess-per-trial spawn |
-| **Runs** | `src/rux_ml/runs/` | Optuna-as-experiment-log read API; canonical `user_attrs` schema; `ask`/`tell` wrapper for one-off (non-sweep) runs; query helpers |
+| **Runs** | `src/rux_ml/runs/` | Optuna-as-experiment-log read API; canonical `user_attrs` schema (Pydantic-validated `TrialAttrs` per PR-009); `one_off_run` context manager wrapping `study.ask`/`study.tell`; query helpers (`list_runs`, `load_run`, `compare_runs` returning Polars / Pydantic objects) |
 | **Registry** | `src/rux_ml/registry/` | Model bundle write/read (`pipeline.skops` + `model.ubj` + `manifest.json`); promotion logic with atomic `champion.json` rewrite; thin `load_model(problem, version="champion")` API |
 | **Internal** | `src/rux_ml/_internal/` | Logging, hashing helpers (`xxhash`/`blake3`), env (OMP/BLAS pinning, `WORKBENCH_HOME` resolution), `SeedSequence` + `.spawn()`, `psutil` memory watchdog raising `MemoryPressureError` |
 
