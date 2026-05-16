@@ -33,6 +33,9 @@ test-gpu:
 test-golden:
 	uv run pytest -m golden
 
+regenerate-golden:
+	uv run pytest -m golden --regenerate-golden
+
 clean:
 	rm -rf .pytest_cache .ruff_cache .basedpyright_cache .mypy_cache
 	rm -rf build dist *.egg-info

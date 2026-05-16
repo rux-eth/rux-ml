@@ -273,6 +273,34 @@ Reproducibility-grade seed handling lives in `src/rux_ml/_internal/seeds.py`. Fu
 
 ---
 
+## Regenerating golden fixtures (per PR-014)
+
+The committed golden fixtures in `tests/golden/fixtures/golden_v1/` (`synthetic.parquet`, `preds.npy`, `metric.json`, `manifest.json`) are the workbench's full-stack regression gate. They MUST be treated as code, not as auto-refreshable artifacts.
+
+**When `tests/golden/test_xgb_baseline.py::test_golden_xgb_baseline_in_process` fails**, follow this investigation procedure before regenerating:
+
+1. **Diff `manifest.json` library versions** vs the current environment (`xgboost.__version__`, `cuda_runtime_version` from `xgboost.build_info()`, sklearn, numpy, polars, skops). If any version changed, that's the likely cause — check that library's release notes for prediction-affecting changes.
+2. **Run the PR-013 CPU bit-exact contract test**: `uv run pytest tests/integration/test_determinism_cpu.py`. If THAT fails, the determinism contract itself regressed — fixing that is the higher priority. Do not regenerate the golden until the determinism contract is back.
+3. **Only after both check out**, run `make regenerate-golden` and review the diff of `manifest.json` (especially `library_versions` and `entropy_hex`) before committing. The regen rewrites all four fixture files atomically.
+
+`make regenerate-golden` is **never** run in CI. The regen path is explicitly manual + reviewable; CI-driven auto-regen would silently mask real regressions.
+
+The `--regenerate-golden` pytest flag is wired via `tests/golden/conftest.py:pytest_addoption` per the [pytest docs](https://docs.pytest.org/en/stable/example/simple.html#pass-different-values-to-a-test-function-depending-on-command-line-options). The `golden` marker is already registered in `pyproject.toml`; default `pytest` excludes it via `addopts`.
+
+**Tolerances** (lockdown values for the v0 fixture; revisit only with documented justification):
+
+- Predictions: `np.testing.assert_allclose(actual, golden, atol=1e-5, rtol=1e-4)` per `docs/CONSTRAINTS.md` Tolerance-Based Golden Tests Only.
+- AUC band: `abs_tol=0.005` — wide enough to survive XGBoost minor releases, tight enough to catch real regressions.
+
+**Two surfaces are tested**:
+
+- `test_golden_xgb_baseline_in_process` — in-process pipeline determinism (training-stack regressions).
+- `test_golden_load_model_matches_in_process` — promote → `load_model` round-trip (PR-010 serialization regressions). Skipped under `--regenerate-golden` (it's a structural test, not a fixture comparison).
+
+**Adding a new golden surface is deliberate.** Each additional golden fit increases the cost of any CUDA / XGBoost upgrade because every golden must be regen'd + diffed. The v0 milestone ships exactly one golden train+predict per PR-014's scope.
+
+---
+
 ## Where new conventions go
 
 When a convention emerges that isn't documented here, add it during the same PR that establishes it. Conventions added retroactively go stale fast.
