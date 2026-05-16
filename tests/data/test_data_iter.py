@@ -46,9 +46,7 @@ def test_dataiter_yields_each_file_once(batch_files: list[Path], tmp_path: Path)
 
     captured: list[tuple[int, int]] = []
 
-    def capture(
-        *, data: NDArray[np.float64], label: NDArray[Any], **_kwargs: Any
-    ) -> None:
+    def capture(*, data: NDArray[np.float64], label: NDArray[Any], **_kwargs: Any) -> None:
         _ = label
         captured.append((int(data.shape[0]), int(data.shape[1])))
 
@@ -59,18 +57,14 @@ def test_dataiter_yields_each_file_once(batch_files: list[Path], tmp_path: Path)
     assert captured[1] == (50, 2)
 
 
-def test_dataiter_reset_restarts_iteration(
-    batch_files: list[Path], tmp_path: Path
-) -> None:
+def test_dataiter_reset_restarts_iteration(batch_files: list[Path], tmp_path: Path) -> None:
     cache = tmp_path / "cache"
     cache.mkdir()
     it = ParquetDataIter(batch_files, "y", cache_prefix=str(cache / "xgb"))
 
     captured: list[int] = []
 
-    def capture(
-        *, data: NDArray[np.float64], label: NDArray[Any], **_kwargs: Any
-    ) -> None:
+    def capture(*, data: NDArray[np.float64], label: NDArray[Any], **_kwargs: Any) -> None:
         _ = label
         captured.append(int(data.shape[0]))
 

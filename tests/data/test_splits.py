@@ -37,23 +37,17 @@ def test_split_rejects_bad_ratio_keys(tiny_df: pl.DataFrame) -> None:
 
 
 def test_split_rejects_ratios_not_summing_to_one(tiny_df: pl.DataFrame) -> None:
-    with pytest.raises(ValueError, match="sum to 1.0"):
-        train_val_test_split(
-            tiny_df, ratios={"train": 0.5, "val": 0.5, "test": 0.5}, seed=0
-        )
+    with pytest.raises(ValueError, match=r"sum to 1\.0"):
+        train_val_test_split(tiny_df, ratios={"train": 0.5, "val": 0.5, "test": 0.5}, seed=0)
 
 
 def test_split_rejects_negative_ratio(tiny_df: pl.DataFrame) -> None:
     with pytest.raises(ValueError, match="non-negative"):
-        train_val_test_split(
-            tiny_df, ratios={"train": 1.1, "val": 0.0, "test": -0.1}, seed=0
-        )
+        train_val_test_split(tiny_df, ratios={"train": 1.1, "val": 0.0, "test": -0.1}, seed=0)
 
 
 def test_split_handles_empty_frame() -> None:
     empty = pl.DataFrame({"x": [], "y": []})
-    parts = train_val_test_split(
-        empty, ratios={"train": 0.7, "val": 0.15, "test": 0.15}, seed=0
-    )
+    parts = train_val_test_split(empty, ratios={"train": 0.7, "val": 0.15, "test": 0.15}, seed=0)
     for key in ("train", "val", "test"):
         assert parts[key].height == 0

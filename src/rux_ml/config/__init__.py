@@ -4,7 +4,7 @@ See `docs/ARCHITECTURE.md` "Configuration Architecture" and D2 / D16 / D17.
 """
 
 from rux_ml.config.data import DataConfig
-from rux_ml.config.features import FeaturesConfig
+from rux_ml.config.features import FeaturesConfig, FeaturesSpec
 from rux_ml.config.memory import MemoryConfig
 from rux_ml.config.registry import RegistryConfig
 from rux_ml.config.root import RuxMLConfig, cfg_hash, layer_cfg_hash
@@ -16,6 +16,7 @@ __all__ = [
     "CatSpec",
     "DataConfig",
     "FeaturesConfig",
+    "FeaturesSpec",
     "FloatSpec",
     "IntSpec",
     "MemoryConfig",

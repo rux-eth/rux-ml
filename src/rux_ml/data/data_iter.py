@@ -7,11 +7,14 @@ partitioning the source data into appropriately-sized files (NVIDIA recommends
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import polars as pl
 import xgboost as xgb
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
 
 
 class ParquetDataIter(xgb.DataIter):
@@ -44,7 +47,7 @@ class ParquetDataIter(xgb.DataIter):
         """Rewind for a fresh pass."""
         self._idx = 0
 
-    def next(self, input_data: Callable[..., None]) -> bool:  # noqa: A003 — XGBoost API name
+    def next(self, input_data: Callable[..., None]) -> bool:
         """Yield the next batch via ``input_data(data=X, label=y)``.
 
         Returns ``True`` after yielding so XGBoost calls again; returns
