@@ -87,5 +87,6 @@ def test_default_config_is_constructable() -> None:
     assert cfg.training.kind == "xgboost"
     assert cfg.training.device == "cuda"
     assert cfg.tuning.sampler == "tpe"
-    assert cfg.tuning.pruner == "hyperband"
+    # PR-007 Tier-2 research: WilcoxonPruner is the new default for the K-fold CV-mean regime.
+    assert cfg.tuning.pruner == "wilcoxon"
     assert cfg.memory.watchdog_threshold_gb == 28.0

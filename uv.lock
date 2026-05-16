@@ -498,6 +498,23 @@ wheels = [
 ]
 
 [[package]]
+name = "optuna-integration"
+version = "4.8.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "optuna" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8f/d9/bdfd6ac94dd733a4df90e9e5b59273e18978132320949c0ca111a1d579db/optuna_integration-4.8.0.tar.gz", hash = "sha256:9f1e3053500a5a6a23f302cbd7ac371f6dd1010372b4b4374c538b8988bd0603", size = 89695, upload-time = "2026-03-16T04:48:05.535Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/57/cb/c209dbb41829dc856b2bdd5b58e877a6480752bd595d4b55f4a8c514efd5/optuna_integration-4.8.0-py3-none-any.whl", hash = "sha256:bb5c038702f744386b9032b12b993779b02e39e6893c324637178df68998f33d", size = 103151, upload-time = "2026-03-16T04:48:04.232Z" },
+]
+
+[package.optional-dependencies]
+xgboost = [
+    { name = "xgboost" },
+]
+
+[[package]]
 name = "packaging"
 version = "26.2"
 source = { registry = "https://pypi.org/simple" }
@@ -927,6 +944,7 @@ dependencies = [
     { name = "category-encoders" },
     { name = "numpy" },
     { name = "optuna" },
+    { name = "optuna-integration", extra = ["xgboost"] },
     { name = "polars" },
     { name = "pyarrow" },
     { name = "pydantic" },
@@ -952,6 +970,7 @@ requires-dist = [
     { name = "category-encoders", specifier = ">=2.6" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "optuna", specifier = ">=4.0" },
+    { name = "optuna-integration", extras = ["xgboost"], specifier = ">=4.8.0" },
     { name = "polars", specifier = ">=1.40" },
     { name = "pyarrow", specifier = ">=17" },
     { name = "pydantic", specifier = ">=2.6" },

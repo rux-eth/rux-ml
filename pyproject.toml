@@ -23,6 +23,7 @@ dependencies = [
     "pyarrow>=17",
     "optuna>=4.0",
     "skfolio>=0.20.1",
+    "optuna-integration[xgboost]>=4.8.0",
 ]
 
 [project.scripts]
