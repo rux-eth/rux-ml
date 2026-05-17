@@ -90,7 +90,7 @@ XGBoost GPU `hist` is near-deterministic but not bit-exact across hardware/CUDA 
 
 ### Zero Hardcoded Parameters (NON-NEGOTIABLE — reinforces structural rule)
 
-Every value that could vary between datasets, problems, environments, or experiments lives in TOML config. Per-layer Pydantic models in `src/rux_ml/config/` are the single source of truth. CLI dot-path overrides (`--training.learning_rate=0.05`) and env vars (`RUXML_TRAINING__LEARNING_RATE=0.05`) are the only acceptable runtime overrides.
+Every value that could vary between datasets, problems, environments, or experiments lives in TOML config. Per-layer Pydantic models in `src/rux_ml/config/` are the single source of truth. CLI dot-path overrides via repeatable `--set` (`--set training.learning_rate=0.05`) and env vars (`RUXML_TRAINING__LEARNING_RATE=0.05`) are the only acceptable runtime overrides.
 
 ### Per-Trial Provenance Triple (NON-NEGOTIABLE)
 

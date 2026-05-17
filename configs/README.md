@@ -22,7 +22,7 @@ configs/
 3. `studies/<name>.toml`
 4. `.env` (gitignored)
 5. Env vars (`RUXML_*` with `__` for nesting — e.g. `RUXML_TRAINING__LEARNING_RATE`)
-6. CLI dot-path overrides (`--training.learning_rate=0.05`)
+6. CLI dot-path overrides via repeatable `--set` (`--set training.learning_rate=0.05`; JSON-parsed values where possible)
 
 ## Override semantics
 

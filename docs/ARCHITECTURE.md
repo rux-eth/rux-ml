@@ -374,7 +374,7 @@ configs/
 
 Override precedence (highest → lowest):
 
-1. CLI dot-path overrides (`--training.learning_rate=0.01`)
+1. CLI dot-path overrides via repeatable `--set` (`--set training.learning_rate=0.01`)
 2. Env vars (`RUXML_TRAINING__LEARNING_RATE=0.01`)
 3. `.env` file (dev only; gitignored)
 4. Study TOML

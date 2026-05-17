@@ -45,7 +45,7 @@ Source data lives **outside** the repo by default; the workbench's `data/cas/` +
 
 - **Verb groups:** `data`, `train`, `tune`, `runs`, `registry` (singular nouns or imperative verbs; chosen per D11)
 - **Subcommands:** lowercase verb (`promote`, `rollback`, `list`, `show`, `compare`, `start`, `resume`, `status`, `retry-trial`)
-- **Override syntax:** dot-path with `=` (`--training.learning_rate=0.05`); env var equivalent uses `__` for nesting (`RUXML_TRAINING__LEARNING_RATE`)
+- **Override syntax:** repeatable `--set <dot-path>=<value>` (e.g. `--set training.learning_rate=0.05 --set tuning.n_trials=100`). Values are JSON-parsed when possible (numbers / bools / lists / objects) and fall back to raw strings otherwise. Typos in the dot-path surface as `ValidationError` because every Pydantic model has `extra="forbid"`. Env var equivalent uses `__` for nesting (`RUXML_TRAINING__LEARNING_RATE`).
 
 ### Registry version strings
 
