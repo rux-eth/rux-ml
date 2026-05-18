@@ -57,7 +57,7 @@ Rebuild the image when **any** of these changes:
 
 - The Dockerfile or `docker-compose.yml` (image-defining configuration).
 - `pyproject.toml` / `uv.lock` (Python dependency set).
-- The CUDA base-image digest (NVIDIA periodically deletes EoL tags; check the watch note in `docs/0.0/RESEARCH-BACKLOG.md` Drift Watch).
+- The CUDA base-image digest (NVIDIA periodically deletes EoL tags; check the watch note in `docs/0.1/RESEARCH-BACKLOG.md` Drift Watch).
 - Driver upgrade on the host (mismatched user-mode driver vs container CUDA runtime).
 
 After every rebuild, re-run the smoke test before resuming any tracked study.

@@ -1,6 +1,6 @@
 # PR-020: Solver Protocol + first Solver family
 
-**Landed-in:** v0.1.0 (pending v0.1.0 cut in PR-021)
+**Landed-in:** v0.1.0
 
 ## Before Implementation (NON-NEGOTIABLE)
 

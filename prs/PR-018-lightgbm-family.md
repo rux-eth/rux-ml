@@ -1,6 +1,6 @@
 # PR-018: LightGBM Trainer family
 
-**Landed-in:** v0.1.0 (pending v0.1.0 cut in PR-021)
+**Landed-in:** v0.1.0
 
 ## Before Implementation (NON-NEGOTIABLE)
 
