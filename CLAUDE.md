@@ -43,13 +43,13 @@ Configuration: three-tier layered TOML (`base.toml` → `problems/<n>.toml` → 
 
 ## Implementation Status
 
-See `docs/ROADMAP.md` for the ordered PR plan (PR-001 through PR-014, organized into Phases A–G). Full PR descriptions in `prs/`. Per-PR research status in `docs/RESEARCH-BACKLOG.md`.
+See `docs/0.0/ROADMAP.md` for the ordered PR plan (PR-001 through PR-014, organized into Phases A–G). Full PR descriptions in `prs/`. Per-PR research status in `docs/0.0/RESEARCH-BACKLOG.md`.
 
 No code yet. Phase 4 (this doc set) just landed; Phase 5 (implementation) begins with PR-001 once `PROCEDURE-pr-research.md` Phase 1 (State Assessment) completes.
 
 ## Ongoing Behavior (MANDATORY)
 
-- **Every PR runs `PROCEDURE-pr-research.md` before implementation.** No exceptions. All v0 PRs are Tier-1 (research-backed at design time) per `docs/RESEARCH-BACKLOG.md`; Phase 1 (State Assessment) is required to catch drift, Phases 2-4 may be light if no drift is found.
+- **Every PR runs `PROCEDURE-pr-research.md` before implementation.** No exceptions. All v0 PRs are Tier-1 (research-backed at design time) per `docs/0.0/RESEARCH-BACKLOG.md`; Phase 1 (State Assessment) is required to catch drift, Phases 2-4 may be light if no drift is found.
 - **Research findings travel with the PR** — appended to the PR file's `## Research findings` section. Do not discard.
 - **State drifts.** Even research-backed decisions need Phase 1 state assessment before implementation. Project staleness threshold is **60 days** (per `docs/CONSTRAINTS.md`).
 - **Doc updates ride with code.** When a PR changes architectural behavior, `docs/ARCHITECTURE.md` (and `docs/CONSTRAINTS.md` / `docs/CONVENTIONS.md` if relevant) update in the same commit.
@@ -61,10 +61,10 @@ No code yet. Phase 4 (this doc set) just landed; Phase 5 (implementation) begins
 - `docs/ARCHITECTURE.md` — canonical architecture reference (data flow, components, decision rules, key abstractions, storage)
 - `docs/CONSTRAINTS.md` — hard rules (no UI, single-GPU sequential, CUDA+fork forbidden, tolerance-not-hash for goldens, two-file model bundle, container digest pinning, per-trial provenance triple, reuse over reinvent)
 - `docs/CONVENTIONS.md` — soft patterns (directory naming, module dependency rules, public API discipline, version-string format, test markers, logging, configuration, Rust+PyO3 conventions)
-- `docs/ROADMAP.md` — PR index (PR-001 through PR-014) with phases and dependencies
-- `docs/RESEARCH-BACKLOG.md` — per-PR research status + drift watch
+- `docs/0.0/ROADMAP.md` — PR index (PR-001 through PR-014) with phases and dependencies
+- `docs/0.0/RESEARCH-BACKLOG.md` — per-PR research status + drift watch
 - `prs/` — full PR descriptions (start new PRs from `prs/PR-TEMPLATE.md`)
-- `docs/DESIGN-log.md` — full design conversation log (D1–D17 with research trail, BEST-GUESS items acknowledged, conflicts flagged)
+- `docs/0.0/DESIGN-log.md` — full design conversation log (D1–D17 with research trail, BEST-GUESS items acknowledged, conflicts flagged)
 - `PROCEDURE-design-planning.md` — how to run design sessions (with integrated research rounds)
 - `PROCEDURE-pr-research.md` — mandatory research procedure before every PR implementation
 - `PROCEDURE-code-audit.md` — post-design-session code audit

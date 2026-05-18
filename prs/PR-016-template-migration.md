@@ -24,7 +24,7 @@ This PR is **Tier-1** — the structural design is already locked in `vibe-rails
 - Project version: `0.0.1` (`pyproject.toml`). No git tags.
 - Branch `dev` clean at `31e2826`.
 - Stack: Python (uv-managed). No existing `scripts/` directory.
-- Temporal docs present at flat root: `docs/DESIGN-log.md`, `docs/RESEARCH-BACKLOG.md`, `docs/ROADMAP.md`.
+- Temporal docs present at flat root: `docs/0.0/DESIGN-log.md`, `docs/0.0/RESEARCH-BACKLOG.md`, `docs/0.0/ROADMAP.md`.
 - Flat SSOT docs present: `docs/ARCHITECTURE.md`, `docs/CONSTRAINTS.md`, `docs/CONVENTIONS.md`.
 - Missing: `docs/VERSIONING.md`, `docs/DEPLOYMENT.md`, `/CHANGELOG.md`.
 - 15 numbered PR files (PR-001 through PR-015), all merged on `dev`. None carry a `Landed-in:` header.
@@ -41,7 +41,7 @@ This PR is **Tier-1** — the structural design is already locked in `vibe-rails
 - None — vibe-rails `main` was inspected fresh today; the canonical script was fetched fresh via `gh api`. No drift.
 
 **New constraints** (learned from prior PRs or codebase evolution):
-- Two Python source files reference `docs/ROADMAP.md` / `docs/DESIGN-log.md` in module docstrings. The canonical TS walker only scans `*.md`; the Python port must extend the walker to also include `*.py` so those references migrate cleanly. The walker filter is widened in the port; the rewrite logic itself stays identical.
+- Two Python source files reference `docs/0.0/ROADMAP.md` / `docs/0.0/DESIGN-log.md` in module docstrings. The canonical TS walker only scans `*.md`; the Python port must extend the walker to also include `*.py` so those references migrate cleanly. The walker filter is widened in the port; the rewrite logic itself stays identical.
 - The project has no `node_modules` or JS build dirs but does have `.venv`, `.pytest_cache`, `.ruff_cache`, `.hypothesis`, `.basedpyright_cache`, `.mypy_cache`, `__pycache__`. IGNORE_DIRS expanded accordingly.
 
 ### Sub-decisions (locked 2026-05-18, user-approved)

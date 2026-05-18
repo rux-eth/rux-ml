@@ -1,6 +1,6 @@
 """``Trainer`` ``typing.Protocol`` — the universal-subset of the sklearn estimator API.
 
-Per D5 (``docs/DESIGN-log.md``): every concrete model family in this workbench
+Per D5 (``docs/0.0/DESIGN-log.md``): every concrete model family in this workbench
 exposes the sklearn estimator API, and the workbench treats that surface as the
 unifying contract. The Protocol intentionally covers only the **universal
 subset** (``fit`` + ``predict``) — fields that differ between classifiers and

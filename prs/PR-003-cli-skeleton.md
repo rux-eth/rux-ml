@@ -112,7 +112,7 @@ PR-002.
 
 ## Architecture section implemented
 
-`docs/ARCHITECTURE.md` → "CLI" component row, "Data Flow" (the CLI is the entry point), and `docs/DESIGN-log.md` D11.
+`docs/ARCHITECTURE.md` → "CLI" component row, "Data Flow" (the CLI is the entry point), and `docs/0.0/DESIGN-log.md` D11.
 
 ## Verification criteria
 

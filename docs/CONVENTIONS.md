@@ -8,7 +8,7 @@ Conventions emerge during design sessions and implementation. Add them here as t
 
 ## Directory Conventions
 
-The repo skeleton was research-validated against `lightning-hydra-template`, the closest known precedent (see D14 in `docs/DESIGN-log.md`). Most top-level directories follow established conventions; a few are inventions. The mapping below pre-empts confusion for future readers.
+The repo skeleton was research-validated against `lightning-hydra-template`, the closest known precedent (see D14 in `docs/0.0/DESIGN-log.md`). Most top-level directories follow established conventions; a few are inventions. The mapping below pre-empts confusion for future readers.
 
 | Directory | Status | Closest analog in established templates |
 |---|---|---|

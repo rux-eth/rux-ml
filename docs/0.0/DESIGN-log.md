@@ -208,8 +208,8 @@ These remain logged for future researchers running `PROCEDURE-pr-research.md`:
 - **`docs/ARCHITECTURE.md`** — fully populated with the 17-decision architecture.
 - **`docs/CONSTRAINTS.md`** — domain constraints added; 60-day staleness threshold recorded.
 - **`docs/CONVENTIONS.md`** — populated with directory, naming, dependency, public API, test, logging, config, and Rust+PyO3 conventions.
-- **`docs/ROADMAP.md`** — populated with the phased PR plan (PR-001 through PR-014).
-- **`docs/RESEARCH-BACKLOG.md`** — every PR indexed with Tier-1 design-research status and staleness threshold.
+- **`docs/0.0/ROADMAP.md`** — populated with the phased PR plan (PR-001 through PR-014).
+- **`docs/0.0/RESEARCH-BACKLOG.md`** — every PR indexed with Tier-1 design-research status and staleness threshold.
 - **`prs/PR-001-*.md` through `prs/PR-014-*.md`** — one file per PR copied from `prs/PR-TEMPLATE.md`.
 
 ### Procedure compliance notes

@@ -12,7 +12,7 @@ Leaf verb:   ``train`` (single baseline run).
 The root ``@app.callback()`` parses global flags into a :class:`GlobalOptions`
 payload stashed on ``typer.Context.obj``. Subcommands retrieve it via
 ``rux_ml.cli._shared.get_options(ctx)``. Real bodies for each subcommand land
-in their respective PRs (see ``docs/ROADMAP.md``).
+in their respective PRs (see ``docs/0.0/ROADMAP.md``).
 """
 
 from __future__ import annotations

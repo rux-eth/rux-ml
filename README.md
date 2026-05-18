@@ -645,7 +645,7 @@ __all__ = ["RuxMLConfig", "Trainer", "load_run", "load_model", "list_runs", "lis
 
 Everything else requires qualified imports (`from rux_ml.tuning import ...`).
 
-**Per-PR procedure** — see `PROCEDURE-pr-research.md`. Every PR runs a state assessment before implementation; non-trivial decisions cite reputable sources. `docs/ROADMAP.md` is the PR index; `docs/RESEARCH-BACKLOG.md` tracks per-PR research status.
+**Per-PR procedure** — see `PROCEDURE-pr-research.md`. Every PR runs a state assessment before implementation; non-trivial decisions cite reputable sources. `docs/0.0/ROADMAP.md` is the PR index; `docs/0.0/RESEARCH-BACKLOG.md` tracks per-PR research status.
 
 ---
 
@@ -685,9 +685,9 @@ rux-ml registry rollback --problem <p> --to <v>   Atomic champion.json rewrite t
 | What the architecture is + how data flows | `docs/ARCHITECTURE.md` |
 | Hard rules — what's non-negotiable | `docs/CONSTRAINTS.md` |
 | Soft patterns — directory conventions, naming, CV defaults | `docs/CONVENTIONS.md` |
-| Design rationale (D1–D17) with research trail | `docs/DESIGN-log.md` |
-| PR index with phases + dependencies | `docs/ROADMAP.md` |
-| Per-PR research status + drift watch | `docs/RESEARCH-BACKLOG.md` |
+| Design rationale (D1–D17) with research trail | `docs/0.0/DESIGN-log.md` |
+| PR index with phases + dependencies | `docs/0.0/ROADMAP.md` |
+| Per-PR research status + drift watch | `docs/0.0/RESEARCH-BACKLOG.md` |
 | How to run a design session | `PROCEDURE-design-planning.md` |
 | Mandatory pre-PR research procedure | `PROCEDURE-pr-research.md` |
 | Post-design alignment checks | `PROCEDURE-code-audit.md` |

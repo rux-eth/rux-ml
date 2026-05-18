@@ -48,7 +48,7 @@ Every architectural and significant design decision must be backed by research f
 - Personal blog posts without engineering weight
 - StackOverflow answers without corroborating evidence
 
-**Process:** decisions without research backing must be explicitly flagged as unresearched in the relevant PR or design doc, and researched before implementation begins. `docs/DESIGN-log.md` tracks which decisions have research and which don't. `PROCEDURE-design-planning.md` integrates research rounds into Phase 2 (Decisions).
+**Process:** decisions without research backing must be explicitly flagged as unresearched in the relevant PR or design doc, and researched before implementation begins. `docs/0.0/DESIGN-log.md` tracks which decisions have research and which don't. `PROCEDURE-design-planning.md` integrates research rounds into Phase 2 (Decisions).
 
 ### PR Research Procedure Required (NON-NEGOTIABLE)
 
@@ -68,7 +68,7 @@ State drifts. Research must be validated before code.
 
 ## Domain Constraints
 
-These are the project-specific non-negotiables established during the design session (2026-05-14 → 2026-05-15). See `docs/DESIGN-log.md` for the research trail behind each.
+These are the project-specific non-negotiables established during the design session (2026-05-14 → 2026-05-15). See `docs/0.0/DESIGN-log.md` for the research trail behind each.
 
 ### No Web UI / No Server (NON-NEGOTIABLE)
 
