@@ -1,5 +1,7 @@
 # PR-003: CLI skeleton
 
+**Landed-in:** v0.0.1
+
 ## Before Implementation (NON-NEGOTIABLE)
 
 This PR MUST NOT be implemented until `PROCEDURE-pr-research.md` has been completed in full and its output appended to the `## Research findings` section below.
@@ -112,7 +114,7 @@ PR-002.
 
 ## Architecture section implemented
 
-`docs/ARCHITECTURE.md` → "CLI" component row, "Data Flow" (the CLI is the entry point), and `docs/DESIGN-log.md` D11.
+`docs/ARCHITECTURE.md` → "CLI" component row, "Data Flow" (the CLI is the entry point), and `docs/0.0/DESIGN-log.md` D11.
 
 ## Verification criteria
 

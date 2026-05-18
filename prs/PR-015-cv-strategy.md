@@ -1,5 +1,7 @@
 # PR-015: CV strategy — Splitter Protocol + library research + splits.py rewrite
 
+**Landed-in:** v0.0.1
+
 ## Before Implementation (NON-NEGOTIABLE)
 
 This PR MUST NOT be implemented until `PROCEDURE-pr-research.md` has been completed in full and its output appended to the `## Research findings` section below.
@@ -146,7 +148,7 @@ Three parallel web-research agents ran on 2026-05-16 against the question scope 
 | Code (touched) | `src/rux_ml/config/root.py`, `src/rux_ml/config/__init__.py`, `src/rux_ml/data/__init__.py`, `src/rux_ml/cli/train.py`, `configs/base.toml`, `pyproject.toml`, `uv.lock` |
 | Tests (new) | `tests/data/test_cv.py` (Protocol conformance, per-strategy, determinism), `tests/data/test_cv_leakage.py` (group + time + embargo), `tests/config/test_cv_config.py` |
 | Tests (touched) | `tests/cli/test_train_subcommand.py` (assert `cv_cfg_hash` in `user_attrs`) |
-| Docs (touched) | `docs/ARCHITECTURE.md`, `docs/CONSTRAINTS.md`, `docs/CONVENTIONS.md`, `docs/RESEARCH-BACKLOG.md` |
+| Docs (touched) | `docs/ARCHITECTURE.md`, `docs/CONSTRAINTS.md`, `docs/CONVENTIONS.md`, `docs/0.0/RESEARCH-BACKLOG.md` |
 
 ### Gate Check (Phase 5, 2026-05-16)
 
@@ -209,8 +211,8 @@ PR-005's use of `category_encoders.NestedCVWrapper(StratifiedKFold(n_splits=5))`
 - `docs/ARCHITECTURE.md` — new "CV Strategy" section under "Key Abstractions" (Splitter Protocol snippet; per-strategy leakage guarantee table; column-to-array groups pattern); Storage section gets an 8th `*_cfg_hash` row.
 - `docs/CONSTRAINTS.md` — "Per-Trial Provenance Triple" gets `cv_cfg_hash` added.
 - `docs/CONVENTIONS.md` — "Per-trial user_attr keys" adds `cv_cfg_hash`; new subsection on CV conventions (one-shot vs repeated; column-to-array groups; per-strategy default selection by data shape).
-- `docs/RESEARCH-BACKLOG.md` — PR-015 row gets `fully-researched 2026-05-16` + `implementation-cleared 2026-05-16`.
-- `docs/DESIGN-log.md` — defer; the PR file's own Research findings section is the durable record per `PROCEDURE-pr-research.md`.
+- `docs/0.0/RESEARCH-BACKLOG.md` — PR-015 row gets `fully-researched 2026-05-16` + `implementation-cleared 2026-05-16`.
+- `docs/0.0/DESIGN-log.md` — defer; the PR file's own Research findings section is the durable record per `PROCEDURE-pr-research.md`.
 
 **NOT in scope:**
 - Replacing PR-005's `NestedCVWrapper(StratifiedKFold)` for target-encoder leakage prevention (Phase 3 surfaced no project-wide conflict).
@@ -247,7 +249,7 @@ PR-004 (data layer — provides Polars/Parquet ingest and the existing `splits.p
 - [ ] `docs/ARCHITECTURE.md` — new "CV Strategy" subsection (Splitter Protocol snippet + per-strategy leakage table + groups column-to-array pattern); Storage / Configuration table mentions the 8th `cv_cfg_hash`
 - [ ] `docs/CONSTRAINTS.md` — `cv_cfg_hash` added to "Per-Trial Provenance Triple"
 - [ ] `docs/CONVENTIONS.md` — `cv_cfg_hash` added to "Per-trial user_attr keys"; new "CV strategy conventions" subsection (one-shot vs repeated; column-to-array groups; per-strategy default selection)
-- [ ] `docs/RESEARCH-BACKLOG.md` — PR-015 row gets `fully-researched 2026-05-16` + `implementation-cleared 2026-05-16`
+- [ ] `docs/0.0/RESEARCH-BACKLOG.md` — PR-015 row gets `fully-researched 2026-05-16` + `implementation-cleared 2026-05-16`
 - [ ] `uv run pytest`, `uv run ruff check .`, `uv run basedpyright src/ tests/` all green
 
 ## Research backing (Tier 2 — required research topics)

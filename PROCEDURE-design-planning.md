@@ -4,6 +4,8 @@
 
 Before starting any non-trivial feature, component, or architectural change. The user may say "let's design X", "let's discuss X", or "let's plan X".
 
+Also at every minor/major version cut — see [`docs/VERSIONING.md`](docs/VERSIONING.md). Each `x.y` bump is treated as a fresh project start and runs this procedure from Phase 1 before any implementation PR for the new version lands. Patch bumps do not require a design session.
+
 ## Phases
 
 ### Phase 1: Idea
@@ -36,7 +38,7 @@ Structure per decision:
 5. **Iterate** — research may surface new questions. Spin up additional rounds until every MUST-ANSWER question has a cited answer.
 6. **Present findings to the user** — options + tradeoffs, now research-backed
 7. **User decides** — may override your recommendation, but overrides without research backing must be explicitly flagged
-8. **Record the decision + research trail** — both go into `docs/DESIGN-log.md`
+8. **Record the decision + research trail** — both go into `docs/0.0/DESIGN-log.md`
 
 **Rules**:
 - One decision at a time — do not rush through
@@ -69,9 +71,9 @@ Convergence cannot happen until Phase 2 is complete — every decision research-
 1. Update `docs/ARCHITECTURE.md` with architectural decisions
 2. Update `docs/CONSTRAINTS.md` if new non-negotiables were established
 3. Create/update PR files in `prs/` for any new work items (start from `prs/PR-TEMPLATE.md`)
-4. Update `docs/ROADMAP.md` to reflect new/changed PRs
-5. Update `docs/RESEARCH-BACKLOG.md` to index each new PR's research status
-6. Append design conversation summary + research log to `docs/DESIGN-log.md`
+4. Update `docs/0.0/ROADMAP.md` to reflect new/changed PRs
+5. Update `docs/0.0/RESEARCH-BACKLOG.md` to index each new PR's research status
+6. Append design conversation summary + research log to `docs/0.0/DESIGN-log.md`
 
 **Rules**:
 - Docs describe what IS decided, not the exploration process

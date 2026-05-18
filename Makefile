@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install lint format type test test-golden test-gpu regenerate-golden clean docker-build docker-run docker-shell
+.PHONY: help install lint format type test test-golden test-gpu regenerate-golden clean docker-build docker-run docker-shell rewrite-doc-refs rewrite-doc-refs-dry
 
 help:
 	@echo "rux-ml — make targets"
@@ -14,6 +14,8 @@ help:
 	@echo "  docker-build         build rux-ml:local image and capture digest to .docker-image-digest"
 	@echo "  docker-run           run rux-ml in container (ARGS=\"<cli args>\")"
 	@echo "  docker-shell         open a bash shell in the container"
+	@echo "  rewrite-doc-refs     migrate cross-references at a version cut (per docs/VERSIONING.md §5)"
+	@echo "  rewrite-doc-refs-dry preview rewrite-doc-refs output without writing"
 	@echo "  clean                remove caches and build artifacts"
 
 install:
@@ -51,6 +53,12 @@ docker-run:
 
 docker-shell:
 	docker compose run --rm --entrypoint /bin/bash rux-ml
+
+rewrite-doc-refs:
+	uv run python scripts/rewrite_doc_refs.py
+
+rewrite-doc-refs-dry:
+	uv run python scripts/rewrite_doc_refs.py --dry-run
 
 clean:
 	rm -rf .pytest_cache .ruff_cache .basedpyright_cache .mypy_cache

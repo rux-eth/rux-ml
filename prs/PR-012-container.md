@@ -1,5 +1,7 @@
 # PR-012: Container
 
+**Landed-in:** v0.0.1
+
 ## Before Implementation (NON-NEGOTIABLE)
 
 This PR MUST NOT be implemented until `PROCEDURE-pr-research.md` has been completed in full and its output appended to the `## Research findings` section below.
@@ -112,7 +114,7 @@ This PR MUST NOT be implemented until `PROCEDURE-pr-research.md` has been comple
 
 - *Recommendation:* Option A (stay on 12.4.1).
   - **Status**: PROVEN (XGBoost CI workflows visible at `dmlc/xgboost@master`)
-  - **Watch note** (added to `docs/RESEARCH-BACKLOG.md` Drift Watch): "XGBoost CI added CUDA 13 variant 2026-05; revisit at PR-012 + 6 months."
+  - **Watch note** (added to `docs/0.0/RESEARCH-BACKLOG.md` Drift Watch): "XGBoost CI added CUDA 13 variant 2026-05; revisit at PR-012 + 6 months."
 
 **Q4: NVIDIA Container Toolkit / Compose syntax**  ⚠ AMEND
 

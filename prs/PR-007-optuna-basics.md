@@ -1,5 +1,7 @@
 # PR-007: Optuna basics
 
+**Landed-in:** v0.0.1
+
 ## Before Implementation (NON-NEGOTIABLE)
 
 This PR MUST NOT be implemented until `PROCEDURE-pr-research.md` has been completed in full and its output appended to the `## Research findings` section below.
@@ -210,8 +212,8 @@ Wire up Optuna 4.x for HPO per D6 + D16 + the research-locked direction: **seque
 **Docs riding with this PR:**
 - `docs/ARCHITECTURE.md` "Decision Rules: Optuna sampler / pruner" — rewrite to reflect the CV-mean default + WilcoxonPruner + skip-BoTorch + HEBO-opt-in research findings.
 - `docs/CONVENTIONS.md` — new "HPO objective shape" subsection: K-fold CV-mean + per-fold reporting + "do not use `XGBoostPruningCallback` inside CV" note.
-- `docs/RESEARCH-BACKLOG.md` — PR-007 row: `fully-researched 2026-05-16` + `implementation-cleared 2026-05-16`.
-- `docs/ROADMAP.md` — flip PR-007 row `[ ]` → `[x]` **in this PR's commit** (per `feedback-roadmap-flip-in-pr` memory — don't miss this time).
+- `docs/0.0/RESEARCH-BACKLOG.md` — PR-007 row: `fully-researched 2026-05-16` + `implementation-cleared 2026-05-16`.
+- `docs/0.0/ROADMAP.md` — flip PR-007 row `[ ]` → `[x]` **in this PR's commit** (per `feedback-roadmap-flip-in-pr` memory — don't miss this time).
 
 **NOT in scope:**
 - Subprocess-per-trial isolation (PR-008).
@@ -255,8 +257,8 @@ PR-006.
 - [ ] GPU-gated integration test (`@pytest.mark.gpu`) passes with `--set training.device=cuda`
 - [ ] `docs/ARCHITECTURE.md` "Decision Rules: Optuna sampler / pruner" rewritten with the research-locked direction
 - [ ] `docs/CONVENTIONS.md` gets the "HPO objective shape" subsection
-- [ ] `docs/RESEARCH-BACKLOG.md` PR-007 row marked `fully-researched 2026-05-16` + `implementation-cleared 2026-05-16`
-- [ ] `docs/ROADMAP.md` PR-007 row flipped `[ ]` → `[x]` **in this PR's commit**
+- [ ] `docs/0.0/RESEARCH-BACKLOG.md` PR-007 row marked `fully-researched 2026-05-16` + `implementation-cleared 2026-05-16`
+- [ ] `docs/0.0/ROADMAP.md` PR-007 row flipped `[ ]` → `[x]` **in this PR's commit**
 - [ ] `uv run pytest`, `uv run ruff check .`, `uv run basedpyright src/ tests/` all green
 
 ## Research backing
