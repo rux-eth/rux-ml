@@ -90,6 +90,17 @@ class TrialAttrs(BaseModel):
     gpu_model: str | None = None
     driver_version: str | None = None
 
+    # PR-020: Solver-trial provenance. All Optional — Trainer trials leave
+    # these None. ``solving_cfg_hash`` is populated by ``from_cfg`` when
+    # ``cfg.solving is not None``; the solver-runtime fields are
+    # populated post-solve by the CLI ``rux-ml solve`` (or any caller
+    # that constructs ``TrialAttrs`` directly).
+    solving_cfg_hash: str | None = None
+    solver_status: str | None = None
+    objective_value: float | None = None
+    solver_iter_count: int | None = None
+    solve_time_s: float | None = None
+
     @classmethod
     def from_cfg(
         cls,
@@ -120,6 +131,11 @@ class TrialAttrs(BaseModel):
             registry_cfg_hash=layer_cfg_hash(cfg, "registry"),
             memory_cfg_hash=layer_cfg_hash(cfg, "memory"),
             cv_cfg_hash=layer_cfg_hash(cfg, "cv"),
+            # PR-020: solving_cfg_hash populated only when cfg.solving is set
+            # (Trainer trials leave it None; solver trials get the hash).
+            solving_cfg_hash=(
+                layer_cfg_hash(cfg, "solving") if cfg.solving is not None else None
+            ),
             root_cfg_hash=cfg_hash(cfg),
             git_sha=git_sha(),
             data_hash=data_hashes["data_hash"],

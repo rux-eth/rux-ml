@@ -230,6 +230,35 @@ All choices are TOML knobs in `[tuning]`.
 
 ## Key Abstractions
 
+### `Solver` Protocol + solving layer (per PR-020 / docs/0.1/DESIGN-log.md Q1)
+
+The Solver layer is the parallel-Protocol surface to the Trainer layer. Per `docs/0.1/DESIGN-log.md` Q1: two parallel `typing.Protocol`s with no shared parent — `Trainer.fit(X, y) → predict(X)` and `Solver.solve(problem) → SolverResult` have fundamentally different data flow; the workbench unifies the **factory/registry** (string-name dispatch via `make_trainer` / `make_solver`) but NOT the runtime contract.
+
+**Per PR-020 Q-Shape research: B-partial-mirror.** The solving layer reuses cross-cutting infrastructure (config-layer discriminated union, registry dict, factory dispatcher, Optuna study substrate, per-trial provenance triple, conformance test pattern) but BYPASSES semantics-mismatched layers — solver runs have no `cfg.data` (problems are matrices, not Parquet), no `cfg.cv` (single solves have no folds), no fittable-model bundle (solver output is `x_star`, not a reusable estimator).
+
+```python
+# src/rux_ml/solving/protocol.py
+class Solver(Protocol):
+    def solve(self, problem: Any) -> SolverResult: ...
+```
+
+`problem` is `Any` because future Solver families take different types — cvxpy uses `cvxpy.Problem`; OSQP-direct uses raw matrix tuples; pyomo-direct uses `ConcreteModel`.
+
+**Per PR-020 Q-First-Solver: CVXPY ships as the first family.** Zero dep addition (cvxpy + clarabel were already transitive via skfolio; promoted to direct deps in PR-020). One `cfg.solving.solver=` switch unlocks Clarabel / OSQP / SCS / ECOS / HiGHS through cvxpy's DCP modeling layer. Default `solver="CLARABEL"` for per-trial provenance stability (Clarabel ranks #3 in `qpsolvers/free_for_all_qpbenchmark`; modern Rust solver). Backend-specific tolerance/iter knobs flow through `cfg.solving.solver_opts: dict[str, Any]` (escape hatch mirroring `XGBoostTraining.model_kwargs`).
+
+```python
+# src/rux_ml/solving/__init__.py
+SOLVER_FAMILIES: dict[str, Callable[..., Solver]] = {
+    "cvxpy": make_cvxpy_solver,
+}
+```
+
+**`RuxMLConfig.solving: SolvingConfig | None = None`** — Optional field. Trainer-shaped studies leave it None; solver-shaped studies set it. Per-trial provenance: `TrialAttrs.solving_cfg_hash` is populated only when `cfg.solving is not None`. Solver-runtime fields (`solver_status`, `objective_value`, `solver_iter_count`, `solve_time_s`) are populated post-solve by `rux-ml solve`.
+
+**CLI verb**: `rux-ml solve` is a single command (analog of `rux-ml train`) — not a typer-group. Solver-internal HPO (tuning Clarabel's `max_iter`, OSQP's `rho`/`alpha`, etc) is deferred to a follow-up Tier-2 PR; v0.1's solve is one-shot only. The user defines `build_problem() -> cvxpy.Problem` in a Python module pointed at by `cfg.solving.problem_module: str`; the CLI imports + calls + records.
+
+**Hashing limitation** (documented in `docs/CONVENTIONS.md`): `solving_cfg_hash` covers the `problem_module` *path* but NOT the module's source content. Users either keep problem modules inside the workbench's git (`git_sha` captures edits) or accept the gap.
+
 ### `Trainer` Protocol + family registry (per D5; refactored in PR-017)
 
 The unifying contract across model families is the sklearn estimator API expressed as a `typing.Protocol`. Zero runtime cost; full compile-time substitutability across `XGBClassifier`, `XGBRegressor`, `LGBMClassifier`, `CatBoostClassifier`, sklearn estimators, and any future custom model.

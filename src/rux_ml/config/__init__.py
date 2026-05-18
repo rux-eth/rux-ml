@@ -17,6 +17,7 @@ from rux_ml.config.memory import MemoryConfig
 from rux_ml.config.registry import RegistryConfig
 from rux_ml.config.root import RuxMLConfig, cfg_hash, layer_cfg_hash
 from rux_ml.config.runs import RunsConfig
+from rux_ml.config.solving import CVXPYSolving, SolvingBase, SolvingConfig
 from rux_ml.config.training import (
     CatBoostTraining,
     LightGBMTraining,
@@ -28,6 +29,7 @@ from rux_ml.config.tuning import CatSpec, FloatSpec, IntSpec, SearchSpec, Tuning
 
 __all__ = [
     "CVConfig",
+    "CVXPYSolving",
     "CatBoostTraining",
     "CatSpec",
     "CombinatorialPurgedCV",
@@ -44,6 +46,8 @@ __all__ = [
     "RunsConfig",
     "RuxMLConfig",
     "SearchSpec",
+    "SolvingBase",
+    "SolvingConfig",
     "StratifiedKFoldCV",
     "TimeSeriesSplitCV",
     "TrainingBase",
