@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from rux_ml.training.catboost.config import CatBoostTraining
 from rux_ml.training.lightgbm.config import LightGBMTraining
 from rux_ml.training.xgboost.config import XGBoostTraining
 
@@ -81,6 +82,12 @@ def _narrow_for_family(cfg: TrainingConfig, family: str) -> TrainingConfig:
     if family == "lightgbm" and not isinstance(cfg, LightGBMTraining):
         msg = (
             f"cfg.kind=='lightgbm' but cfg is not a LightGBMTraining instance "
+            f"({type(cfg).__name__}); did a caller bypass Pydantic validation?"
+        )
+        raise TypeError(msg)
+    if family == "catboost" and not isinstance(cfg, CatBoostTraining):
+        msg = (
+            f"cfg.kind=='catboost' but cfg is not a CatBoostTraining instance "
             f"({type(cfg).__name__}); did a caller bypass Pydantic validation?"
         )
         raise TypeError(msg)

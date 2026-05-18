@@ -114,6 +114,18 @@ For a one-off (non-sweep) baseline training, `cli.train.run()` follows the same 
 
 These are runtime branches the workbench must auto-select, based on configuration and observed inputs.
 
+### CatBoost ingest + categorical handling (per PR-019)
+
+CatBoost's ``fit(DataFrame, y)`` accepts pandas/polars DataFrames directly; no ``Pool`` construction is required (Q-Wrap §9 PROVEN at v1.2.10). ``Pool`` is the optional ``DMatrix``/``Dataset`` analog and is exposed by ``src/rux_ml/training/catboost/ingest.py::build_pool`` as a utility for advanced users (e.g., explicit ``baseline=``, ``weights=``, ``timestamp=`` knobs), but the factory does not call it.
+
+**Categorical handling (Q-Cat)**: CatBoost does NOT auto-detect pandas Categorical dtype — opposite of LightGBM. It actively errors on category-dtype columns not listed in ``cat_features=``. The ``_CatBoostTrainerShim`` extracts categorical column names from the input DataFrame at fit time via ``select_dtypes(include="category")`` and threads them through to the underlying estimator. The workbench's ``_ColumnRouter`` (PR-005) is unchanged — its low-card-passthrough output (pandas Categorical) is exactly what the shim looks for; high-card target-encoded floats pass through as numeric.
+
+CatBoost's native categorical algorithm is **Ordered Target Statistics** with smoothing (Prokhorenkova et al. 2018) — different from LightGBM's Fisher partitioning and XGBoost's partition-based split. For the workbench's existing high-card target-encoding path (NestedCVWrapper), Pargent et al. 2022 groups CatBoost ordered TS and K-fold target encoding both under "regularized target encoding" and finds them comparable; whether CatBoost ordered TS strictly beats NestedCV target encoding for catboost-only studies is an open empirical question (deferred to post-v0 benchmark).
+
+**Threading (Q-Parallel)**: CatBoost uses Intel TBB, NOT OpenMP — the workbench's ``OMP_NUM_THREADS`` env-var pinning (from PR-011) is **invisible to CatBoost**. The factory reads ``OMP_NUM_THREADS`` from the trial subprocess's environment and passes it explicitly as ``thread_count=`` to the CatBoost estimator. Same intent, different transport. CONVENTIONS.md documents this.
+
+**GPU (Q-GPU)**: CatBoost ships prebuilt CUDA-enabled PyPI wheels via ``uv add catboost`` (no extras, no source build, no container delta). RTX 4090 (CC 8.9) is field-confirmed. ``cfg.device == "cuda"`` activates ``task_type="GPU"`` + ``devices="0"`` (single-GPU pin). CatBoost-GPU is ~2.6–4.6× slower than XGBoost-GPU but materially faster than CatBoost-CPU at workbench scale. GPU bit-exact determinism is NOT achievable (CatBoost issue #546); CPU bit-exact requires the recipe documented in CONVENTIONS.md.
+
 ### LightGBM ingest path (per PR-018 Q-Ingest)
 
 LightGBM's ``Dataset`` always quantizes input features to uint8 histograms at construction (`max_bin=255` default), giving ~8x memory compression vs raw float arrays. **No tier-switch decision rule is needed** — unlike XGBoost (`QuantileDMatrix` vs `ExtMemQuantileDMatrix` per D3), LightGBM's binned dataset fits in host RAM at workbench scale (36 GB host; ~50 MB for a 1Mx50 dataset post-binning). The out-of-core path (`two_round=True` for memory-mapped files; `Dataset(data=[Sequence(...), ...])` for chunked readers) is file-based, not host-RAM-tier — deferred to a future PR if needed.

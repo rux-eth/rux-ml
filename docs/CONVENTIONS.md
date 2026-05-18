@@ -336,6 +336,24 @@ Rationale: the family name (`lightgbm`) matches `cfg.training.kind` and the `TRA
 
 Note: PR-018 introduced the `[project.optional-dependencies]` table for the first time. PR-019 and PR-020 add new entries without restructuring.
 
+## Per-family threading model (per PR-019 Q-Parallel)
+
+The workbench's `pin_threads()` (PR-011) exports `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, `POLARS_MAX_THREADS` env vars to the trial subprocess. **Not every family honors these.**
+
+| Family | Threading library | Honors `OMP_NUM_THREADS`? | Workbench transport |
+|---|---|---|---|
+| XGBoost | OpenMP | Yes | env var (no factory action) |
+| LightGBM | OpenMP | Yes | env var (no factory action) |
+| **CatBoost** | **Intel TBB** | **No** | factory reads env, passes `thread_count=` explicitly |
+
+When adding a family whose threading library is NOT OpenMP, the factory must read `OMP_NUM_THREADS` from the env and translate explicitly. For CatBoost, the helper is `_resolve_thread_count()` in `src/rux_ml/training/catboost/factory.py`.
+
+**CPU bit-exact determinism (PR-013 contract)** also varies by family:
+
+- XGBoost: `random_state` + `OMP_NUM_THREADS=1` + `tree_method="hist"` suffices.
+- LightGBM: `random_state` + `deterministic=True` + `OMP_NUM_THREADS=1`.
+- CatBoost: `random_seed` + `thread_count=1` + `bootstrap_type='No'` + `rsm=1` + `random_strength=0` + `has_time=True` + `boosting_type='Plain'`. **A dedicated determinism test for CatBoost is deferred to a follow-up Tier-2 PR** (PR-019 scope reduction — recipe is exotic, deserves its own focused review).
+
 ## Per-family fit-time callbacks / kwarg translation (per PR-018 Q-Wrap)
 
 Each family's factory translates `TrainingBase` and per-variant config fields to the family's upstream kwarg names. The Trainer Protocol surface (`fit(X, y, **kwargs) -> Trainer`; `predict(X) -> ArrayLike`) is family-agnostic; callers (cli/train.py, tuning/objective.py, registry/promote.py) call `make_trainer(cfg.training, seed=...).fit(x, y, ...)` without knowing the family.

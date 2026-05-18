@@ -28,6 +28,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from rux_ml.training.base import TrainingBase
+from rux_ml.training.catboost import (
+    CatBoostTraining,
+    make_catboost_trainer,
+)
 from rux_ml.training.factory import make_trainer
 from rux_ml.training.lightgbm import (
     LightGBMTraining,
@@ -59,18 +63,21 @@ if TYPE_CHECKING:
 TRAINER_FAMILIES: dict[str, Callable[..., Trainer]] = {
     "xgboost": make_xgboost_trainer,
     "lightgbm": make_lightgbm_trainer,
+    "catboost": make_catboost_trainer,
 }
 
 __all__ = [
     "DEFAULT_BYTES_PER_GB",
     "METRIC_REGISTRY",
     "TRAINER_FAMILIES",
+    "CatBoostTraining",
     "LightGBMTraining",
     "Trainer",
     "TrainingBase",
     "XGBoostTraining",
     "compute_score",
     "estimate_x_bytes",
+    "make_catboost_trainer",
     "make_lightgbm_trainer",
     "make_trainer",
     "make_xgboost_trainer",
