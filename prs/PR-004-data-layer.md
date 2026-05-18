@@ -1,5 +1,7 @@
 # PR-004: Data layer
 
+**Landed-in:** v0.0.1
+
 ## Before Implementation (NON-NEGOTIABLE)
 
 This PR MUST NOT be implemented until `PROCEDURE-pr-research.md` has been completed in full and its output appended to the `## Research findings` section below.

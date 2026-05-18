@@ -3,6 +3,12 @@
 <!-- Copy this file to prs/PR-XXX-short-name.md and fill in every section. -->
 <!-- The "Before Implementation" and "Research findings" sections are MANDATORY per docs/CONSTRAINTS.md. -->
 
+<!-- Landed-in: set to the released version this PR shipped under (e.g. v0.1.0).
+     Use "(not yet landed)" for in-flight or dormant PRs.
+     Use "superseded by PR-XXX" for replaced PRs.
+     See docs/VERSIONING.md §4 for the policy. -->
+**Landed-in:** (not yet landed)
+
 ## Before Implementation (NON-NEGOTIABLE)
 
 This PR MUST NOT be implemented until `PROCEDURE-pr-research.md` has been completed in full and its output appended to the `## Research findings` section below.

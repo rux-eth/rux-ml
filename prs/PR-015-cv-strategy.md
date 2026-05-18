@@ -1,5 +1,7 @@
 # PR-015: CV strategy — Splitter Protocol + library research + splits.py rewrite
 
+**Landed-in:** v0.0.1
+
 ## Before Implementation (NON-NEGOTIABLE)
 
 This PR MUST NOT be implemented until `PROCEDURE-pr-research.md` has been completed in full and its output appended to the `## Research findings` section below.
