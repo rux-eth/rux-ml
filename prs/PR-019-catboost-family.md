@@ -1,6 +1,6 @@
 # PR-019: CatBoost Trainer family
 
-**Landed-in:** (not yet landed)
+**Landed-in:** v0.1.0 (pending v0.1.0 cut in PR-021)
 
 ## Before Implementation (NON-NEGOTIABLE)
 
@@ -16,19 +16,56 @@ Skipping the PR research procedure is a hard violation of the research-backed-de
 
 ## Research findings
 
-_To be populated by `PROCEDURE-pr-research.md`. Do not begin implementation until this section exists with completed findings from all required phases._
+`PROCEDURE-pr-research.md` 5-phase Tier-2 procedure completed 2026-05-18.
 
-**Open research questions** (must be resolved before implementation):
+### State Assessment (2026-05-18) — Phase 1
 
-1. **CatBoost native categorical handling vs `_ColumnRouter`.** CatBoost's claim to fame is native categorical support — order statistics + one-hot for low-cardinality, target statistics for high-cardinality. Does this obsolete the v0 `categorical_low_card_threshold` BEST-GUESS (PR-005) for catboost-only studies? Success criteria: documented decision on whether CatBoost bypasses `_ColumnRouter` entirely, integrates with a flag, or coexists. Cite CatBoost docs + Yandex paper.
+**Current state (post-PR-018)**: 2 Trainer families registered (`xgboost`, `lightgbm`). `[project.optional-dependencies]` table introduced by PR-018. `configs/search_spaces/lightgbm.toml` exists. `_ColumnRouter` sentinel renamed `PASSTHROUGH_TO_XGB_CATEGORICAL → PASSTHROUGH_NATIVE_CATEGORICAL` in PR-018. `PASSTHROUGH_NATIVE_CATEGORICAL` already family-agnostic per PR-018 design.
 
-2. **Symmetric tree parallelism characteristics.** CatBoost uses oblivious / symmetric trees — different parallelism strategy than XGBoost's level-wise or LightGBM's leaf-wise growth. Does this change the v0 thread-pinning strategy (`OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, `POLARS_MAX_THREADS` from PR-011)? Success criteria: documented thread-pinning rules for CatBoost (may be same, may differ). Cite CatBoost docs + parallelism benchmarks.
+**CatBoost outlier surface** (flagged in PR-017 Q-MK; re-verified at v1.2.10): no `**kwargs` on `__init__` (117 explicit params); no sklearn inheritance; pandas required as hard dep. Implication: `CatBoostTraining` has no `model_kwargs` escape hatch.
 
-3. **`CatBoostError` normalization into `MemoryPressureError`.** The v0 memory watchdog (PR-011) catches XGBoost OOM via `MemoryPressureError → optuna.TrialPruned`. Does CatBoost surface OOM differently? Does it need an explicit exception-translation layer in the factory? Success criteria: documented error-normalization path. Cite CatBoost source on memory failure modes.
+**New constraints surfaced (Phase 1)**: per-family kwarg-name translation richer than LightGBM (CatBoost capitalizes metric names `AUC`/`Logloss`/`RMSE`/`MAE`; renames `n_estimators` → `iterations`, `max_depth` → `depth`, `random_state` → `random_seed`); `early_stopping_rounds` is a CatBoost constructor kwarg (simpler than LightGBM's fit-time callback); `cat_features` extraction needed (CatBoost does NOT auto-detect pandas Categorical, unlike LightGBM).
 
-4. **CatBoost-CUDA on consumer RTX 4090.** Like LightGBM, verify the official CUDA build works on consumer cards (compute capability 8.9). If it works, ensure the workbench's container CUDA 12.4.1 pin is compatible. Cite CatBoost GPU tutorial + GitHub issues.
+### Phase 3 — Research findings (6 parallel agents)
 
-5. **Canonical CatBoost HPO search-space.** What hyperparameters belong in `configs/search_spaces/catboost.toml`? At minimum: `learning_rate`, `depth`, `l2_leaf_reg`, `random_strength`, `bagging_temperature`, `border_count`. Success criteria: research-anchored ranges cited from production references.
+**Q-GPU — Default to GPU.** PROVEN. Material divergence from PR-018's LightGBM: CatBoost ships prebuilt CUDA-enabled PyPI wheels (`uv add catboost`, no extras, no source build, no container delta). RTX 4090 (CC 8.9) field-confirmed via [issue #2649](https://github.com/catboost/catboost/issues/2649). [szilard/GBM-perf](https://github.com/szilard/GBM-perf) V100 2024-06-06: CatBoost-GPU ~2.6-4.6× slower than XGBoost-GPU at 1M-10M rows but materially faster than CPU. Factory toggles `task_type="GPU"` + `devices="0"` when `cfg.device == "cuda"`. GPU bit-exact determinism NOT achievable (issue #546).
+
+**Q-Cat — Pattern-A shim extracts `cat_features` at fit time.** PROVEN. CatBoost does NOT auto-detect pandas Categorical (opposite of LightGBM); raises error on category-dtype columns not in `cat_features=` ([issue #757](https://github.com/catboost/catboost/issues/757), open FR [#1386](https://github.com/catboost/catboost/issues/1386)). The `_CatBoostTrainerShim.fit()` extracts column names via `select_dtypes(include="category")` and passes through as `cat_features=`. `_ColumnRouter` unchanged. CatBoost's ordered Target Statistics ([Prokhorenkova et al. 2018](https://arxiv.org/abs/1706.09516)) is different from LightGBM's Fisher partitioning and XGBoost's partition-based split; vs `NestedCVWrapper` target encoding for high-card, Pargent et al. 2022 ([arxiv:2104.00629](https://arxiv.org/pdf/2104.00629)) groups both under "regularized target encoding" → comparable.
+
+**Q-Ingest** — covered by Q-Wrap §9 (no separate research): CatBoost's `fit(DataFrame, y)` works natively without `Pool`. Thin `build_pool()` placeholder in `ingest.py` for symmetry with xgboost/lightgbm subpackages.
+
+**Q-Parallel — CatBoost uses Intel TBB, NOT OpenMP. Factory passes `thread_count` explicitly.** PROVEN. Workbench's `OMP_NUM_THREADS` env-var pinning (PR-011) is **invisible to CatBoost** — TBB doesn't read OMP env vars by default. Factory reads `OMP_NUM_THREADS` from the trial subprocess env and passes as `thread_count=` to CatBoost. PR-011's `pin_threads()` is the transport; the factory translates. CONVENTIONS.md documents this. Bit-exact CPU determinism for CatBoost requires `thread_count=1` + `bootstrap_type='No'` + `rsm=1` + `random_strength=0` + `random_seed` + `has_time=True` + `boosting_type='Plain'` ([issue #1587](https://github.com/catboost/catboost/issues/1587)) — dedicated test deferred to follow-up Tier-2 PR.
+
+**Q-Err — No translation layer needed.** PROVEN. `CatBoostError` is a flat `Exception` subclass (`_catboost.pyx@v1.2.10` L188-193). CPU OOM usually surfaces as OS SIGKILL (issues #968, #1814); GPU OOM (`TOutOfMemoryError`) is uncatchable from Python ([issue #2678](https://github.com/catboost/catboost/issues/2678), open). Subprocess-per-trial isolation (PR-008) already converts "subprocess died" → "trial failed" → study continues. A naive `CatBoostError → MemoryPressureError` would misclassify input-validation errors as OOM. **No `errors.py` module in PR-019 scope.**
+
+**Q-HPO — 7-knob search space.** PROVEN with strong convergent evidence. `learning_rate`, `depth`, `l2_leaf_reg`, `random_strength`, `bagging_temperature`, `border_count`, `bootstrap_type` (categorical over `{Bayesian, Bernoulli, MVS}`). `iterations` + `grow_policy` FIXED (CatBoost docs say iterations should be large + use early-stopping; grow_policy is fixed at `SymmetricTree` per Optuna canonical examples). Anchored on [CatBoost parameter-tuning](https://catboost.ai/en/docs/concepts/parameter-tuning) + [Optuna catboost_simple.py](https://github.com/optuna/optuna-examples/blob/main/catboost/catboost_simple.py) + [CatBoost team Optuna tutorial](https://github.com/catboost/tutorials/blob/master/hyperparameters_tuning/hyperparameters_tuning_using_optuna_and_hyperopt.ipynb).
+
+**Q-Wrap — 14-field `CatBoostTraining` schema; complete translation table.** PROVEN against `catboost/python-package/catboost/core.py @ v1.2.10` L5305-5425. No `**kwargs`. Key findings:
+- Metric translation: `auc → AUC`, `logloss → Logloss`, `rmse → RMSE`, `mae → MAE` (case-sensitive).
+- `loss_function` task-derived (`Logloss` classifier; `RMSE` regressor) because `AUC` is eval-only (Q-Wrap §4).
+- `early_stopping_rounds` is a top-level constructor kwarg (L5396) — single kwarg shorthand for `od_type="Iter"` + `od_wait=N`.
+- `random_state` → `random_seed` rename; `n_estimators` → `iterations`; `max_depth` → `depth`.
+- Factory injects `verbose=False`, `allow_writing_files=False`.
+- `fit(DataFrame, target)` works without `Pool` construction.
+- **bootstrap_type ↔ randomness-kwarg interaction**: Bayesian accepts `bagging_temperature`, rejects `subsample`; Bernoulli/MVS/Poisson accept `subsample`, reject `bagging_temperature`. Factory conditionally includes only the active kwarg (CatBoost throws on mismatches).
+
+### Phase 4 — Locked sub-decisions
+
+| # | Decision |
+|---|---|
+| 1 | `device` inherits from `TrainingBase` (default `"cuda"`); factory toggles `task_type="GPU"` accordingly. Q-GPU confirmed GPU is the ergonomic default. |
+| 2 | `thread_count` sourced from `OMP_NUM_THREADS` env var (set by PR-011's `pin_threads()` from `cfg.memory.omp_threads`). Reuse existing field, no `MemoryConfig` schema bloat. |
+| 3 | CPU bit-exact determinism test for CatBoost deferred to follow-up Tier-2 PR (recipe documented in CONVENTIONS.md). |
+| 4 | Pattern-A shim `_CatBoostTrainerShim` for `cat_features` auto-extraction. |
+| 5 | Auto-derive `loss_function` from task; `eval_metric` from `_METRIC_TRANSLATE`. `loss_function` NOT exposed as a config field (`AUC` is eval-only trap). |
+| 6 | 14 typed fields on `CatBoostTraining` (search-space dims + family-agnostic plumbing). CTR/text/imbalance knobs deferred. |
+
+### Verification artifacts
+
+- `make test` → **319 passed**, 0 failed, 15 deselected. Was 310 pre-PR-019; added 9 new tests (1 conformance-test entry + 8 in `test_catboost_smoke.py`).
+- `uv run basedpyright src/` → **0 errors, 0 warnings, 0 notes**.
+- `uv run ruff check .` → **All checks passed**.
+- XGBoost + LightGBM integrations untouched per `One PR, One Thing`.
 
 ---
 

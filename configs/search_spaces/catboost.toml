@@ -1,0 +1,91 @@
+# rux-ml reference search space for CatBoost tabular workloads (PR-019 Q-HPO).
+#
+# NOT auto-loaded — this is a reference template. Copy entries into your
+# problem/study TOML's `[search_space."training.<field>"]` blocks per D17.
+#
+# Primary anchors:
+#  - CatBoost official parameter-tuning guide: https://catboost.ai/en/docs/concepts/parameter-tuning
+#  - CatBoost training-parameters reference: https://catboost.ai/docs/en/references/training-parameters/common
+#  - Optuna official examples: https://github.com/optuna/optuna-examples/blob/main/catboost/catboost_simple.py
+#                              https://github.com/optuna/optuna-examples/blob/main/catboost/catboost_pruning.py
+#  - CatBoost team's Optuna tutorial: https://github.com/catboost/tutorials/blob/master/hyperparameters_tuning/hyperparameters_tuning_using_optuna_and_hyperopt.ipynb
+
+[search_space."training.learning_rate"]
+type = "float"
+low = 0.01
+high = 0.3
+log = true
+# CatBoost default is 0.03 (auto-set otherwise). Tutorial uses [0.01, 0.1]; we
+# extend the upper bound to 0.3 to match the XGBoost/LightGBM canonical ceiling
+# and let Optuna explore aggressive shrinkage on short studies.
+# Source: https://catboost.ai/docs/en/references/training-parameters/common
+
+[search_space."training.depth"]
+type = "int"
+low = 4
+high = 10
+log = false
+# CatBoost default = 6. Official tuning guide: "values in the range from 6 to 10
+# are recommended"; we widen the floor to 4. Capped at 10 to stay within the
+# documented sweet spot.
+# Source: https://catboost.ai/en/docs/concepts/parameter-tuning
+
+[search_space."training.l2_leaf_reg"]
+type = "float"
+low = 1.0
+high = 10.0
+log = true
+# CatBoost default = 3.0; "any positive value allowed". CatBoost team's notebook
+# uses [1, 10] linear; we keep [1, 10] but flip to log-scale because l2 spans
+# an order of magnitude — matches LightGBM/XGBoost convention for lambda-style
+# regularizers.
+# Source: https://catboost.ai/docs/en/references/training-parameters/common
+
+[search_space."training.random_strength"]
+type = "float"
+low = 1e-9
+high = 10.0
+log = true
+# CatBoost default = 1. Official guide flags it as a recommended tuning knob;
+# no explicit range published. De-facto Kaggle range [1e-9, 10] log-scale lets
+# the sampler effectively disable the randomization at the low end.
+# Source: https://catboost.ai/en/docs/concepts/parameter-tuning
+
+[search_space."training.bagging_temperature"]
+type = "float"
+low = 0.0
+high = 10.0
+log = false
+# Active only under bootstrap_type = "Bayesian" (CatBoost default for many
+# losses). Range [0, inf), higher = more aggressive bagging. Linear — 0 is
+# the "all weights = 1" anchor, must be sampleable.
+# Source: https://catboost.ai/docs/en/references/training-parameters/common
+# Source: https://github.com/optuna/optuna-examples/blob/main/catboost/catboost_pruning.py
+
+[search_space."training.border_count"]
+type = "int"
+low = 32
+high = 255
+log = false
+# Allowed range [1, 65535]; CPU default 254, GPU defaults 32 / 128. Brackets
+# the GPU-pairwise default (32) at the low end and the CPU "best quality"
+# default (~255) at the top.
+# Source: https://catboost.ai/docs/en/references/training-parameters/quantization
+
+[search_space."training.bootstrap_type"]
+type = "categorical"
+choices = ["Bayesian", "Bernoulli", "MVS"]
+# Searched per Optuna's official catboost_simple.py and catboost_pruning.py
+# examples. Excludes "Poisson" (GPU-only) and "No" (disables bagging entirely).
+# MVS is CatBoost's variance-reduced default for many regression losses.
+# Source: https://github.com/optuna/optuna-examples/blob/main/catboost/catboost_simple.py
+
+# iterations is intentionally FIXED, not searched — CatBoost docs say "set to
+# a large value and use the overfitting detector." Tuning it pairwise with
+# learning_rate double-counts the same effect. Source:
+# https://catboost.ai/en/docs/concepts/parameter-tuning
+#
+# grow_policy is intentionally FIXED to "SymmetricTree" (CatBoost's signature;
+# the other policies change default depth semantics and interact non-orthogonally
+# with l2_leaf_reg). Override in [training] block if a study deliberately needs
+# Depthwise / Lossguide.

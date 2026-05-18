@@ -35,6 +35,9 @@ rux-ml = "rux_ml.cli:app"
 lightgbm = [
     "lightgbm>=4.6.0",
 ]
+catboost = [
+    "catboost>=1.2.10",
+]
 
 [dependency-groups]
 dev = [

@@ -18,6 +18,7 @@ from rux_ml.config.registry import RegistryConfig
 from rux_ml.config.root import RuxMLConfig, cfg_hash, layer_cfg_hash
 from rux_ml.config.runs import RunsConfig
 from rux_ml.config.training import (
+    CatBoostTraining,
     LightGBMTraining,
     TrainingBase,
     TrainingConfig,
@@ -27,6 +28,7 @@ from rux_ml.config.tuning import CatSpec, FloatSpec, IntSpec, SearchSpec, Tuning
 
 __all__ = [
     "CVConfig",
+    "CatBoostTraining",
     "CatSpec",
     "CombinatorialPurgedCV",
     "DataConfig",

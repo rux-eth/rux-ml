@@ -28,7 +28,13 @@ import numpy as np
 import pytest
 from sklearn.datasets import make_classification
 
-from rux_ml.training import TRAINER_FAMILIES, LightGBMTraining, TrainingBase, XGBoostTraining
+from rux_ml.training import (
+    TRAINER_FAMILIES,
+    CatBoostTraining,
+    LightGBMTraining,
+    TrainingBase,
+    XGBoostTraining,
+)
 
 # Minimal per-family configs for the conformance smoke. Each entry constructs
 # a config valid for that family on CPU (so GPU-free CI machines pass the test
@@ -51,6 +57,14 @@ _MINIMAL_CFG: dict[str, TrainingBase] = {
         metric="auc",
         n_estimators=8,
         max_depth=3,
+        learning_rate=0.3,
+        early_stopping_rounds=None,
+    ),
+    "catboost": CatBoostTraining(
+        device="cpu",
+        metric="auc",
+        iterations=8,
+        depth=3,
         learning_rate=0.3,
         early_stopping_rounds=None,
     ),
