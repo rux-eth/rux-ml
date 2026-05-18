@@ -3,7 +3,10 @@
 Decision rule (per `docs/ARCHITECTURE.md`):
 
     if cardinality(col) ≤ FeaturesConfig.categorical_low_card_threshold:
-        pass through as Polars Categorical → XGBoost enable_categorical=True
+        pass through as Polars Categorical → native categorical handling
+        (XGBoost enable_categorical=True; LightGBM categorical_feature="auto"
+        auto-detection of pandas Categorical dtype — same downstream
+        encoding-of-nothing sentinel for both families, per PR-018 Q-Cat)
     else:
         category_encoders TargetEncoder via NestedCVWrapper
         (or hash encoding if cardinality is truly massive — configurable)
@@ -24,9 +27,12 @@ if TYPE_CHECKING:
 
 # Sentinel — `make_categorical_encoder` returns this constant when the column
 # is below the low-card threshold and should be passed through unchanged to
-# XGBoost's native categorical handling. The ColumnTransformer wiring treats
-# this as a literal "passthrough" instruction.
-PASSTHROUGH_TO_XGB_CATEGORICAL: str = "passthrough"
+# whichever family-native categorical handling is downstream (XGBoost's
+# enable_categorical=True; LightGBM's categorical_feature="auto" pandas-
+# Categorical auto-detect). The ColumnTransformer wiring treats this as a
+# literal "passthrough" instruction. Renamed from PASSTHROUGH_TO_XGB_CATEGORICAL
+# in PR-018 because the same sentinel serves both families per Q-Cat research.
+PASSTHROUGH_NATIVE_CATEGORICAL: str = "passthrough"
 
 
 def make_categorical_encoder(
@@ -47,7 +53,7 @@ def make_categorical_encoder(
         random_state: Seed for ``NestedCVWrapper`` shuffling.
 
     Returns:
-        ``PASSTHROUGH_TO_XGB_CATEGORICAL`` (the string ``"passthrough"``) for low-cardinality
+        ``PASSTHROUGH_NATIVE_CATEGORICAL`` (the string ``"passthrough"``) for low-cardinality
         columns, signaling the caller to skip encoding (Polars Categorical reaches XGBoost
         directly). Otherwise a ``NestedCVWrapper(TargetEncoder(...))`` instance.
 
@@ -63,7 +69,7 @@ def make_categorical_encoder(
         )
         raise ValueError(msg)
     if cardinality <= threshold:
-        return PASSTHROUGH_TO_XGB_CATEGORICAL
+        return PASSTHROUGH_NATIVE_CATEGORICAL
     return NestedCVWrapper(
         feature_encoder=TargetEncoder(cols=[column], handle_unknown="value"),
         cv=n_splits,

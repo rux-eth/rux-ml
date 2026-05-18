@@ -28,7 +28,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer
 
 from rux_ml.features.encoders import (
-    PASSTHROUGH_TO_XGB_CATEGORICAL,
+    PASSTHROUGH_NATIVE_CATEGORICAL,
     make_categorical_encoder,
 )
 from rux_ml.features.polars_steps import select_columns
@@ -85,7 +85,7 @@ class _ColumnRouter(BaseEstimator, TransformerMixin):
 
     def fit(self, X: pd.DataFrame, y: Any = None) -> _ColumnRouter:
         for col, enc in self.encoders.items():
-            if enc != PASSTHROUGH_TO_XGB_CATEGORICAL:
+            if enc != PASSTHROUGH_NATIVE_CATEGORICAL:
                 enc.fit(self._col_frame(X, col), y)
         return self
 
@@ -95,7 +95,7 @@ class _ColumnRouter(BaseEstimator, TransformerMixin):
             parts.append(self._col_frame(X, col))
         for col in self.spec.categorical_columns:
             enc = self.encoders[col]
-            if enc == PASSTHROUGH_TO_XGB_CATEGORICAL:
+            if enc == PASSTHROUGH_NATIVE_CATEGORICAL:
                 parts.append(self._col_frame(X, col))
             else:
                 out = enc.transform(self._col_frame(X, col))
@@ -109,7 +109,7 @@ class _ColumnRouter(BaseEstimator, TransformerMixin):
             parts.append(self._col_frame(X, col))
         for col in self.spec.categorical_columns:
             enc = self.encoders[col]
-            if enc == PASSTHROUGH_TO_XGB_CATEGORICAL:
+            if enc == PASSTHROUGH_NATIVE_CATEGORICAL:
                 parts.append(self._col_frame(X, col))
             else:
                 # Critical: fit_transform on the wrapper, not fit+transform —

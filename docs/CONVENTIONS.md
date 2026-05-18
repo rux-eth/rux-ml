@@ -321,6 +321,34 @@ The `--regenerate-golden` pytest flag is wired via `tests/golden/conftest.py:pyt
 
 ---
 
+## Per-family optional extras naming (per PR-018 A3)
+
+Optional dependencies are PEP 631 extras named **after the family**, not after the backend package. Each `[project.optional-dependencies]` entry installs one family's runtime deps:
+
+```toml
+[project.optional-dependencies]
+lightgbm = ["lightgbm>=4.6.0"]
+# catboost = ["catboost>=1.2"]    # PR-019
+# osqp     = ["osqp>=0.6"]        # PR-020
+```
+
+Rationale: the family name (`lightgbm`) matches `cfg.training.kind` and the `TRAINER_FAMILIES["lightgbm"]` registry key. Users who want a family run `uv sync --extra lightgbm`; the workbench's hard `[project.dependencies]` covers the default-experience family (xgboost) per Q-Dep (PR-017).
+
+Note: PR-018 introduced the `[project.optional-dependencies]` table for the first time. PR-019 and PR-020 add new entries without restructuring.
+
+## Per-family fit-time callbacks / kwarg translation (per PR-018 Q-Wrap)
+
+Each family's factory translates `TrainingBase` and per-variant config fields to the family's upstream kwarg names. The Trainer Protocol surface (`fit(X, y, **kwargs) -> Trainer`; `predict(X) -> ArrayLike`) is family-agnostic; callers (cli/train.py, tuning/objective.py, registry/promote.py) call `make_trainer(cfg.training, seed=...).fit(x, y, ...)` without knowing the family.
+
+Family-specific translation patterns observed so far:
+
+- **Constructor-kwarg families** (XGBoost): `early_stopping_rounds` is a constructor kwarg; the factory bakes it into the estimator at construction time. The caller passes `eval_set=[...]` to `fit()` and the library uses the stored `early_stopping_rounds`.
+- **Fit-time-callback families** (LightGBM): `early_stopping_rounds` is NOT a constructor kwarg in v4.5+; it lives in `callbacks=[lightgbm.early_stopping(N)]` passed to `fit()`. The factory returns a thin shim whose `fit()` injects the callback when `eval_set` is present (Pattern A per Phase-4 PR-018 sub-decision). Callers remain unchanged.
+
+When a new family is added (PR-019, PR-020, ...), the family's factory takes responsibility for adapting upstream kwargs to the workbench's surface. If the family's `__init__` rejects unknown kwargs (CatBoost — Q-MK in PR-017 design session), the family's variant config OMITS `model_kwargs` and only exposes typed fields.
+
+Metric translation: if the family doesn't accept the workbench's metric-registry name (`auc`, `logloss`, `rmse`, `mae`), the factory maintains a `_METRIC_TRANSLATE` map (LightGBM: `logloss` → `binary_logloss`).
+
 ## Multi-family Trainer extensibility (per PR-017)
 
 Per `docs/0.1/DESIGN-log.md` Q1–Q5 + Q6:

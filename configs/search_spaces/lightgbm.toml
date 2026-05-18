@@ -1,0 +1,99 @@
+# rux-ml reference search space for LightGBM tabular workloads (PR-018 Q-HPO).
+#
+# NOT auto-loaded — this is a reference template. Copy the entries below into
+# your problem/study TOML's `[search_space."training.<field>"]` blocks per D17.
+# The workbench's SearchSpec mechanism reads `[search_space]` tables from the
+# loaded TOML stack; this file is documentation + cite-anchored defaults.
+#
+# Primary anchors:
+#  - Optuna's canonical example: optuna-examples/lightgbm/lightgbm_simple.py
+#    https://github.com/optuna/optuna-examples/blob/main/lightgbm/lightgbm_simple.py
+#  - Optuna stepwise LightGBMTuner internals:
+#    https://github.com/optuna/optuna-integration/blob/main/optuna_integration/lightgbm/_lightgbm_tuner/optimize.py
+#  - LightGBM official tuning guide (v4.5+):
+#    https://lightgbm.readthedocs.io/en/latest/Parameters-Tuning.html
+#  - LightGBM Parameters reference (defaults / constraints):
+#    https://lightgbm.readthedocs.io/en/latest/Parameters.html
+
+[search_space."training.learning_rate"]
+type = "float"
+low = 0.005
+high = 0.3
+log = true
+# LightGBM default is 0.1 (Parameters.html). Optuna's stepwise tuner deliberately
+# does NOT tune learning_rate (it's coupled to num_iterations + early stopping).
+# Range [0.005, 0.3] log-scale brackets the Microsoft tuning-guide guidance
+# "smaller learning_rate with larger num_iterations -> better accuracy"; users
+# running fixed-budget studies without a separate LR schedule should sweep here.
+
+[search_space."training.num_leaves"]
+type = "int"
+low = 2
+high = 256
+log = false
+# Optuna canonical example: suggest_int("num_leaves", 2, 256).
+# Microsoft tuning guide: num_leaves should be < 2^max_depth; 127 may already
+# over-fit at max_depth=7. The range covers small- through large-tree regimes.
+
+[search_space."training.max_depth"]
+type = "int"
+low = -1
+high = 12
+log = false
+# LightGBM default = -1 (no limit). Leaf-wise growth makes max_depth a soft
+# regularizer; num_leaves is the primary capacity knob. Users who want to
+# fix max_depth = -1 should omit this entry from their study TOML.
+
+[search_space."training.min_data_in_leaf"]
+type = "int"
+low = 5
+high = 100
+log = false
+# Optuna canonical (under sklearn alias min_child_samples): suggest_int(5, 100).
+# Users with >1M-row datasets should widen the upper bound (Microsoft guide:
+# "hundreds or thousands is enough for a LARGE dataset").
+
+[search_space."training.feature_fraction"]
+type = "float"
+low = 0.4
+high = 1.0
+log = false
+# Optuna canonical: suggest_float("feature_fraction", 0.4, 1.0).
+# Stepwise tuner uses the same [0.4, 1.0] range.
+
+[search_space."training.bagging_fraction"]
+type = "float"
+low = 0.4
+high = 1.0
+log = false
+# Optuna canonical: suggest_float("bagging_fraction", 0.4, 1.0).
+
+[search_space."training.bagging_freq"]
+type = "int"
+low = 1
+high = 7
+log = false
+# Optuna canonical: suggest_int("bagging_freq", 1, 7). MUST be > 0 for
+# bagging_fraction to actually fire (Parameters.html: "0 means disable bagging").
+
+[search_space."training.lambda_l1"]
+type = "float"
+low = 1e-8
+high = 10.0
+log = true
+# Optuna canonical: suggest_float("lambda_l1", 1e-8, 10.0, log=True).
+# Stepwise tuner: identical range.
+
+[search_space."training.lambda_l2"]
+type = "float"
+low = 1e-8
+high = 10.0
+log = true
+# Optuna canonical: suggest_float("lambda_l2", 1e-8, 10.0, log=True).
+
+# boosting_type is intentionally FIXED, not searched. dart changes the training
+# algorithm substantially (random tree dropout) with separate tuning knobs
+# (drop_rate, skip_drop) that this reference does not expose; rf is Random
+# Forest mode, not boosting. Optuna's canonical example + stepwise tuner both
+# fix boosting_type. Override via [training] kind = "lightgbm", boosting_type =
+# "dart" if a study deliberately wants dart.

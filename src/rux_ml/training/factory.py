@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from rux_ml.training.lightgbm.config import LightGBMTraining
 from rux_ml.training.xgboost.config import XGBoostTraining
 
 if TYPE_CHECKING:
@@ -66,13 +67,20 @@ def _narrow_for_family(cfg: TrainingConfig, family: str) -> TrainingConfig:
     future readers and gives us a place to harden the invariant if a
     non-Pydantic caller ever bypasses validation.
     """
-    # ``isinstance`` is trivially-true when the union has a single variant
-    # (TrainingConfig = Annotated[XGBoostTraining, ...]), but becomes
-    # meaningful in PR-018 once LightGBMTraining widens the union — this
-    # narrows ``cfg`` correctly for downstream factories.
-    if family == "xgboost" and not isinstance(cfg, XGBoostTraining):  # pyright: ignore[reportUnnecessaryIsInstance]
+    # Pydantic v2's discriminated union routes the input dict to the matching
+    # variant at validation time; by the time ``make_trainer`` runs, ``cfg``
+    # is already the correct variant subclass. These ``isinstance`` checks
+    # are belt-and-suspenders for callers that bypass Pydantic validation
+    # (e.g. forged configs in defensive tests).
+    if family == "xgboost" and not isinstance(cfg, XGBoostTraining):
         msg = (
             f"cfg.kind=='xgboost' but cfg is not an XGBoostTraining instance "
+            f"({type(cfg).__name__}); did a caller bypass Pydantic validation?"
+        )
+        raise TypeError(msg)
+    if family == "lightgbm" and not isinstance(cfg, LightGBMTraining):
+        msg = (
+            f"cfg.kind=='lightgbm' but cfg is not a LightGBMTraining instance "
             f"({type(cfg).__name__}); did a caller bypass Pydantic validation?"
         )
         raise TypeError(msg)

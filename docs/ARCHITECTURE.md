@@ -114,6 +114,18 @@ For a one-off (non-sweep) baseline training, `cli.train.run()` follows the same 
 
 These are runtime branches the workbench must auto-select, based on configuration and observed inputs.
 
+### LightGBM ingest path (per PR-018 Q-Ingest)
+
+LightGBM's ``Dataset`` always quantizes input features to uint8 histograms at construction (`max_bin=255` default), giving ~8x memory compression vs raw float arrays. **No tier-switch decision rule is needed** — unlike XGBoost (`QuantileDMatrix` vs `ExtMemQuantileDMatrix` per D3), LightGBM's binned dataset fits in host RAM at workbench scale (36 GB host; ~50 MB for a 1Mx50 dataset post-binning). The out-of-core path (`two_round=True` for memory-mapped files; `Dataset(data=[Sequence(...), ...])` for chunked readers) is file-based, not host-RAM-tier — deferred to a future PR if needed.
+
+`src/rux_ml/training/lightgbm/ingest.py::build_dataset` is the single helper; it constructs a `lightgbm.Dataset` from pandas DataFrame + label, with `categorical_feature="auto"` for pandas-Categorical auto-detection (see LightGBM categorical handling below).
+
+### LightGBM categorical handling (per PR-018 Q-Cat)
+
+LightGBM's native categorical splitter is **Fisher (1958) optimal partitioning over a sorted gradient histogram** — different algorithm from XGBoost's partition-based split, but the workbench feeds both the same pipeline output. Low-cardinality categoricals (per `categorical_low_card_threshold`) reach LightGBM as pandas Categorical dtype, and LightGBM's `_data_from_pandas` auto-detects them under the default `categorical_feature="auto"`. High-cardinality categoricals reach LightGBM as `NestedCVWrapper`-target-encoded floats — which **LightGBM's own docs recommend** ("treat high-card as numeric"; corroborated by Pargent et al. 2021: regularized target encoding outperforms native LightGBM handling on high-card).
+
+No `_ColumnRouter` changes were needed — the same sentinel (renamed `PASSTHROUGH_TO_XGB_CATEGORICAL` → `PASSTHROUGH_NATIVE_CATEGORICAL` in PR-018) serves both families.
+
 ### XGBoost ingest path (per D3)
 
 ```

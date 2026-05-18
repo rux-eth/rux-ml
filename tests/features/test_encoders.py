@@ -7,7 +7,7 @@ from category_encoders.wrapper import NestedCVWrapper
 
 from rux_ml.config import FeaturesConfig
 from rux_ml.features.encoders import (
-    PASSTHROUGH_TO_XGB_CATEGORICAL,
+    PASSTHROUGH_NATIVE_CATEGORICAL,
     make_categorical_encoder,
 )
 
@@ -15,7 +15,7 @@ from rux_ml.features.encoders import (
 def test_low_cardinality_returns_passthrough() -> None:
     cfg = FeaturesConfig(categorical_low_card_threshold=10)
     encoder = make_categorical_encoder("cat", cardinality=5, cfg=cfg)
-    assert encoder == PASSTHROUGH_TO_XGB_CATEGORICAL
+    assert encoder == PASSTHROUGH_NATIVE_CATEGORICAL
 
 
 def test_high_cardinality_returns_nestedcv_wrapper() -> None:
@@ -28,7 +28,7 @@ def test_at_threshold_returns_passthrough() -> None:
     """Threshold is inclusive (cardinality ≤ threshold → passthrough)."""
     cfg = FeaturesConfig(categorical_low_card_threshold=10)
     encoder = make_categorical_encoder("cat", cardinality=10, cfg=cfg)
-    assert encoder == PASSTHROUGH_TO_XGB_CATEGORICAL
+    assert encoder == PASSTHROUGH_NATIVE_CATEGORICAL
 
 
 def test_just_above_threshold_returns_encoder() -> None:

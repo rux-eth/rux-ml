@@ -25,17 +25,19 @@ from typing import Annotated
 from pydantic import Field
 
 from rux_ml.training.base import TrainingBase
+from rux_ml.training.lightgbm.config import LightGBMTraining
 from rux_ml.training.xgboost.config import XGBoostTraining
 
-# Discriminated-union TrainingConfig. Single variant in v0.1; PR-018+ widens
-# the Union as new families land. Pydantic v2 dispatches on the ``kind``
-# discriminator field (PR-006 convention; matches cv.py's CVConfig pattern).
+# Discriminated-union TrainingConfig. PR-017 introduced the pattern with
+# XGBoostTraining; PR-018 widens to include LightGBMTraining. Pydantic v2
+# dispatches on the ``kind`` discriminator field.
 TrainingConfig = Annotated[
-    XGBoostTraining,
+    XGBoostTraining | LightGBMTraining,
     Field(discriminator="kind"),
 ]
 
 __all__ = [
+    "LightGBMTraining",
     "TrainingBase",
     "TrainingConfig",
     "XGBoostTraining",

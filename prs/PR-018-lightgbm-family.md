@@ -1,6 +1,6 @@
 # PR-018: LightGBM Trainer family
 
-**Landed-in:** (not yet landed)
+**Landed-in:** v0.1.0 (pending v0.1.0 cut in PR-021)
 
 ## Before Implementation (NON-NEGOTIABLE)
 
@@ -16,19 +16,89 @@ Skipping the PR research procedure is a hard violation of the research-backed-de
 
 ## Research findings
 
-_To be populated by `PROCEDURE-pr-research.md`. Do not begin implementation until this section exists with completed findings from all required phases._
+`PROCEDURE-pr-research.md` 5-phase Tier-2 procedure completed 2026-05-18.
 
-**Open research questions** (must be resolved before implementation):
+### State Assessment (2026-05-18) — Phase 1
 
-1. **LightGBM-CUDA on consumer RTX 4090.** Does the official LightGBM CUDA build work on consumer cards (RTX 4090 = Ada Lovelace, compute capability 8.9)? Or is OpenCL required for consumer GPU support? Success criteria: a working `gpu_use_dp=true` or equivalent on the workbench's actual hardware, with documented GPU-build install path. Cite LightGBM official GPU tutorial + GitHub issues for consumer-card support.
+**Current state (post-PR-017):**
+- Training layer is multi-family: `src/rux_ml/training/xgboost/` subpackage; `TRAINER_FAMILIES = {"xgboost": ...}`; `TrainingConfig = Annotated[XGBoostTraining, Field(discriminator="kind")]` (single-variant union).
+- `configs/search_spaces/` directory doesn't yet exist; v0 SearchSpec is INLINE in study TOMLs.
+- `pyproject.toml` has NO `[project.optional-dependencies]` table yet; PR-018 introduces it.
+- `_ColumnRouter` (`src/rux_ml/features/pipeline.py:60`) uses `PASSTHROUGH_TO_XGB_CATEGORICAL` sentinel — Q-Cat may extend or bypass.
 
-2. **LightGBM categorical handling vs the v0 `_ColumnRouter`** (PR-005). LightGBM has native categorical support via `categorical_feature=` parameter that bypasses one-hot encoding. Does the v0 `_ColumnRouter` strategy (per the categorical-encoding decision rule in `docs/ARCHITECTURE.md`) need a LightGBM-specific override? Success criteria: documented decision on whether LightGBM bypasses or integrates with `_ColumnRouter`. Cite LightGBM docs + benchmarks.
+**New constraints surfaced (not in stub):**
+- Per-family kwarg-name translation (XGBoost `eval_metric=` → LightGBM `metric=`; `device="cuda"` → `device="gpu"` or `"cuda"`; etc.).
+- GPU build variants are non-trivial (OpenCL vs CUDA vs CPU; no prebuilt CUDA wheel on PyPI).
+- `early_stopping_rounds` semantics differ between families.
+- `use_native` flag symmetry decision.
+- `_ColumnRouter` integration path (extend vs bypass).
 
-3. **`Dataset` (LightGBM's `DMatrix`-equivalent) memory profile.** The workbench's RAM-bound 36 GB constraint shaped the v0 XGBoost ingest-path decision rule (per D3 — `QuantileDMatrix` vs `ExtMemQuantileDMatrix`). Does LightGBM's `Dataset` have analogous tiers? Success criteria: a LightGBM-specific ingest-path decision rule for `docs/ARCHITECTURE.md`. Cite LightGBM `Dataset` source + memory benchmarks.
+### Research Questions — Phase 2
 
-4. **Canonical LightGBM HPO search-space.** What hyperparameters belong in `configs/search_spaces/lightgbm.toml`? At minimum: `learning_rate`, `num_leaves`, `max_depth`, `min_data_in_leaf`, `feature_fraction`, `bagging_fraction`, `lambda_l1`, `lambda_l2`. Success criteria: research-anchored ranges + log/linear scales cited from production references (Kaggle Grandmaster posts, LightGBM-Optuna integration examples, mature open-source repos).
+Five must-answer; Q-A3 doc-only. All independent → 5 parallel research agents.
 
-5. **A3 — Extras-naming convention.** Codify into `docs/CONVENTIONS.md` in this PR's commit: per-family extras named after the family (`[lightgbm]`), not after the backend (`[scikit-learn-lightgbm]`). Document the rule for future families.
+| Q | Bundle | Status |
+|---|---|---|
+| Q-GPU | LightGBM-CUDA on RTX 4090 | PROVEN |
+| Q-Cat | LightGBM categorical vs `_ColumnRouter` | PROVEN |
+| Q-Ingest | Dataset memory profile | PROVEN |
+| Q-Wrap | Sklearn-wrapper kwarg-translation | PROVEN |
+| Q-HPO | Canonical HPO search-space defaults | PROVEN |
+
+### Phase 3 — Research findings
+
+Five parallel agents. All citations from primary sources at pinned versions/commits.
+
+**Q-GPU — CPU-only ship; defer GPU.** PROVEN.
+- LightGBM has two GPU build variants (OpenCL `device_type=gpu`; native CUDA `device_type=cuda`); neither has prebuilt CUDA wheel on PyPI.
+- Performance ([szilard/GBM-perf benchmarks, V100 2024-06-06](https://github.com/szilard/GBM-perf)): LightGBM-GPU is **8-28x slower than XGBoost-GPU** at workbench-scale (100K-10M rows). Corroborated by user reports [#6697](https://github.com/microsoft/LightGBM/issues/6697) (A100), [#6531](https://github.com/microsoft/LightGBM/issues/6531) (RTX 4060).
+- Install path via `uv add lightgbm`: CPU wheel only. CUDA build requires `pip install --no-binary lightgbm --config-settings=cmake.define.USE_CUDA=ON`; documented as flaky ([#6417](https://github.com/microsoft/LightGBM/issues/6417), [#5785](https://github.com/microsoft/LightGBM/issues/5785)).
+- Decision: ship CPU-only; `make_lightgbm_trainer` raises `NotImplementedError("LightGBM GPU support deferred ...")` when `cfg.device == "cuda"`. Future PR widens path when prereqs (prebuilt wheel OR vetted source-build recipe; container delta; golden benchmarks showing GPU > CPU) are met.
+- Sources: [LightGBM Installation Guide @ v4.5.0](https://lightgbm.readthedocs.io/en/v4.5.0/Installation-Guide.html), [GPU Tutorial @ v4.5.0](https://lightgbm.readthedocs.io/en/v4.5.0/GPU-Tutorial.html).
+
+**Q-Cat — Near-zero `_ColumnRouter` change.** PROVEN.
+- LightGBM's native splitter is Fisher (1958) optimal partitioning over a sorted gradient histogram — different algorithm from XGBoost's partition-based split.
+- High-cardinality behavior: LightGBM's own docs at [Advanced-Topics @ v4.5.0](https://lightgbm.readthedocs.io/en/v4.5.0/Advanced-Topics.html#categorical-feature-support) recommend **"treat high-card as numeric"** — i.e., the workbench's existing `NestedCVWrapper` target encoding for high-card columns is **what LightGBM itself recommends**. Corroborated by Pargent et al. 2021 ([arxiv:2104.00629](https://arxiv.org/pdf/2104.00629)): regularized target encoding ≥ native LightGBM handling on high-card.
+- Low-cardinality auto-detect: `_data_from_pandas @ v4.5.0` ([basic.py](https://github.com/microsoft/LightGBM/blob/v4.5.0/python-package/lightgbm/basic.py)) auto-detects pandas Categorical dtype columns under `categorical_feature="auto"` — exactly what the workbench's `_ColumnRouter` produces for low-card.
+- **Migration cost: rename `PASSTHROUGH_TO_XGB_CATEGORICAL` → `PASSTHROUGH_NATIVE_CATEGORICAL`** (same sentinel serves both families). No `_ColumnRouter` logic changes.
+
+**Q-Ingest — No tier-switch needed.** PROVEN.
+- LightGBM's `Dataset` always quantizes to uint8 histograms at construction (`max_bin=255` default), giving ~8x compression vs raw float ([basic.py @ v4.5.0](https://github.com/microsoft/LightGBM/blob/v4.5.0/python-package/lightgbm/basic.py)).
+- Out-of-core path is file-based (`two_round=True`; `Sequence` API), not host-RAM-tier. Single in-memory tier suffices for workbench-scale data (RAM-bound 36 GB host; 1Mx50 → ~50 MB binned).
+- Thin `src/rux_ml/training/lightgbm/ingest.py::build_dataset(x, y, data_cfg)` helper for symmetry with `xgboost/ingest.py`. No `lightgbm_in_memory_x_gb_max` knob.
+
+**Q-Wrap — Complete kwarg-translation table.** PROVEN.
+- `LGBMModel.__init__` ([sklearn.py L485-507 @ v4.5.0](https://github.com/microsoft/LightGBM/blob/v4.5.0/python-package/lightgbm/sklearn.py#L485-L507)) accepts `**kwargs: Any` — confirms Q-MK precondition for retaining `model_kwargs` on `LightGBMTraining`.
+- **`early_stopping_rounds` is a FIT-TIME CALLBACK in v4.5+**, not a constructor kwarg ([callback.py L452](https://github.com/microsoft/LightGBM/blob/v4.5.0/python-package/lightgbm/callback.py#L452)). Diverges from XGBoost. Pattern A (Phase 4 sub-decision): factory returns a thin shim whose `fit()` injects `lightgbm.early_stopping(N)` callback when `eval_set` present.
+- **`logloss` → `binary_logloss`** translation (LightGBM rejects "logloss" as `metric=` value). `_METRIC_TRANSLATE = {"logloss": "binary_logloss"}` in factory.
+- `random_state` alone is NOT bit-exact — must pair with `deterministic=True` for PR-013 CPU bit-exact contract.
+- `subsample` requires `subsample_freq > 0` to fire (default `subsample_freq=1` in `LightGBMTraining`).
+- `max_depth=-1` means "no limit" in LightGBM (XGBoost uses 0).
+- Sklearn-wrapper aliases: `min_data_in_leaf` → `min_child_samples`; `feature_fraction` → `colsample_bytree`; `bagging_fraction` → `subsample`; `bagging_freq` → `subsample_freq`; `lambda_l1` → `reg_alpha`; `lambda_l2` → `reg_lambda`.
+
+**Q-HPO — Research-anchored 9-knob search space.** PROVEN.
+- 7-of-9 hyperparameters have convergent evidence (Optuna canonical example [`optuna-examples/lightgbm/lightgbm_simple.py`](https://github.com/optuna/optuna-examples/blob/main/lightgbm/lightgbm_simple.py) + Optuna stepwise [`LightGBMTuner @ _lightgbm_tuner/optimize.py`](https://github.com/optuna/optuna-integration/blob/main/optuna_integration/lightgbm/_lightgbm_tuner/optimize.py) + LightGBM tuning guide [Parameters-Tuning](https://lightgbm.readthedocs.io/en/latest/Parameters-Tuning.html)).
+- `learning_rate` and `max_depth` have source disagreement — rux-ml leans documented inline.
+- `boosting_type` FIXED to `"gbdt"`, not searched (Optuna canonical + stepwise tuner both fix it).
+- Output: [`configs/search_spaces/lightgbm.toml`](../configs/search_spaces/lightgbm.toml).
+
+### Phase 4 — Sub-decisions (user-approved)
+
+| # | Decision |
+|---|---|
+| 1 | `LightGBMTraining` inherits `device: Literal["cuda", "cpu"]` from `TrainingBase` unchanged; factory raises `NotImplementedError` on `cfg.device == "cuda"`. (No type-narrow override → no `# pyright: ignore`.) |
+| 2 | Keep `early_stopping_rounds` on `TrainingBase` (family-agnostic concept); LightGBM factory provides Pattern-A shim that injects `lightgbm.early_stopping(N)` callback at fit time. |
+| 3 | Rename `PASSTHROUGH_TO_XGB_CATEGORICAL` → `PASSTHROUGH_NATIVE_CATEGORICAL`. |
+| 4 | OMIT `use_native` on `LightGBMTraining` for v0.1. |
+| 5 | `deterministic: bool = False` (matches LightGBM default; opt in for PR-013 bit-exact tests). |
+| 6 | Add `tests/training/test_lightgbm_smoke.py` with categorical column to exercise Q-Cat integration. |
+
+### Verification artifacts
+
+- `make test` → **310 passed**, 0 failed, 15 deselected (gpu/slow/golden/docker — gated). Was 305 pre-PR-018; added 5 new tests (1 conformance-test entry for lightgbm + 4 in `test_lightgbm_smoke.py`).
+- `uv run basedpyright src/` → **0 errors, 0 warnings, 0 notes**.
+- `uv run ruff check .` → **All checks passed**.
+- Existing v0 + PR-017 tests unchanged. The XGBoost integration is untouched per `One PR, One Thing`.
 
 ---
 
