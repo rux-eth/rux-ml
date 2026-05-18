@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "rux-ml"
-version = "0.0.1"
+version = "0.1.0"
 description = "Personal ML research workbench for tabular GBM lifecycle (XGBoost-first)"
 readme = "README.md"
 requires-python = ">=3.12"

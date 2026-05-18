@@ -2,7 +2,7 @@
 
 `rux-ml` is a personal ML research workbench for the full lifecycle of tabular gradient-boosted models — primarily XGBoost, with a contract that admits LightGBM, CatBoost, and other sklearn-compatible models later. It is operated via a single CLI (`rux-ml`) and a Python package (`rux_ml`); there is no web UI and no long-running server.
 
-This document describes the architecture as designed across the 17 decisions logged in `docs/0.0/DESIGN-log.md`. Hard rules live in `docs/CONSTRAINTS.md`; soft patterns in `docs/CONVENTIONS.md`.
+This document describes the architecture as designed across the 17 decisions logged in `docs/0.0/DESIGN-log.md` plus v0.1 amendments in `docs/0.1/DESIGN-log.md`. Hard rules live in `docs/CONSTRAINTS.md`; soft patterns in `docs/CONVENTIONS.md`. <!-- rewrite-doc-refs:skip-line -->
 
 ---
 
@@ -32,7 +32,7 @@ The Python package is organized into layered subpackages. Dependencies flow down
 
 `src/rux_ml/_internal/trial_runner.py` is the entry point invoked by `subprocess.run` per trial — see Data Flow below.
 
-The repository skeleton is in `docs/CONVENTIONS.md`; the Python package internal structure is laid out in detail in D15 of `docs/0.0/DESIGN-log.md`.
+The repository skeleton is in `docs/CONVENTIONS.md`; the Python package internal structure is laid out in detail in D15 of `docs/0.0/DESIGN-log.md`. <!-- rewrite-doc-refs:skip-line -->
 
 ---
 
@@ -560,7 +560,7 @@ Two interactions worth flagging explicitly:
 
 - **Constraints (hard rules):** `docs/CONSTRAINTS.md`
 - **Conventions (soft patterns):** `docs/CONVENTIONS.md`
-- **Decision research trail:** `docs/0.0/DESIGN-log.md` (D1 through D17)
-- **PR plan:** `docs/0.0/ROADMAP.md`
-- **Per-PR research status:** `docs/0.0/RESEARCH-BACKLOG.md`
+- **Decision research trail:** `docs/0.0/DESIGN-log.md` (v0: D1 through D17) + `docs/0.1/DESIGN-log.md` (v0.1: Q1 through Q6 + deferred A1–A6) <!-- rewrite-doc-refs:skip-line -->
+- **PR plan:** `docs/0.1/ROADMAP.md` (v0 roadmap frozen at `docs/0.0/ROADMAP.md`) <!-- rewrite-doc-refs:skip-line -->
+- **Per-PR research status:** `docs/0.1/RESEARCH-BACKLOG.md` (v0 backlog frozen at `docs/0.0/RESEARCH-BACKLOG.md`) <!-- rewrite-doc-refs:skip-line -->
 - **Procedures:** `PROCEDURE-design-planning.md`, `PROCEDURE-pr-research.md`, `PROCEDURE-code-audit.md`

@@ -1,6 +1,6 @@
 # PR-017: Trainer registry refactor
 
-**Landed-in:** (not yet landed)
+**Landed-in:** v0.1.0
 
 ## Before Implementation (NON-NEGOTIABLE)
 

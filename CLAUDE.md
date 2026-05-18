@@ -43,13 +43,13 @@ Configuration: three-tier layered TOML (`base.toml` → `problems/<n>.toml` → 
 
 ## Implementation Status
 
-See `docs/0.0/ROADMAP.md` for the ordered PR plan (PR-001 through PR-014, organized into Phases A–G). Full PR descriptions in `prs/`. Per-PR research status in `docs/0.0/RESEARCH-BACKLOG.md`.
+See `docs/0.1/ROADMAP.md` for the ordered PR plan of the active version. Full PR descriptions in `prs/`. Per-PR research status in `docs/0.1/RESEARCH-BACKLOG.md`. The v0 roadmap is frozen at `docs/0.0/ROADMAP.md`. <!-- rewrite-doc-refs:skip-line -->
 
 No code yet. Phase 4 (this doc set) just landed; Phase 5 (implementation) begins with PR-001 once `PROCEDURE-pr-research.md` Phase 1 (State Assessment) completes.
 
 ## Ongoing Behavior (MANDATORY)
 
-- **Every PR runs `PROCEDURE-pr-research.md` before implementation.** No exceptions. All v0 PRs are Tier-1 (research-backed at design time) per `docs/0.0/RESEARCH-BACKLOG.md`; Phase 1 (State Assessment) is required to catch drift, Phases 2-4 may be light if no drift is found.
+- **Every PR runs `PROCEDURE-pr-research.md` before implementation.** No exceptions. All v0 PRs were Tier-1 (research-backed at design time) per `docs/0.0/RESEARCH-BACKLOG.md`; v0.1 PRs are Tier-2 per `docs/0.1/RESEARCH-BACKLOG.md`. Phase 1 (State Assessment) is required to catch drift, Phases 2-4 may be light if no drift is found. <!-- rewrite-doc-refs:skip-line -->
 - **Honor the Per-Phase Approval Gate** in any multi-phase procedure (`PROCEDURE-pr-research.md`, `PROCEDURE-design-planning.md`) — see `docs/CONSTRAINTS.md`. Default behavior is to halt at every phase boundary and request explicit approval before advancing.
 - **Research findings travel with the PR** — appended to the PR file's `## Research findings` section. Do not discard.
 - **State drifts.** Even research-backed decisions need Phase 1 state assessment before implementation. Project staleness threshold is **60 days** (per `docs/CONSTRAINTS.md`).
@@ -66,10 +66,10 @@ No code yet. Phase 4 (this doc set) just landed; Phase 5 (implementation) begins
 - `docs/VERSIONING.md` — versioning policy + bump rules + changelog format + hybrid docs-versioning layout (flat, meta-rule)
 - `docs/DEPLOYMENT.md` — container build + image-digest capture + smoke test + rebuild triggers (flat, SSOT)
 - `/CHANGELOG.md` — user-facing changelog (Keep-a-Changelog 1.1.0)
-- `docs/0.0/ROADMAP.md` — PR index (PR-001 through PR-015) with phases and dependencies
-- `docs/0.0/RESEARCH-BACKLOG.md` — per-PR research status + drift watch
+- `docs/0.1/ROADMAP.md` — active PR index with phases and dependencies (v0 roadmap frozen at `docs/0.0/ROADMAP.md`) <!-- rewrite-doc-refs:skip-line -->
+- `docs/0.1/RESEARCH-BACKLOG.md` — per-PR research status + drift watch (v0 backlog frozen at `docs/0.0/RESEARCH-BACKLOG.md`) <!-- rewrite-doc-refs:skip-line -->
 - `prs/` — full PR descriptions (start new PRs from `prs/PR-TEMPLATE.md`)
-- `docs/0.0/DESIGN-log.md` — full design conversation log (D1–D17 with research trail, BEST-GUESS items acknowledged, conflicts flagged)
+- `docs/0.1/DESIGN-log.md` — active design conversation log with research trail (BEST-GUESS items acknowledged, conflicts flagged); v0 design history (D1–D17) frozen at `docs/0.0/DESIGN-log.md` <!-- rewrite-doc-refs:skip-line -->
 - `PROCEDURE-design-planning.md` — how to run design sessions (with integrated research rounds)
 - `PROCEDURE-pr-research.md` — mandatory research procedure before every PR implementation
 - `PROCEDURE-code-audit.md` — post-design-session code audit
