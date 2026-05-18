@@ -16,8 +16,13 @@
 # Set per problem when categoricals matter.
 
 [training]
-# Defaults: kind="xgboost", device="cuda", tree_method="hist",
+# Per PR-017: TrainingConfig is a tagged-union over per-family variants —
+# `kind` MUST be set explicitly because Pydantic's discriminator dispatch
+# runs BEFORE field defaults are applied (same pattern as `[cv]` below).
+# Switch via kind ∈ {xgboost} (PR-018 adds lightgbm, PR-019 adds catboost).
+# Defaults: device="cuda", tree_method="hist",
 # enable_categorical=true, learning_rate=0.1, max_depth=6, n_estimators=100.
+kind = "xgboost"
 
 [tuning]
 # Defaults: sampler="tpe" (multivariate=true, group=true, n_startup_trials=20,

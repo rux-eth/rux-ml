@@ -26,8 +26,7 @@ from numpy.typing import NDArray
 from sklearn.datasets import make_classification
 
 from rux_ml._internal.seeds import make_seed_bag
-from rux_ml.config import TrainingConfig
-from rux_ml.training import make_trainer
+from rux_ml.training import XGBoostTraining, make_trainer
 
 pytestmark = pytest.mark.gpu
 
@@ -43,8 +42,8 @@ def _synth_dataset() -> tuple[NDArray[np.float64], NDArray[np.int_]]:
     return cast("NDArray[np.float64]", x_arr), cast("NDArray[np.int_]", y_arr)
 
 
-def _gpu_cfg() -> TrainingConfig:
-    return TrainingConfig(
+def _gpu_cfg() -> XGBoostTraining:
+    return XGBoostTraining(
         device="cuda",
         tree_method="hist",
         metric="auc",

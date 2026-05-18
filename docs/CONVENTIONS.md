@@ -321,6 +321,47 @@ The `--regenerate-golden` pytest flag is wired via `tests/golden/conftest.py:pyt
 
 ---
 
+## Multi-family Trainer extensibility (per PR-017)
+
+Per `docs/0.1/DESIGN-log.md` Q1–Q5 + Q6:
+
+**Subpackage per family.** Every Trainer family lives at `src/rux_ml/training/<family>/`:
+
+```
+src/rux_ml/training/
+├── __init__.py        # public API + TRAINER_FAMILIES registry
+├── base.py            # TrainingBase (family-agnostic fields)
+├── factory.py         # top-level make_trainer dispatcher
+├── metrics.py         # family-agnostic metric registry
+├── protocol.py        # Trainer typing.Protocol
+└── <family>/
+    ├── __init__.py    # public API for this family's subpackage
+    ├── config.py      # <Family>Training Pydantic variant of TrainingConfig
+    ├── factory.py     # make_<family>_trainer
+    └── (family-specific extras: ingest.py, etc.)
+```
+
+**B-explicit registry.** Families register themselves in `src/rux_ml/training/__init__.py`'s `TRAINER_FAMILIES: dict[str, Callable]` — one entry per family, hand-maintained, no decorator-driven registration. Pattern anchored on HF transformers' `MODEL_MAPPING_NAMES`. The conformance test (`tests/training/test_registry_conformance.py`) parametrizes over this dict; any registered family that fails the end-to-end fit-predict smoke fails CI.
+
+**Discriminated-union config.** `TrainingConfig` (`src/rux_ml/config/training.py`) is `Annotated[XGBoostTraining | <Future>Training, Field(discriminator="kind")]`. Each variant inherits from `TrainingBase` and declares `kind: Literal["<family>"]` as the discriminator. The `kind` field is NOT on `TrainingBase` (it would force every variant to break `reportIncompatibleVariableOverride`). The dispatcher takes `cfg: TrainingConfig` so basedpyright narrows on each variant.
+
+**TOML configs MUST declare `kind` explicitly** under `[training]`. Pydantic's discriminator dispatch runs BEFORE field defaults are applied, so even though variants have `kind = "xgboost"` defaults, the TOML loader requires the key to be present (same pattern as `[cv]`). Example:
+
+```toml
+[training]
+kind = "xgboost"
+device = "cpu"
+metric = "auc"
+```
+
+**Per-family extras naming.** Optional dependencies follow the per-family pattern — `[xgboost]`, `[lightgbm]`, `[catboost]` — named after the family, not the backend package. (XGBoost stays hard-required per Q-Dep research; PR-018+ add the optional siblings.) Codified by PR-018 in the same commit that adds the first sibling.
+
+**Family removal**: deprecate with `FutureWarning` from the family's factory in release `0.y`, remove in `0.(y+1)`. MINOR bump per `docs/VERSIONING.md §1`; bundle-loadability break is documented in `CHANGELOG.md`, not elevated to MAJOR.
+
+**Conformance test invariant.** `tests/training/test_registry_conformance.py` is the stale-path tripwire. Adding a family without a working subpackage fails the test; removing a subpackage without removing the registry entry fails the test. Each new family adds (a) its registry entry, (b) its minimal-cfg entry in the test's `_MINIMAL_CFG` map (with a fail-loudly assertion that every registered family is in the map). No skipping, no XFAILing.
+
+**Native escape hatches** (per D5): each family may expose a `use_native: bool` flag on its variant to bypass the sklearn-wrapper API for the ~5 % of cases where the wrapper is insufficient (XGBoost: `xgb.train()`; LightGBM: `lgb.train()`; CatBoost: `cb.train()`). Not used by default; flagged on the per-family variant when it lands.
+
 ## Where new conventions go
 
 When a convention emerges that isn't documented here, add it during the same PR that establishes it. Conventions added retroactively go stale fast.

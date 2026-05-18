@@ -6,10 +6,10 @@ from typing import cast
 
 import numpy as np
 import pytest
+from pydantic import ValidationError
 from xgboost import XGBClassifier, XGBModel, XGBRegressor
 
-from rux_ml.config import TrainingConfig
-from rux_ml.training import Trainer, make_trainer
+from rux_ml.training import TRAINER_FAMILIES, Trainer, XGBoostTraining, make_trainer
 
 
 def _accept(_trainer: Trainer) -> None:
@@ -18,14 +18,14 @@ def _accept(_trainer: Trainer) -> None:
 
 
 def test_make_trainer_returns_xgbclassifier_for_classification_metric(
-    training_cfg_classification: TrainingConfig,
+    training_cfg_classification: XGBoostTraining,
 ) -> None:
     trainer = make_trainer(training_cfg_classification)
     assert isinstance(trainer, XGBClassifier)
 
 
 def test_make_trainer_returns_xgbregressor_for_regression_metric(
-    training_cfg_regression: TrainingConfig,
+    training_cfg_regression: XGBoostTraining,
 ) -> None:
     trainer = make_trainer(training_cfg_regression)
     assert isinstance(trainer, XGBRegressor)
@@ -37,7 +37,7 @@ def _params(trainer: Trainer) -> dict[str, object]:
 
 
 def test_make_trainer_propagates_top_level_kwargs(
-    training_cfg_classification: TrainingConfig,
+    training_cfg_classification: XGBoostTraining,
 ) -> None:
     trainer = make_trainer(training_cfg_classification)
     params = _params(trainer)
@@ -52,7 +52,7 @@ def test_make_trainer_propagates_top_level_kwargs(
 
 def test_make_trainer_model_kwargs_override_top_level() -> None:
     """``model_kwargs`` wins on key collisions so TOML can override defaults."""
-    cfg = TrainingConfig(
+    cfg = XGBoostTraining(
         device="cpu",
         metric="auc",
         n_estimators=5,
@@ -67,14 +67,52 @@ def test_make_trainer_model_kwargs_override_top_level() -> None:
     assert params["n_estimators"] == 5  # untouched
 
 
-def test_make_trainer_rejects_non_xgboost_kind() -> None:
-    cfg = TrainingConfig(kind="lightgbm", device="cpu", metric="rmse", early_stopping_rounds=None)
-    with pytest.raises(NotImplementedError, match="lightgbm"):
-        make_trainer(cfg)
+def test_pydantic_rejects_unknown_family_at_config_validation() -> None:
+    """Discriminated union: ``kind="lightgbm"`` is rejected at config construction.
+
+    Pre-PR-017 the rejection happened later (``make_trainer`` raised
+    ``NotImplementedError``). Post-refactor, Pydantic's discriminated union
+    enforces the rejection at validation time — the unknown ``kind`` value
+    can never reach the factory dispatcher.
+    """
+    with pytest.raises(ValidationError):
+        # The discriminated union's literal type rejects "lightgbm" until PR-018
+        # adds it. Until then, validation fails with a ValidationError naming
+        # the invalid literal.
+        XGBoostTraining(  # pyright: ignore[reportCallIssue]
+            kind="lightgbm",  # type: ignore[arg-type]
+            device="cpu",
+            metric="rmse",
+            early_stopping_rounds=None,
+        )
+
+
+def test_make_trainer_rejects_unregistered_family() -> None:
+    """Defensive: ``make_trainer`` raises ValueError when ``cfg.kind`` is not in
+    ``TRAINER_FAMILIES``.
+
+    Reachable only via a caller that bypasses Pydantic validation (which is
+    blocked by ``test_pydantic_rejects_unknown_family_at_config_validation``),
+    or via a programmatic mutation of ``TRAINER_FAMILIES`` itself. Kept as a
+    defensive smoke so the error path is exercised in CI and the dispatcher
+    can never silently fall through.
+    """
+
+    class _ForgedConfig:
+        kind = "bogus_family"
+
+    with pytest.raises(ValueError, match="not registered"):
+        make_trainer(cast("XGBoostTraining", _ForgedConfig()))
+
+
+def test_trainer_families_registry_contains_xgboost() -> None:
+    """``TRAINER_FAMILIES`` is the SSOT for registered families."""
+    assert "xgboost" in TRAINER_FAMILIES
+    assert callable(TRAINER_FAMILIES["xgboost"])
 
 
 def test_trainer_protocol_conforms_to_xgboost(
-    training_cfg_classification: TrainingConfig,
+    training_cfg_classification: XGBoostTraining,
 ) -> None:
     """``XGBClassifier`` satisfies the structural :class:`Trainer` protocol.
 
@@ -94,7 +132,7 @@ def test_trainer_exposes_best_iteration_after_early_stopping_fit() -> None:
     ``best_iteration`` on the fitted estimator (the field the ``Trainer`` Protocol
     advertises as ``best_iteration_`` / sklearn convention).
     """
-    cfg = TrainingConfig(
+    cfg = XGBoostTraining(
         device="cpu",
         metric="logloss",
         n_estimators=16,

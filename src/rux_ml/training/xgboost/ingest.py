@@ -1,5 +1,12 @@
 """XGBoost ingest-path decision rule (per D3).
 
+Moved from ``rux_ml/training/ingest.py`` in PR-017 to live alongside other
+XGBoost-specific code. Re-exported from ``rux_ml.training`` for back-compat
+so existing callers (``cli/train.py``, ``tuning/objective.py``) need not
+update import paths in this PR. Future PRs introducing family-specific
+ingest paths (e.g. LightGBM ``Dataset``, CatBoost ``Pool``) will live in
+their own subpackages.
+
 ``select_ingest(x_bytes, data_cfg)`` returns the **DMatrix class** the trainer
 should use:
 

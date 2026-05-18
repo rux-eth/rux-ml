@@ -35,7 +35,7 @@ from rux_ml.config.features import FeaturesConfig
 from rux_ml.config.memory import MemoryConfig
 from rux_ml.config.registry import RegistryConfig
 from rux_ml.config.runs import RunsConfig
-from rux_ml.config.training import TrainingConfig
+from rux_ml.config.training import TrainingConfig, XGBoostTraining
 from rux_ml.config.tuning import SearchSpec, TuningConfig
 
 if TYPE_CHECKING:
@@ -85,7 +85,7 @@ class RuxMLConfig(BaseSettings):
 
     data: DataConfig = Field(default_factory=DataConfig)
     features: FeaturesConfig = Field(default_factory=FeaturesConfig)
-    training: TrainingConfig = Field(default_factory=TrainingConfig)
+    training: TrainingConfig = Field(default_factory=XGBoostTraining)
     tuning: TuningConfig = Field(default_factory=TuningConfig)
     runs: RunsConfig = Field(default_factory=RunsConfig)
     registry: RegistryConfig = Field(default_factory=RegistryConfig)

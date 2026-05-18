@@ -1,37 +1,42 @@
-"""Training layer config (per D5, D3)."""
+"""Training layer config — discriminated union over per-family variants (per PR-017).
 
-from typing import Any, Literal
+Re-exports the family-agnostic :class:`TrainingBase` (from
+``rux_ml.training.base``) and the XGBoost variant :class:`XGBoostTraining`
+(from ``rux_ml.training.xgboost.config``) so existing callers' imports
+(``from rux_ml.config import TrainingConfig``) continue to resolve. The
+discriminated-union :data:`TrainingConfig` is assembled here at the
+config-layer level.
+
+The narrow layer inversion (``rux_ml.config`` depending on
+``rux_ml.training.xgboost.config``) is intentional: Pydantic v2 discriminated
+unions need the assembly point to know all variants by type. Per-family
+variants live co-located with their factories per Q5 of
+``docs/0.1/DESIGN-log.md`` — they're discovered by the registry at runtime
+and assembled into the union here at type level.
+
+PR-018/PR-019 widen the union by adding ``LightGBMTraining`` / ``CatBoostTraining``
+imports + the corresponding variants in the ``Annotated[...]`` below.
+"""
+
+from __future__ import annotations
+
+from typing import Annotated
 
 from pydantic import Field
 
-from rux_ml.config._strict_model import StrictModel
+from rux_ml.training.base import TrainingBase
+from rux_ml.training.xgboost.config import XGBoostTraining
 
+# Discriminated-union TrainingConfig. Single variant in v0.1; PR-018+ widens
+# the Union as new families land. Pydantic v2 dispatches on the ``kind``
+# discriminator field (PR-006 convention; matches cv.py's CVConfig pattern).
+TrainingConfig = Annotated[
+    XGBoostTraining,
+    Field(discriminator="kind"),
+]
 
-class TrainingConfig(StrictModel):
-    # Trainer family (per D5 — sklearn estimator API as the contract).
-    kind: Literal["xgboost", "lightgbm", "catboost", "sklearn"] = "xgboost"
-
-    # GPU-first per D3 (user override of CPU-first lean).
-    device: Literal["cuda", "cpu"] = "cuda"
-
-    # Eval metric (concrete metric registry lands in PR-006).
-    metric: str = "auc"
-
-    # XGBoost-specific defaults that match D3 / D4 decisions.
-    enable_categorical: bool = True
-    tree_method: Literal["hist", "approx", "exact"] = "hist"
-
-    # Native xgb.train() escape hatch per D5 (~5% of cases).
-    use_native: bool = False
-
-    # Common tunable hyperparameters surfaced at the top level so dot-path
-    # CLI/env overrides stay clean (e.g. RUXML_TRAINING__LEARNING_RATE=0.01).
-    learning_rate: float = 0.1
-    max_depth: int = 6
-    n_estimators: int = 100
-    subsample: float = 1.0
-    colsample_bytree: float = 1.0
-    early_stopping_rounds: int | None = 50
-
-    # Anything else (XGBoost-specific or family-specific kwargs).
-    model_kwargs: dict[str, Any] = Field(default_factory=dict)
+__all__ = [
+    "TrainingBase",
+    "TrainingConfig",
+    "XGBoostTraining",
+]
