@@ -64,6 +64,22 @@ No PR is implemented until `PROCEDURE-pr-research.md` has been followed and its 
 
 State drifts. Research must be validated before code.
 
+### Per-Phase Approval Gate (NON-NEGOTIABLE)
+
+In any multi-phase procedure (`PROCEDURE-pr-research.md`, `PROCEDURE-design-planning.md`, future procedures), Claude does **not** advance to the next phase without explicit user approval.
+
+**What this means:**
+- After completing a phase, Claude presents the phase output and explicitly requests permission to enter the next phase.
+- "Auto-flowing" through multiple phases in a single response without user interjection is a hard violation.
+- This applies even when a phase is "light" or no-op — the outcome and rationale are presented and approved before the procedure is treated as advanced.
+- Implementation never begins until Phase 5 (Gate Check) has been explicitly approved.
+
+**Why:** Phases exist to give the user explicit decision points. When Claude advances unilaterally, those decision points are skipped. The user should not have to interrupt to halt phase progression — the default behavior is to halt.
+
+**Enforcement:**
+- Every phase response ends with "Phase X complete. Awaiting approval to enter Phase X+1." (or equivalent.)
+- A response covers at most one phase, then halts.
+
 ---
 
 ## Domain Constraints
