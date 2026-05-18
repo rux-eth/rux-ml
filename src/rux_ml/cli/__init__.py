@@ -23,7 +23,7 @@ from typing import Annotated
 import typer
 
 from rux_ml import __version__
-from rux_ml.cli import data, registry, runs, train, tune
+from rux_ml.cli import data, registry, runs, solve, train, tune
 from rux_ml.cli._shared import GlobalOptions, parse_set_overrides
 
 app = typer.Typer(
@@ -39,8 +39,9 @@ app.add_typer(tune.app, name="tune")
 app.add_typer(runs.app, name="runs")
 app.add_typer(registry.app, name="registry")
 
-# Leaf verb (``rux-ml train``) — single baseline training, no sub-verb.
+# Leaf verbs (single command, no sub-verb).
 app.command(name="train", help="Run a single baseline training (no sweep).")(train.run_command)
+app.command(name="solve", help="Run a single solver invocation (per PR-020).")(solve.run_command)
 
 
 def _version_callback(value: bool) -> None:

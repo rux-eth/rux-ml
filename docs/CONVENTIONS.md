@@ -336,6 +336,38 @@ Rationale: the family name (`lightgbm`) matches `cfg.training.kind` and the `TRA
 
 Note: PR-018 introduced the `[project.optional-dependencies]` table for the first time. PR-019 and PR-020 add new entries without restructuring.
 
+## Solver layer (per PR-020)
+
+The Solver layer is a parallel top-level surface alongside the Trainer layer. Per `docs/0.1/DESIGN-log.md` Q1 + PR-020 Q-Shape (partial mirror), the solving layer reuses the workbench's config/registry/factory/study/provenance substrate but bypasses `cfg.data` / `cfg.cv` / fittable-model registry.
+
+**Subpackage layout** mirrors the Trainer layer:
+
+```
+src/rux_ml/solving/
+├── __init__.py        # public API + SOLVER_FAMILIES registry
+├── base.py            # SolvingBase (family-agnostic config: problem_module)
+├── factory.py         # top-level make_solver dispatcher
+├── protocol.py        # Solver typing.Protocol
+├── result.py          # SolverResult dataclass
+└── <family>/
+    ├── __init__.py    # public API for this family
+    ├── config.py      # <Family>Solving Pydantic variant
+    └── factory.py     # make_<family>_solver
+```
+
+**`rux-ml solve` verb convention.** Single command (analog of `rux-ml train`), NOT a typer-group. With solver-internal HPO deferred to a follow-up PR, there's no `start/resume/status` to need. User invokes `rux-ml solve --problem <problem-name>` (or `--config <path>`) for a one-shot solve. The CLI:
+
+1. Loads `cfg.solving` from the TOML stack.
+2. Imports `cfg.solving.problem_module` (a Python module path) and calls its `build_problem() → <family-specific problem>`.
+3. Dispatches via `make_solver(cfg.solving)`.
+4. Calls `solver.solve(problem)` and records a 1-trial Optuna trial with `TrialAttrs` (provenance + solver-runtime fields).
+
+**Problem-module contract**: the user defines `def build_problem() -> cvxpy.Problem` (for the CVXPY family) in any importable Python module. The CLI imports fresh on each invocation. Keep problem modules inside the workbench's git so `git_sha` captures their content (the `solving_cfg_hash` field covers only the module's import path, not its source — known limitation).
+
+**Solver trials vs Trainer trials**: same `TrialAttrs` schema with Optional fields. Solver trials leave `data_hash` / `data_bytes_hash` / `data_logical_hash` as `"none:solver-trial"` placeholders (no Parquet input) and fill `solving_cfg_hash` + `solver_status` + `objective_value` + `solver_iter_count` + `solve_time_s`. Trainer trials work unchanged — they leave the solver fields None.
+
+**Solver-internal HPO is deferred** to a follow-up Tier-2 PR. v0.1's `rux-ml solve` is one-shot only; users sweep over solver hyperparameters by running multiple invocations with different overrides.
+
 ## Per-family threading model (per PR-019 Q-Parallel)
 
 The workbench's `pin_threads()` (PR-011) exports `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, `POLARS_MAX_THREADS` env vars to the trial subprocess. **Not every family honors these.**

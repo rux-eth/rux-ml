@@ -1,6 +1,6 @@
 # PR-020: Solver Protocol + first Solver family
 
-**Landed-in:** (not yet landed)
+**Landed-in:** v0.1.0 (pending v0.1.0 cut in PR-021)
 
 ## Before Implementation (NON-NEGOTIABLE)
 
@@ -16,27 +16,62 @@ Skipping the PR research procedure is a hard violation of the research-backed-de
 
 ## Research findings
 
-_To be populated by `PROCEDURE-pr-research.md`. Do not begin implementation until this section exists with completed findings from all required phases._
+`PROCEDURE-pr-research.md` 5-phase Tier-2 procedure completed 2026-05-18.
 
-**Open research questions** (must be resolved before implementation):
+### State Assessment (2026-05-18) — Phase 1
 
-1. **First Solver family choice.** Candidates: OSQP, Clarabel, SCS, scipy.optimize, cvxpy-wrapped (multi-backend). Tradeoffs: install footprint (some solvers ship as small C extensions, cvxpy pulls a lot), license (some commercial — MOSEK, Gurobi, CPLEX — out of scope for an open workbench), problem-class coverage (QP-only vs QP+SOCP+SDP), Python-side ergonomics. Success criteria: a single first Solver family chosen with cited tradeoff analysis. Anchor on cvxpy's solver list and the 2026-05-18 research (cvxpy ships OSQP/ECOS/CLARABEL/SCS as required deps, rest as extras).
+**Surprise**: `cvxpy 1.8.2` + `clarabel 0.11.1` are **already runtime-installed** via `skfolio>=0.20.1` (hard dep from PR-015). Promoted to direct deps in PR-020 rather than relying on transitive.
 
-2. **Canonical `Solver` Protocol surface.** The lean from Q1 is `solve(problem) → result`, but what's the concrete `problem` type?
-   - Option A: cvxpy-style structured object (`Problem(Minimize(obj), constraints)`)
-   - Option B: raw matrices (`P, q, A, l, u` OSQP-style)
-   - Option C: a workbench-specific dataclass that wraps either
-   Success criteria: a concrete `Solver.solve(...)` signature with rationale. Anchor on cvxpy / pyomo / scipy.optimize conventions.
+**Impedance mismatch surfaced** between Solver and the workbench's existing layers — Phase 1 elevated this to a top-level Q-Shape question (which the stub didn't anticipate):
 
-3. **A4 — `rux-ml solve` CLI verb design.** What subcommands mirror `rux-ml train` / `rux-ml tune`? Options:
-   - `rux-ml solve start --problem <name>` — analog of `rux-ml tune start`
-   - `rux-ml solve status / resume / retry-trial` — analogs of tuning verbs
-   - `rux-ml solve once --problem <name>` — analog of `rux-ml train` (single solve, no HPO)
-   Success criteria: a CLI surface that's consistent with the v0 verb naming convention (`docs/CONVENTIONS.md` CLI verbs). Document the design in `docs/CONVENTIONS.md`.
+| Workbench layer | Tabular shape | Solver shape | Mismatch |
+|---|---|---|---|
+| `cfg.data` | Polars/Parquet + `target_column` | matrices `(P, q, A, l, u)` or `cvxpy.Problem` | Yes |
+| `cfg.cv` | K-fold / TimeSeriesSplit / CPCV | single solve, no folds | Yes |
+| Registry bundle | `pipeline.skops` + `model.ubj` + manifest | `x_star` solution vector | Yes |
+| Optuna study (PR-007 objective) | K-fold-CV-mean | single-trial solve | Yes |
+| `TrialAttrs` schema | Trainer-specific required fields | needs solver-specific fields | Yes |
 
-4. **Solver-side study integration with Optuna.** Does the v0 K-fold CV-mean objective (PR-007) translate to solver tuning, or is the HPO surface fundamentally different for constrained optimization? Are there per-solver hyperparameters worth tuning (e.g., OSQP's `rho`, `alpha`)? Success criteria: documented decision on whether Solver families participate in `rux-ml tune` the same way Trainer families do, or whether solver HPO is a separate verb / out of scope for v0.1.
+### Phase 3 — Research findings
 
-5. **Provenance triple extension.** The v0 provenance triple (`docs/ARCHITECTURE.md` "Reproducibility Architecture") includes `data_hash`, per-layer config hashes, `git_sha`, `entropy_hex`, `image_digest`, library/CUDA versions, `omp_threads`, `peak_rss_mb`. Does it carry forward unchanged for Solver runs, or does Solver runs need different provenance fields (e.g., `problem_hash` instead of `data_hash`)? Success criteria: documented provenance schema for Solver runs.
+**Q-First-Solver — CVXPY.** PROVEN.
+- Zero dep addition (cvxpy + clarabel already transitive via skfolio per Phase 1 surprise).
+- Covers LP/QP/QCQP/SOCP/SDP/MILP through one `solver=` switch.
+- Pin `solver="CLARABEL"` in TOML for per-trial provenance stability. Clarabel ranks #3 in [qpsolvers/free_for_all_qpbenchmark](https://github.com/qpsolvers/free_for_all_qpbenchmark/blob/main/results/free_for_all.md); modern Rust solver; Apache-2.0.
+- Source pins: [cvxpy v1.8.2](https://github.com/cvxpy/cvxpy), [clarabel v0.11.1](https://github.com/oxfordcontrol/Clarabel.rs).
+- Trade-off: cvxpy adds DCP compilation overhead on every `solve()`; future PRs may register clarabel-direct / OSQP-direct as backends if profiled > 5% (analog of the v0 D13 "first Rust crate" threshold).
+
+**Q-Shape — B (partial mirror).** CONVENTION.
+- skfolio (already in workbench deps) uses A-full-mirror but only because portfolio data has a natural `X = returns matrix` reshape — QP matrices `(P, q, A, l, u)` lack that. (Source: [skfolio/optimization/_mean_risk.py](https://raw.githubusercontent.com/skfolio/skfolio/main/src/skfolio/optimization/convex/_mean_risk.py))
+- Optuna + MLflow validate substrate-reuse without forcing fittable-model assumptions. (Sources: [Optuna first-tutorial](https://optuna.readthedocs.io/en/stable/tutorial/10_key_features/001_first.html), [MLflow Tracking](https://mlflow.org/docs/latest/ml/tracking/))
+- C-utility-module has no documented precedent in workbench-shaped projects.
+- Decision: keep config-layer + registry-dict + factory + Optuna study + per-trial provenance; drop cfg.data / cfg.cv / Trainer-shaped registry for solver trials.
+
+### Phase 4 — Locked sub-decisions
+
+| # | Decision |
+|---|---|
+| 1 | **Q-Shape = B (partial mirror)** — keep cross-cutting plumbing, drop semantics-mismatched layers. |
+| 2 | **Q-First-Solver = CVXPY** — pin `solver="CLARABEL"` default; `solver_opts: dict[str, Any]` escape hatch for backend-specific knobs. |
+| 3 | **Q-Registry = skip for v0.1** — Optuna study + `user_attrs` provenance is sufficient; no solver bundle in PR-020. |
+| 4 | **Q-HPO = defer** — `rux-ml solve` is one-shot only; solver-internal HPO is a follow-up Tier-2 PR. |
+| 5 | **Q-CLI = single command** `rux-ml solve` (analog of `rux-ml train`; not a typer-group). |
+| 6 | **Q-Provenance = single `TrialAttrs` with Optional solver fields** — `solving_cfg_hash` + `solver_status` + `objective_value` + `solver_iter_count` + `solve_time_s`, all Optional. Trainer trials work unchanged. |
+
+### Phase 5 — Gate Check sub-decisions (locked during implementation)
+
+- **`SolverResult` is a plain `@dataclass`** (not Pydantic) — runtime result type, not config.
+- **`solving_cfg_hash` covers `problem_module` path but NOT the module's source content.** Documented limitation in `docs/CONVENTIONS.md`; users keep problem modules inside the workbench's git so `git_sha` covers their content.
+- **Solver-trial data hashes use placeholder `"none:solver-trial"`** — solver runs have no Parquet input. `TrialAttrs` schema validates string presence, not content.
+- **Backend setting names differ across cvxpy backends** (Clarabel uses `tol_gap_abs` / `tol_feas` / `max_iter`; OSQP uses `eps_abs` / `eps_rel`). Rather than fake unified abstraction across names, the workbench passes `solver_opts: dict[str, Any]` straight through (matches the Trainer-side `model_kwargs` escape hatch pattern).
+- **`solver_opts` flows through `Problem.solve(solver=..., **solver_opts)`** — users consult the backend's docs for the right setting names.
+
+### Verification artifacts
+
+- `make test` → **324 passed**, 0 failed, 15 deselected. Was 319 pre-PR-020; added 5 new tests (2 in conformance + 3 in cvxpy smoke).
+- `uv run basedpyright src/` → **0 errors, 0 warnings, 0 notes**.
+- `uv run ruff check .` → **All checks passed**.
+- `rux-ml solve --help` registers cleanly in the CLI; XGBoost / LightGBM / CatBoost integrations untouched per `One PR, One Thing`.
 
 ---
 

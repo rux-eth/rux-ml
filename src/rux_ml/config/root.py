@@ -35,6 +35,9 @@ from rux_ml.config.features import FeaturesConfig
 from rux_ml.config.memory import MemoryConfig
 from rux_ml.config.registry import RegistryConfig
 from rux_ml.config.runs import RunsConfig
+from rux_ml.config.solving import (
+    SolvingConfig,  # noqa: TC001 — Pydantic needs runtime resolution for the discriminated-union annotation
+)
 from rux_ml.config.training import TrainingConfig, XGBoostTraining
 from rux_ml.config.tuning import SearchSpec, TuningConfig
 
@@ -53,6 +56,7 @@ _HASH_ELIDED_FIELDS: dict[str, set[str]] = {
     "registry": {"root"},
     "memory": set(),
     "cv": set(),
+    "solving": set(),
 }
 
 
@@ -91,6 +95,11 @@ class RuxMLConfig(BaseSettings):
     registry: RegistryConfig = Field(default_factory=RegistryConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     cv: CVConfig = Field(default_factory=KFoldCV)
+    # ``solving`` is Optional (default None) — only solver-shaped runs set
+    # it; Trainer-shaped runs leave it None. Per PR-020 Q-Shape (partial
+    # mirror), the solving layer reuses the config / registry / Optuna
+    # substrate but bypasses ``cfg.data`` and ``cfg.cv``.
+    solving: SolvingConfig | None = None
     search_space: dict[str, SearchSpec] = Field(default_factory=dict)
 
     model_config = SettingsConfigDict(
