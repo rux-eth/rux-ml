@@ -47,6 +47,7 @@ def test_extra_keys_in_toml_are_rejected(tmp_path: Path) -> None:
         dedent(
             """
             [training]
+            kind = "xgboost"
             learning_rate = 0.1
             this_field_does_not_exist = "boom"
             """

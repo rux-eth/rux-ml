@@ -19,8 +19,7 @@ from numpy.typing import NDArray
 from sklearn.datasets import make_classification
 
 from rux_ml._internal.seeds import make_seed_bag
-from rux_ml.config import TrainingConfig
-from rux_ml.training import make_trainer
+from rux_ml.training import XGBoostTraining, make_trainer
 
 
 @pytest.fixture(autouse=True)
@@ -50,7 +49,7 @@ def _synth_dataset() -> tuple[NDArray[np.float64], NDArray[np.int_]]:
     return cast("NDArray[np.float64]", x_arr), cast("NDArray[np.int_]", y_arr)
 
 
-def _cpu_cfg() -> TrainingConfig:
+def _cpu_cfg() -> XGBoostTraining:
     """CPU + hist + early_stopping disabled (val-driven early stopping adds nondet).
 
     ``subsample`` and ``colsample_bytree`` are set < 1.0 so XGBoost actually
@@ -58,7 +57,7 @@ def _cpu_cfg() -> TrainingConfig:
     regardless of seed (no random draw) and the seed-sensitivity sanity test
     can't distinguish "seed plumbed correctly" from "no randomness present".
     """
-    return TrainingConfig(
+    return XGBoostTraining(
         device="cpu",
         tree_method="hist",
         metric="auc",

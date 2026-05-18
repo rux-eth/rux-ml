@@ -1,88 +1,79 @@
-"""``make_trainer`` factory — pick the concrete XGBoost estimator per ``TrainingConfig``.
+"""``make_trainer`` top-level dispatcher (per PR-017).
 
-Per D5: the contract across families is the sklearn estimator API; the factory
-returns a concrete class whose surface matches :class:`Trainer` structurally.
+Replaces the pre-PR-017 single-family if/elif dispatch with a registry-driven
+lookup against ``TRAINER_FAMILIES`` (declared in
+:mod:`rux_ml.training.__init__`). The signature is preserved — every existing
+caller (``cli/train.py``, ``tuning/objective.py``, ``registry/promote.py``,
+tests) continues to call ``make_trainer(cfg.training, seed=...)`` unchanged.
 
-``cfg.kind`` selects the family ("xgboost" today); the **task** (classification
-vs regression) is derived from ``cfg.metric`` via the metric registry — AUC /
-logloss → ``XGBClassifier``; RMSE / MAE → ``XGBRegressor``. Keeping task off
-``TrainingConfig`` itself prevents the metric and task from drifting apart
-(which they shouldn't — they're the same decision).
+Per Q4 of ``docs/0.1/DESIGN-log.md``: the registry is a plain dict, not a
+decorator-driven plugin loader. Each family's factory is registered explicitly
+at module-import time when ``TRAINER_FAMILIES`` is constructed. The
+parametrized conformance test (``tests/training/test_registry_conformance.py``)
+iterates the dict so any registered family that fails to satisfy the
+:class:`Trainer` Protocol fails CI loudly.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
-from xgboost import XGBClassifier, XGBRegressor
-
-from rux_ml.training.metrics import task_for_metric
+from rux_ml.training.xgboost.config import XGBoostTraining
 
 if TYPE_CHECKING:
-    from rux_ml.config import TrainingConfig
+    from rux_ml.config.training import TrainingConfig
     from rux_ml.training.protocol import Trainer
-
-
-def _xgb_kwargs(cfg: TrainingConfig, *, seed: int | None) -> dict[str, object]:
-    """Assemble the XGBoost kwargs from TrainingConfig top-level fields + model_kwargs.
-
-    ``model_kwargs`` always wins on key collisions so callers can override
-    top-level defaults from TOML without having to add new TrainingConfig fields.
-
-    ``seed`` (PR-013): when not None, sets XGBoost's ``random_state``. The
-    sklearn wrapper threads this into the booster's RNG for bootstrap
-    sampling, column subsampling, and any other internal randomness so two
-    fits with the same seed (and ``tree_method="hist"`` + single thread on
-    CPU) produce bit-exact predictions. GPU `hist` is near-deterministic
-    only (per D9 + CONSTRAINTS.md tolerance-based golden-tests rule).
-    """
-    base: dict[str, object] = {
-        "device": cfg.device,
-        "tree_method": cfg.tree_method,
-        "enable_categorical": cfg.enable_categorical,
-        "learning_rate": cfg.learning_rate,
-        "max_depth": cfg.max_depth,
-        "n_estimators": cfg.n_estimators,
-        "subsample": cfg.subsample,
-        "colsample_bytree": cfg.colsample_bytree,
-        "early_stopping_rounds": cfg.early_stopping_rounds,
-        "eval_metric": cfg.metric,
-    }
-    if seed is not None:
-        base["random_state"] = seed
-    base.update(cfg.model_kwargs)
-    return base
 
 
 def make_trainer(cfg: TrainingConfig, *, seed: int | None = None) -> Trainer:
     """Return the concrete trainer for ``cfg``.
 
-    ``cfg.kind`` selects the family (only ``"xgboost"`` implemented in v0); the
-    task (classifier vs regressor) is derived from ``cfg.metric`` so the
-    user-visible config has a single source of truth.
+    Dispatches on ``cfg.kind`` via the ``TRAINER_FAMILIES`` registry. Each
+    registered family is responsible for narrowing ``cfg`` to its own
+    variant type (e.g. ``XGBoostTraining``) and constructing the concrete
+    estimator.
 
-    ``seed`` (PR-013): plumbs ``SeedBag.xgb_seed`` into XGBoost's
-    ``random_state``. When ``None``, XGBoost defaults to its internal
-    nondeterministic RNG. ``model_kwargs`` in the config takes precedence
-    over the ``seed`` argument on key collision (matches PR-006's existing
-    "model_kwargs wins" convention for direct user overrides).
+    ``seed`` (PR-013) is passed through to the family factory; the family
+    decides where to plumb it (XGBoost uses ``random_state``).
 
     Raises:
-        NotImplementedError: when ``cfg.kind`` is set to a family beyond
-            ``"xgboost"`` — those land in their own follow-up PRs (per D5).
+        ValueError: when ``cfg.kind`` is not in ``TRAINER_FAMILIES``. This
+            happens when a config selects a family that isn't registered —
+            e.g. a stale TOML referencing a removed family, or a family
+            scoped to a future PR that hasn't landed yet.
     """
-    if cfg.kind != "xgboost":
-        msg = (
-            f"training.kind={cfg.kind!r} is declared in TrainingConfig but only "
-            f"'xgboost' is implemented in v0; LightGBM/CatBoost/sklearn families "
-            f"land in their own follow-up PRs."
-        )
-        raise NotImplementedError(msg)
+    from rux_ml.training import TRAINER_FAMILIES  # noqa: PLC0415 — break import cycle
 
-    kwargs = _xgb_kwargs(cfg, seed=seed)
-    task = task_for_metric(cfg.metric)
-    # XGBoost stubs don't expose ``best_iteration_`` (set at runtime) so the
-    # structural match against the minimal Trainer Protocol needs a cast here.
-    if task == "classification":
-        return cast("Trainer", XGBClassifier(**kwargs))
-    return cast("Trainer", XGBRegressor(**kwargs))
+    family = cfg.kind
+    factory = TRAINER_FAMILIES.get(family)
+    if factory is None:
+        known = sorted(TRAINER_FAMILIES)
+        msg = (
+            f"training.kind={family!r} is not registered in TRAINER_FAMILIES; "
+            f"known families: {known}. New families land in their own follow-up "
+            f"PRs and must register themselves in src/rux_ml/training/__init__.py."
+        )
+        raise ValueError(msg)
+    return factory(_narrow_for_family(cfg, family), seed=seed)
+
+
+def _narrow_for_family(cfg: TrainingConfig, family: str) -> TrainingConfig:
+    """Narrow ``cfg`` to the registered variant type for ``family``.
+
+    Pydantic v2's discriminator handles this at validation time — by the time
+    ``make_trainer`` is called, ``cfg`` is already the correct variant subclass.
+    This helper is a no-op at runtime but documents the narrowing intent for
+    future readers and gives us a place to harden the invariant if a
+    non-Pydantic caller ever bypasses validation.
+    """
+    # ``isinstance`` is trivially-true when the union has a single variant
+    # (TrainingConfig = Annotated[XGBoostTraining, ...]), but becomes
+    # meaningful in PR-018 once LightGBMTraining widens the union — this
+    # narrows ``cfg`` correctly for downstream factories.
+    if family == "xgboost" and not isinstance(cfg, XGBoostTraining):  # pyright: ignore[reportUnnecessaryIsInstance]
+        msg = (
+            f"cfg.kind=='xgboost' but cfg is not an XGBoostTraining instance "
+            f"({type(cfg).__name__}); did a caller bypass Pydantic validation?"
+        )
+        raise TypeError(msg)
+    return cfg

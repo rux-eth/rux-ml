@@ -53,8 +53,8 @@ from rux_ml.config import (
     RegistryConfig,
     RunsConfig,
     RuxMLConfig,
-    TrainingConfig,
     TuningConfig,
+    XGBoostTraining,
 )
 from rux_ml.config.features import FeaturesSpec
 from rux_ml.data import load_parquet, materialize, train_val_test_split
@@ -143,7 +143,7 @@ def _golden_cfg(synthetic_path: Path, tmp_path: Path) -> RuxMLConfig:
             categorical_low_card_threshold=10,
             spec=FeaturesSpec(numeric_columns=["x1", "x2", "x3"], categorical_columns=["cat"]),
         ),
-        training=TrainingConfig(
+        training=XGBoostTraining(
             kind="xgboost",
             device="cpu",
             tree_method="hist",

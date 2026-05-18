@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from rux_ml.config import TrainingConfig
+from rux_ml.training import XGBoostTraining
 
 
 @pytest.fixture
-def training_cfg_classification() -> TrainingConfig:
+def training_cfg_classification() -> XGBoostTraining:
     """Tiny classification-friendly training config (CPU, fast)."""
-    return TrainingConfig(
+    return XGBoostTraining(
         device="cpu",
         metric="auc",
         n_estimators=8,
@@ -21,9 +21,9 @@ def training_cfg_classification() -> TrainingConfig:
 
 
 @pytest.fixture
-def training_cfg_regression() -> TrainingConfig:
+def training_cfg_regression() -> XGBoostTraining:
     """Tiny regression-friendly training config (CPU, fast)."""
-    return TrainingConfig(
+    return XGBoostTraining(
         device="cpu",
         metric="rmse",
         n_estimators=8,

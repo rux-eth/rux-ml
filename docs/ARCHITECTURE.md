@@ -206,11 +206,13 @@ All choices are TOML knobs in `[tuning]`.
 
 ## Key Abstractions
 
-### `Trainer` Protocol (per D5)
+### `Trainer` Protocol + family registry (per D5; refactored in PR-017)
 
 The unifying contract across model families is the sklearn estimator API expressed as a `typing.Protocol`. Zero runtime cost; full compile-time substitutability across `XGBClassifier`, `XGBRegressor`, `LGBMClassifier`, `CatBoostClassifier`, sklearn estimators, and any future custom model.
 
 The Protocol covers only the **universal subset** (`fit` + `predict`) so both classifiers and regressors satisfy it. Classification-only (`predict_proba`) and conditionally-available (`best_iteration_` after early-stopping fit) attributes are accessed defensively at call sites — the metric registry casts to a classifier surface for AUC / logloss; the CLI uses `getattr(..., None)` for `best_iteration`.
+
+The Protocol is intentionally **not** `@runtime_checkable`. Per PEP 544 + CPython 3.12 typing docs, `isinstance(x, MyProtocol)` only checks method *names*, not signatures — a factory returning `lambda X, y: None` would pass `isinstance` and fail at real `.fit()` calls. The behavioral conformance test (`tests/training/test_registry_conformance.py`) is the runtime gate instead: it parametrizes over `TRAINER_FAMILIES.keys()` and asserts each factory's output passes a tiny end-to-end fit-predict smoke. Anchored on sklearn `parametrize_with_checks` + Optuna `pytest_samplers.py`.
 
 ```python
 # src/rux_ml/training/protocol.py
@@ -222,16 +224,37 @@ class Trainer(Protocol):
     def predict(self, X: Any) -> ArrayLike: ...
 ```
 
-The model factory (`src/rux_ml/training/factory.py`) returns the configured concrete trainer:
+**Per-family layout** (per PR-017 / `docs/0.1/DESIGN-log.md` Q2): each Trainer family lives as a subpackage under `src/rux_ml/training/<family>/` with three files — `__init__.py` (public API), `factory.py` (the `make_<family>_trainer` function), `config.py` (the family's Pydantic schema variant of `TrainingConfig`). XGBoost is the first family at `src/rux_ml/training/xgboost/`; LightGBM and CatBoost subpackages land in PR-018 / PR-019.
+
+**B-explicit registry** (per Q4): families are registered in a plain dict in `src/rux_ml/training/__init__.py`:
 
 ```python
-def make_trainer(cfg: TrainingConfig) -> Trainer:
-    if cfg.kind == "xgboost":
-        return XGBClassifier(**cfg.model_kwargs)
-    # ... LightGBM / CatBoost / sklearn cases as added
+# src/rux_ml/training/__init__.py
+TRAINER_FAMILIES: dict[str, Callable[..., Trainer]] = {
+    "xgboost": make_xgboost_trainer,
+}
 ```
 
-The native `xgb.train()` API is reserved for the ~5 % of cases where the sklearn wrapper falls short — chiefly `QuantileDMatrix(..., ref=train_dmat)` and `ExtMemQuantileDMatrix` paths. This branch is configurable in `[training]`.
+Hand-maintained — no decorator-driven registration. Pattern anchored on HuggingFace transformers' `MODEL_MAPPING_NAMES`; entry-points (a la `pytest11`) ruled out because they're for third-party discovery, which the workbench has no need for. The top-level `make_trainer(cfg)` dispatches against this dict:
+
+```python
+def make_trainer(cfg: TrainingConfig, *, seed: int | None = None) -> Trainer:
+    family = cfg.kind  # discriminator on each variant
+    factory = TRAINER_FAMILIES[family]
+    return factory(cfg, seed=seed)
+```
+
+**Discriminated-union `TrainingConfig`** (per Q-A1 + Q-MK research findings): the per-family config schema is a discriminated union over per-variant Pydantic models, all inheriting from a shared `TrainingBase` for family-agnostic fields (`device`, `metric`, `early_stopping_rounds`). Variants declare `kind: Literal["<family>"]` for the discriminator + family-specific fields. `model_kwargs: dict[str, Any]` is retained only on variants whose upstream `__init__` accepts `**kwargs` (XGBoost, LightGBM); CatBoost variants will OMIT `model_kwargs` because `CatBoostClassifier.__init__` rejects unknown kwargs.
+
+```python
+# src/rux_ml/config/training.py
+TrainingConfig = Annotated[
+    XGBoostTraining,  # | LightGBMTraining | CatBoostTraining (PR-018 / PR-019)
+    Field(discriminator="kind"),
+]
+```
+
+The native `xgb.train()` API is reserved for the ~5 % of cases where the sklearn wrapper falls short — chiefly `QuantileDMatrix(..., ref=train_dmat)` and `ExtMemQuantileDMatrix` paths. This branch is configurable on the `XGBoostTraining` variant (`use_native: bool`).
 
 ### `RuxMLConfig` and `SearchSpec` (per D2 / D17 / D16)
 

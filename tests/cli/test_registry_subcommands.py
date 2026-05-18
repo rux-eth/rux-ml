@@ -19,7 +19,7 @@ from rux_ml.config import (
     RegistryConfig,
     RunsConfig,
     RuxMLConfig,
-    TrainingConfig,
+    XGBoostTraining,
 )
 from rux_ml.config.features import FeaturesSpec
 from rux_ml.runs import TrialAttrs, data_hashes, one_off_run
@@ -54,6 +54,7 @@ target_column = "y"
 spec = {{ numeric_columns = ["x1", "x2"], categorical_columns = [] }}
 
 [training]
+kind = "xgboost"
 device = "cpu"
 metric = "auc"
 n_estimators = 8
@@ -77,7 +78,7 @@ shuffle = true
     cfg = RuxMLConfig(
         data=DataConfig(source_path=src, target_column="y"),
         features=FeaturesConfig(spec=FeaturesSpec(numeric_columns=["x1", "x2"])),
-        training=TrainingConfig(
+        training=XGBoostTraining(
             device="cpu", metric="auc", n_estimators=8, max_depth=3, learning_rate=0.3
         ),
         runs=RunsConfig(storage_url=storage_url, artifacts_root=tmp_path / "studies/artifacts"),

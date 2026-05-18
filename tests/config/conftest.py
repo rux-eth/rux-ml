@@ -19,6 +19,7 @@ def base_toml(tmp_path: Path) -> Path:
             target_column = "y"
 
             [training]
+            kind = "xgboost"
             learning_rate = 0.1
             max_depth = 6
             """
@@ -39,6 +40,7 @@ def problem_toml(tmp_path: Path) -> Path:
             target_column = "label"  # overrides base
 
             [training]
+            kind = "xgboost"
             max_depth = 7  # overrides base; learning_rate stays at base
             """
         ).strip()
@@ -55,6 +57,7 @@ def study_toml(tmp_path: Path) -> Path:
         dedent(
             """
             [training]
+            kind = "xgboost"
             learning_rate = 0.05  # overrides base; max_depth stays at problem (7)
 
             [search_space."training.learning_rate"]

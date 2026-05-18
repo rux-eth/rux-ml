@@ -96,6 +96,7 @@ target_column = "y"
 spec = {{ numeric_columns = ["x1", "x2"], categorical_columns = [] }}
 
 [training]
+kind = "xgboost"
 device = "cpu"
 metric = "auc"
 n_estimators = 8
