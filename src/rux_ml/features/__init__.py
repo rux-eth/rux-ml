@@ -6,7 +6,7 @@ object via ``set_output("polars")``.
 """
 
 from rux_ml.features.encoders import (
-    PASSTHROUGH_TO_XGB_CATEGORICAL,
+    PASSTHROUGH_NATIVE_CATEGORICAL,
     make_categorical_encoder,
 )
 from rux_ml.features.pipeline import (
@@ -17,7 +17,7 @@ from rux_ml.features.pipeline import (
 from rux_ml.features.polars_steps import select_columns
 
 __all__ = [
-    "PASSTHROUGH_TO_XGB_CATEGORICAL",
+    "PASSTHROUGH_NATIVE_CATEGORICAL",
     "build_column_transformer",
     "cardinalities_from",
     "make_categorical_encoder",

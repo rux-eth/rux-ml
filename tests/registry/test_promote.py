@@ -22,7 +22,7 @@ from rux_ml.config import (
     RegistryConfig,
     RunsConfig,
     RuxMLConfig,
-    TrainingConfig,
+    XGBoostTraining,
 )
 from rux_ml.config.features import FeaturesSpec
 from rux_ml.registry import load_model
@@ -36,7 +36,7 @@ def _make_cfg(tmp_path: Path, source: Path, registry_root: Path) -> RuxMLConfig:
     return RuxMLConfig(
         data=DataConfig(source_path=source, target_column="y"),
         features=FeaturesConfig(spec=FeaturesSpec(numeric_columns=["x1", "x2"])),
-        training=TrainingConfig(
+        training=XGBoostTraining(
             device="cpu",
             metric="auc",
             n_estimators=8,

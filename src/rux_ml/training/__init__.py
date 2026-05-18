@@ -29,6 +29,10 @@ from typing import TYPE_CHECKING
 
 from rux_ml.training.base import TrainingBase
 from rux_ml.training.factory import make_trainer
+from rux_ml.training.lightgbm import (
+    LightGBMTraining,
+    make_lightgbm_trainer,
+)
 from rux_ml.training.metrics import (
     METRIC_REGISTRY,
     compute_score,
@@ -54,17 +58,20 @@ if TYPE_CHECKING:
 # insertion order.
 TRAINER_FAMILIES: dict[str, Callable[..., Trainer]] = {
     "xgboost": make_xgboost_trainer,
+    "lightgbm": make_lightgbm_trainer,
 }
 
 __all__ = [
     "DEFAULT_BYTES_PER_GB",
     "METRIC_REGISTRY",
     "TRAINER_FAMILIES",
+    "LightGBMTraining",
     "Trainer",
     "TrainingBase",
     "XGBoostTraining",
     "compute_score",
     "estimate_x_bytes",
+    "make_lightgbm_trainer",
     "make_trainer",
     "make_xgboost_trainer",
     "optuna_direction",

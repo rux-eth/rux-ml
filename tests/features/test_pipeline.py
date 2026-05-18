@@ -9,7 +9,7 @@ from category_encoders.wrapper import NestedCVWrapper
 from sklearn.pipeline import Pipeline
 
 from rux_ml.config import FeaturesConfig
-from rux_ml.features.encoders import PASSTHROUGH_TO_XGB_CATEGORICAL
+from rux_ml.features.encoders import PASSTHROUGH_NATIVE_CATEGORICAL
 from rux_ml.features.pipeline import (
     _ColumnRouter,
     build_column_transformer,
@@ -55,7 +55,7 @@ def test_build_column_transformer_routes_per_decision_rule(
     router = build_column_transformer(cards, features_cfg_low_threshold)
     assert isinstance(router, _ColumnRouter)
     # low_cat is at-threshold (well below) → passthrough sentinel
-    assert router.encoders["low_cat"] == PASSTHROUGH_TO_XGB_CATEGORICAL
+    assert router.encoders["low_cat"] == PASSTHROUGH_NATIVE_CATEGORICAL
     # high_cat is at threshold=3 way above → real NestedCVWrapper encoder
     assert isinstance(router.encoders["high_cat"], NestedCVWrapper)
 

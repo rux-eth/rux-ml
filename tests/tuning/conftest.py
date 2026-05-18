@@ -16,8 +16,8 @@ from rux_ml.config import (
     KFoldCV,
     RuxMLConfig,
     SearchSpec,
-    TrainingConfig,
     TuningConfig,
+    XGBoostTraining,
 )
 from rux_ml.config.features import FeaturesConfig, FeaturesSpec
 
@@ -49,7 +49,7 @@ def tune_cfg(synth_parquet: Path) -> RuxMLConfig:
         features=FeaturesConfig(
             spec=FeaturesSpec(numeric_columns=["x1", "x2"], categorical_columns=[]),
         ),
-        training=TrainingConfig(
+        training=XGBoostTraining(
             device="cpu",
             metric="auc",
             n_estimators=8,
