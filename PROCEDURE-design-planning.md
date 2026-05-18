@@ -4,6 +4,8 @@
 
 Before starting any non-trivial feature, component, or architectural change. The user may say "let's design X", "let's discuss X", or "let's plan X".
 
+Also at every minor/major version cut — see [`docs/VERSIONING.md`](docs/VERSIONING.md). Each `x.y` bump is treated as a fresh project start and runs this procedure from Phase 1 before any implementation PR for the new version lands. Patch bumps do not require a design session.
+
 ## Phases
 
 ### Phase 1: Idea

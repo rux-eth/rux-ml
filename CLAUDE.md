@@ -50,24 +50,30 @@ No code yet. Phase 4 (this doc set) just landed; Phase 5 (implementation) begins
 ## Ongoing Behavior (MANDATORY)
 
 - **Every PR runs `PROCEDURE-pr-research.md` before implementation.** No exceptions. All v0 PRs are Tier-1 (research-backed at design time) per `docs/0.0/RESEARCH-BACKLOG.md`; Phase 1 (State Assessment) is required to catch drift, Phases 2-4 may be light if no drift is found.
+- **Honor the Per-Phase Approval Gate** in any multi-phase procedure (`PROCEDURE-pr-research.md`, `PROCEDURE-design-planning.md`) — see `docs/CONSTRAINTS.md`. Default behavior is to halt at every phase boundary and request explicit approval before advancing.
 - **Research findings travel with the PR** — appended to the PR file's `## Research findings` section. Do not discard.
 - **State drifts.** Even research-backed decisions need Phase 1 state assessment before implementation. Project staleness threshold is **60 days** (per `docs/CONSTRAINTS.md`).
-- **Doc updates ride with code.** When a PR changes architectural behavior, `docs/ARCHITECTURE.md` (and `docs/CONSTRAINTS.md` / `docs/CONVENTIONS.md` if relevant) update in the same commit.
+- **Doc updates ride with code.** When a PR changes architectural behavior, `docs/ARCHITECTURE.md` (and `docs/CONSTRAINTS.md` / `docs/CONVENTIONS.md` if relevant) update in the same commit. User-facing changes get a `[Unreleased]` entry in `/CHANGELOG.md` per `docs/VERSIONING.md` §6.
+- **Run the version-cut ritual** when minor/major bumps land — `PROCEDURE-design-planning.md` from Phase 1 first, then snapshot temporal docs into a new `docs/<x.y>/` dir, then run `scripts/rewrite_doc_refs.py`. See `docs/VERSIONING.md` §2.
 - **No phantom implementations.** Every PR includes a test exercising actual behavior end-to-end through the layer it touches.
 - **All configurable values from config files.** Zero hardcoded parameters for behavior that might change. TOML knobs are the only acceptable source for tunable values.
 
 ## Design References
 
 - `docs/ARCHITECTURE.md` — canonical architecture reference (data flow, components, decision rules, key abstractions, storage)
-- `docs/CONSTRAINTS.md` — hard rules (no UI, single-GPU sequential, CUDA+fork forbidden, tolerance-not-hash for goldens, two-file model bundle, container digest pinning, per-trial provenance triple, reuse over reinvent)
+- `docs/CONSTRAINTS.md` — hard rules (no UI, single-GPU sequential, CUDA+fork forbidden, tolerance-not-hash for goldens, two-file model bundle, container digest pinning, per-trial provenance triple, reuse over reinvent, per-phase approval gate)
 - `docs/CONVENTIONS.md` — soft patterns (directory naming, module dependency rules, public API discipline, version-string format, test markers, logging, configuration, Rust+PyO3 conventions)
-- `docs/0.0/ROADMAP.md` — PR index (PR-001 through PR-014) with phases and dependencies
+- `docs/VERSIONING.md` — versioning policy + bump rules + changelog format + hybrid docs-versioning layout (flat, meta-rule)
+- `docs/DEPLOYMENT.md` — container build + image-digest capture + smoke test + rebuild triggers (flat, SSOT)
+- `/CHANGELOG.md` — user-facing changelog (Keep-a-Changelog 1.1.0)
+- `docs/0.0/ROADMAP.md` — PR index (PR-001 through PR-015) with phases and dependencies
 - `docs/0.0/RESEARCH-BACKLOG.md` — per-PR research status + drift watch
 - `prs/` — full PR descriptions (start new PRs from `prs/PR-TEMPLATE.md`)
 - `docs/0.0/DESIGN-log.md` — full design conversation log (D1–D17 with research trail, BEST-GUESS items acknowledged, conflicts flagged)
 - `PROCEDURE-design-planning.md` — how to run design sessions (with integrated research rounds)
 - `PROCEDURE-pr-research.md` — mandatory research procedure before every PR implementation
 - `PROCEDURE-code-audit.md` — post-design-session code audit
+- `scripts/rewrite_doc_refs.py` — version-cut cross-reference migrator (run at every minor/major bump per `docs/VERSIONING.md` §5)
 
 ## Constraints
 
