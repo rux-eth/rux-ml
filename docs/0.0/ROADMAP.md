@@ -63,6 +63,12 @@ Full PR descriptions live in `prs/`. This file is the index.
 | [PR-013](../../prs/PR-013-seed-management.md) | Seed management — `SeedSequence(entropy)` per run + `.spawn()` for `{split, cv, sampler, xgb}` seeds + entropy persistence in `user_attrs` + version logging (`xgboost_version`, `cuda_runtime_version`, `image_digest`) | `[x]` | PR-009, PR-015 |
 | [PR-014](../../prs/PR-014-golden-tests.md) | Golden regression test infrastructure — tolerance-based fixtures + `@pytest.mark.golden` marker + a single end-to-end golden test on a tiny fixed-seed dataset (XGBoost) using `np.testing.assert_allclose` + AUC tolerance bands | `[x]` | PR-010, PR-013 |
 
+## Phase H: Post-v0 template migration
+
+| PR | Description | Status | Depends on |
+|----|-------------|--------|------------|
+| [PR-016](../../prs/PR-016-template-migration.md) | Vibe-rails hybrid docs-versioning migration — move `DESIGN-log` / `RESEARCH-BACKLOG` / `ROADMAP` into `docs/0.0/`; add `docs/VERSIONING.md` + `/CHANGELOG.md` + `docs/DEPLOYMENT.md`; append Per-Phase Approval Gate (NON-NEGOTIABLE) to `docs/CONSTRAINTS.md`; add `Landed-in:` header to every numbered PR file + `prs/PR-TEMPLATE.md`; ship `scripts/rewrite_doc_refs.py` (Python port of the canonical TS migrator); tag `v0.0.1` at merge | `[x]` | — |
+
 ---
 
 ## Notes
