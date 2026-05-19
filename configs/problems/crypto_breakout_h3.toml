@@ -1,0 +1,82 @@
+# Crypto OHLCV breakout-return problem (h=3 forward target).
+#
+# Dataset: ~daily OHLCV+market_cap for 1084 assets, 20.7M rows stacked
+# panel (after 0.008% hygiene filter: |target| <= 1.0,
+# |log_return_{1,3,24}| <= 5). Target is forward-looking (h=3
+# timestamps = 3 days), so CV must be panel-aware time-respecting —
+# see [cv] below.
+#
+# Promoted to the repo at PR-025 (was local-only since 2026-05-18).
+# Pre-PR-025 the [cv] kind was "time_series" with gap=24 (row-count)
+# which collapsed to ~0.022 timestamps of per-asset embargo on the
+# 1084-asset panel — the motivating bug for PR-023. PR-025's
+# calibration runs on the post-PR-023 PanelCombinatorialPurgedCV.
+
+[data]
+# Workbench-absolute path; the parquet stays on the workbench (~1.4 GB).
+source_path = "data/crypto_breakout_h3.parquet"
+target_column = "target_breakout_h3"
+# 20.7M rows × 9 f64 features ≈ 1.5 GB; well below the 18 GB threshold,
+# so QuantileDMatrix in-VRAM ingest is selected.
+gpu_in_memory_x_gb_max = 18.0
+# PR-024: temporal one-off splits for the baseline path. time_column is
+# Int64 Unix-seconds (delta = 86400s between unique values = daily bars).
+split_kind = "time_ordered"
+time_column = "timestamp"
+
+[features]
+# Stateless numeric panel — no high-card categoricals, no target encoding
+# in v0.1.0 first run. The `sector` and `symbol` columns stay in the parquet
+# but are NOT routed through features. `symbol` IS used by [cv] as
+# `asset_column` for PanelCombinatorialPurgedCV's per-asset purge.
+
+[features.spec]
+numeric_columns = [
+    "log_return_1",
+    "log_return_3",
+    "log_return_24",
+    "rolling_std_24",
+    "hl_range",
+    "intra_position",
+    "log_volume",
+    "log_market_cap",
+    "log_market_share",
+]
+categorical_columns = []
+
+[training]
+kind = "xgboost"
+device = "cuda"
+# Regression — rmse routes the factory to XGBRegressor.
+metric = "rmse"
+tree_method = "hist"
+enable_categorical = false
+# Baseline hyperparams (BEST-GUESS, flagged); overridden by the sweep.
+learning_rate = 0.05
+max_depth = 6
+n_estimators = 500
+subsample = 0.9
+colsample_bytree = 0.9
+early_stopping_rounds = 20
+
+[cv]
+# Panel-aware CPCV per PR-023 D1. Folds over unique sorted timestamps
+# (72401 unique daily bars in the dataset); per-asset purge is
+# timestamp-atomic. target_horizon_bars=3 covers the h=3 forward
+# target. embargo_pct=0.0 because target_horizon_bars=3 alone already
+# gives ±3 timestamp days of separation around every test span
+# (sufficient for h=3); pushing embargo_pct higher would consume
+# multi-year-long chunks of the train side (0.005 × 72401 ≈ 362 days).
+#
+# n_folds=5, n_test_folds=2 → C(5,2)=10 combinatorial paths.
+kind = "panel_cpcv"
+n_folds = 5
+n_test_folds = 2
+time_column = "timestamp"
+asset_column = "symbol"
+target_horizon_bars = 3
+embargo_pct = 0.0
+
+[memory]
+# Workbench has 36 GB RAM; default watchdog threshold = 28 GB (BEST-GUESS).
+# Leave at default for first run.
