@@ -8,6 +8,7 @@ import pytest
 
 from rux_ml.config import (
     CombinatorialPurgedCV,
+    DataConfig,
     GroupKFoldCV,
     KFoldCV,
     RuxMLConfig,
@@ -25,21 +26,32 @@ def test_default_cv_is_kfold() -> None:
     assert cfg.cv.n_splits == 5
 
 
+# PR-024: temporal CV kinds (time_series, cpcv, panel_cpcv) require the
+# baseline path to use time_ordered splits too — the validator rejects
+# otherwise. Each row carries the [data] block needed to satisfy that rule
+# (None for non-temporal kinds keeps the test surface small).
+_TEMPORAL_DATA_BLOCK = '[data]\nsplit_kind = "time_ordered"\ntime_column = "ts"\n'
+
+
 @pytest.mark.parametrize(
-    ("kind", "expected_cls", "extra_toml"),
+    ("kind", "expected_cls", "extra_toml", "data_block"),
     [
-        ("kfold", KFoldCV, ""),
-        ("stratified_kfold", StratifiedKFoldCV, ""),
-        ("time_series", TimeSeriesSplitCV, "gap = 2\n"),
-        ("group_kfold", GroupKFoldCV, 'groups_column = "g"\n'),
-        ("cpcv", CombinatorialPurgedCV, "n_folds = 6\nn_test_folds = 2\n"),
+        ("kfold", KFoldCV, "", ""),
+        ("stratified_kfold", StratifiedKFoldCV, "", ""),
+        ("time_series", TimeSeriesSplitCV, "gap = 2\n", _TEMPORAL_DATA_BLOCK),
+        ("group_kfold", GroupKFoldCV, 'groups_column = "g"\n', ""),
+        ("cpcv", CombinatorialPurgedCV, "n_folds = 6\nn_test_folds = 2\n", _TEMPORAL_DATA_BLOCK),
     ],
 )
 def test_cv_config_loads_each_kind_from_toml(
-    tmp_path: Path, kind: str, expected_cls: type, extra_toml: str
+    tmp_path: Path,
+    kind: str,
+    expected_cls: type,
+    extra_toml: str,
+    data_block: str,
 ) -> None:
     config = tmp_path / "base.toml"
-    config.write_text(f'[cv]\nkind = "{kind}"\n{extra_toml}')
+    config.write_text(f'{data_block}[cv]\nkind = "{kind}"\n{extra_toml}')
     cfg = RuxMLConfig.from_layers(config)
     assert isinstance(cfg.cv, expected_cls)
     assert cfg.cv.kind == kind
@@ -77,7 +89,12 @@ def test_layer_cfg_hash_for_cv_layer_changes_with_kind() -> None:
 
 def test_root_cfg_hash_changes_when_cv_changes() -> None:
     h_a = cfg_hash(RuxMLConfig(cv=KFoldCV(n_splits=5)))
-    h_b = cfg_hash(RuxMLConfig(cv=TimeSeriesSplitCV(n_splits=5, gap=0, max_train_size=None)))
+    h_b = cfg_hash(
+        RuxMLConfig(
+            data=DataConfig(split_kind="time_ordered", time_column="ts"),
+            cv=TimeSeriesSplitCV(n_splits=5, gap=0, max_train_size=None),
+        )
+    )
     assert h_a != h_b
 
 

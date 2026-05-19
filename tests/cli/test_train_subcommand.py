@@ -1,7 +1,11 @@
 """End-to-end CLI tests for ``rux-ml train``.
 
-Tiny synthetic Parquet → train_val_test_split → features → XGBoost → score,
-recorded as a 1-trial Optuna study in SQLite (per D7).
+Tiny synthetic Parquet → split (random OR time_ordered) → features → XGBoost
+→ score, recorded as a 1-trial Optuna study in SQLite (per D7).
+
+PR-024 adds a ``time_ordered`` dispatch path via ``cfg.data.split_kind``;
+the CLI integration test below exercises it end-to-end through
+:func:`rux_ml.data.splits.make_splits` and the cross-field validator.
 """
 
 from __future__ import annotations
@@ -119,6 +123,112 @@ def test_train_errors_when_source_path_missing(runner: CliRunner, tmp_path: Path
     config.write_text("[data]\ntarget_column = 'y'\n")  # source_path absent
     result = runner.invoke(app, ["--config", str(config), "train"])
     assert result.exit_code != 0
+
+
+# ---------- PR-024: time_ordered dispatch path ----------
+
+
+@pytest.fixture
+def time_ordered_train_workdir(tmp_path: Path) -> Path:
+    """Synthetic time-series Parquet + base.toml with ``data.split_kind = 'time_ordered'``.
+
+    The ``ts`` column is intentionally out-of-order so the temporal sort step
+    has work to do; ``y`` is generated from features so the trained model
+    beats chance on the chronologically-last test fold.
+    """
+    rng = np.random.default_rng(0)
+    n = 200
+    ts = rng.permutation(n).tolist()  # shuffled timestamps
+    x1 = rng.normal(size=n)
+    x2 = rng.normal(size=n)
+    y = ((0.7 * x1 + 0.3 * x2 + rng.normal(0, 0.3, size=n)) > 0).astype(int)
+    df = pl.DataFrame({"ts": ts, "x1": x1.tolist(), "x2": x2.tolist(), "y": y.tolist()})
+    src = tmp_path / "synth_ts.parquet"
+    df.write_parquet(src)
+
+    storage_path = tmp_path / "studies" / "studies.db"
+    config = tmp_path / "base.toml"
+    config.write_text(
+        f"""
+[data]
+source_path = "{src}"
+target_column = "y"
+cas_root = "{tmp_path}/cas"
+manifests_root = "{tmp_path}/manifests"
+split_kind = "time_ordered"
+time_column = "ts"
+
+[features]
+spec = {{ numeric_columns = ["ts", "x1", "x2"], categorical_columns = [] }}
+
+[training]
+kind = "xgboost"
+device = "cpu"
+metric = "auc"
+n_estimators = 16
+max_depth = 3
+learning_rate = 0.3
+
+[runs]
+storage_url = "sqlite:///{storage_path}"
+artifacts_root = "{tmp_path}/studies/artifacts"
+"""
+    )
+    return tmp_path
+
+
+def test_train_time_ordered_path_end_to_end_cpu(
+    runner: CliRunner, time_ordered_train_workdir: Path
+) -> None:
+    """Dispatcher routes through ``temporal_train_val_test_split`` when
+    ``cfg.data.split_kind == 'time_ordered'``. Confirms the CLI surface +
+    config validator + dispatcher all wire correctly."""
+    result = runner.invoke(
+        app,
+        _argv(time_ordered_train_workdir, "train"),
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr or result.stdout
+    assert "score (auc):" in result.stdout
+    score_line = next(
+        line for line in result.stdout.splitlines() if "score (auc):" in line
+    )
+    score = float(score_line.split(":")[-1].strip())
+    assert 0.0 <= score <= 1.0
+
+
+def test_train_time_ordered_rejects_missing_time_column(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """PR-024 cross-field validator: ``time_ordered`` without ``time_column`` fails."""
+    config = tmp_path / "base.toml"
+    config.write_text(
+        '[data]\nsource_path = "/nonexistent"\ntarget_column = "y"\n'
+        'split_kind = "time_ordered"\n'  # no time_column
+    )
+    result = runner.invoke(app, ["--config", str(config), "train"])
+    assert result.exit_code != 0
+    # Validator raises pydantic ValidationError; typer wraps it as the runtime
+    # exception. Inspect ``result.exception`` for the validator's text.
+    assert result.exception is not None
+    assert "time_ordered" in str(result.exception)
+    assert "time_column" in str(result.exception)
+
+
+def test_train_temporal_cv_rejects_random_split(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """PR-024 cross-field validator: temporal CV + random split fails fast."""
+    config = tmp_path / "base.toml"
+    config.write_text(
+        '[data]\nsource_path = "/nonexistent"\ntarget_column = "y"\n\n'
+        '[cv]\nkind = "time_series"\n'
+    )
+    result = runner.invoke(app, ["--config", str(config), "train"])
+    assert result.exit_code != 0
+    assert result.exception is not None
+    assert "time_series" in str(result.exception)
+    assert "split_kind" in str(result.exception)
 
 
 @pytest.mark.gpu

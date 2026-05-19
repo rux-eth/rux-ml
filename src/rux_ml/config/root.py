@@ -20,7 +20,7 @@ import hashlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -43,6 +43,11 @@ from rux_ml.config.tuning import SearchSpec, TuningConfig
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+# CV kinds that require time-ordered one-off splits at the baseline path.
+# Used by the PR-024 cross-field validator on RuxMLConfig. Tracked here so the
+# rule lives next to the validator that consumes it.
+_TEMPORAL_CV_KINDS: frozenset[str] = frozenset({"time_series", "cpcv", "panel_cpcv"})
 
 # Fields elided before hashing because they are non-deterministic / runtime-only.
 # Kept here as the single source of truth so changes surface in code review.
@@ -108,6 +113,39 @@ class RuxMLConfig(BaseSettings):
         extra="forbid",
         nested_model_default_partial_update=True,
     )
+
+    @model_validator(mode="after")
+    def _validate_split_kind_consistency(self) -> RuxMLConfig:
+        """PR-024 cross-field check: ``data.split_kind`` must be consistent
+        with ``data.time_column`` and ``cv.kind``.
+
+        Two rules, both fail-fast at config-load time:
+
+        1. ``data.split_kind == "time_ordered"`` requires ``data.time_column``
+           to be set — the temporal split function needs a timestamp column.
+        2. ``cv.kind in {time_series, cpcv, panel_cpcv}`` requires
+           ``data.split_kind == "time_ordered"`` — running a temporal CV with
+           a random-shuffle one-off baseline produces meaningfully different
+           train/val/test shapes between ``rux-ml train`` and ``rux-ml tune``,
+           and the leakage profile of the baseline is the well-documented
+           foot-gun this PR fixes.
+        """
+        if self.data.split_kind == "time_ordered" and self.data.time_column is None:
+            msg = (
+                "data.split_kind == 'time_ordered' requires data.time_column to be set "
+                "(name a timestamp column on the input DataFrame). See PR-024."
+            )
+            raise ValueError(msg)
+        if self.cv.kind in _TEMPORAL_CV_KINDS and self.data.split_kind != "time_ordered":
+            msg = (
+                f"cv.kind == {self.cv.kind!r} is temporal but data.split_kind == "
+                f"{self.data.split_kind!r} would random-shuffle the one-off baseline "
+                f"path (rux-ml train). Set data.split_kind = 'time_ordered' and "
+                f"data.time_column to a timestamp column to keep the baseline "
+                f"chronologically ordered. See PR-024."
+            )
+            raise ValueError(msg)
+        return self
 
     # Single-process workbench: TOML paths threaded through class state because
     # `settings_customise_sources` has no per-call kwargs hook. Not thread-safe;
