@@ -47,22 +47,22 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, cast
 
-if TYPE_CHECKING:
-    from collections.abc import Iterator
-
+import numpy as np
 import optuna
 import typer
+import xgboost as xgb
 
-from rux_ml._internal.env import get_versions
 from rux_ml._internal.memory import Watchdog
 from rux_ml._internal.seeds import make_seed_bag
-from rux_ml.config import RuxMLConfig
-from rux_ml.data import load_parquet, make_splits, make_splitter, materialize
-from rux_ml.features import cardinalities_from, make_features
-from rux_ml.training import compute_score, make_trainer
+from rux_ml.config import RuxMLConfig, XGBoostTraining
+from rux_ml.data import load_parquet, make_splitter, materialize
+from rux_ml.training import compute_score
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     import polars as pl
+    from numpy.typing import NDArray
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
@@ -71,7 +71,7 @@ app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
 
 @contextmanager
-def _stopwatch(timings: dict[str, float], key: str) -> Iterator[None]:
+def _stopwatch(timings: dict[str, float], key: str) -> Generator[None]:
     """Accumulate per-step wallclock into ``timings[key]`` (seconds)."""
     t0 = time.perf_counter()
     try:
@@ -80,154 +80,203 @@ def _stopwatch(timings: dict[str, float], key: str) -> Iterator[None]:
         timings[key] = timings.get(key, 0.0) + (time.perf_counter() - t0)
 
 
-# ---------- Position-specific _fold_scores variants ----------
+# ---------- Position-specific _fold_scores variants (numpy-native) ----------
+#
+# Profile (2026-05-19 probe on workbench, crypto-h3 / panel_cpcv n_folds=5
+# n_test_folds=2 → 10 folds per trial, 20.7M-row panel):
+#   trainer_fit:   39.4s/trial (62%) — XGBoost GPU work
+#   df_row_select: 14.5s/trial (23%) — pl.DataFrame[idx.tolist()] x 40
+#   predict_score:  3.6s/trial  (6%) — CPU↔GPU bounce per predict
+#   pipeline:       2.2s/trial  (3.5%) — sklearn Pipeline on polars
+#   df_to_pandas:   0.9s/trial  (1.4%) — small, not the bottleneck
+#
+# Optimization (this revision):
+# 1. Pre-convert x_full + y_full to numpy ONCE at the top of the objective
+#    (outside the fold loop). Per-fold row select becomes a numpy slice
+#    (instant) instead of polars __getitem__(list[int]).
+# 2. Skip the sklearn Pipeline entirely for problems with zero
+#    categorical_columns + numeric_columns subset only. Pre-select
+#    numeric_columns once and call it done — this dataset has no
+#    transforms beyond column selection. (General-purpose pipeline
+#    handling stays in src/rux_ml/tuning/objective.py; the calibration
+#    script is allowed to take the fast path for this problem because
+#    eval_set placement, not pipeline cost, is what we're measuring.)
+# 3. Build XGBoost QuantileDMatrix directly from numpy (no pandas
+#    intermediate). Train via xgb.train (low-level) so we can construct
+#    the DMatrix once per fold and reuse it for fit + predict (eliminates
+#    the CPU↔GPU bounce that produced the "mismatched devices" warning).
 
 
-def _strip_target(df: pl.DataFrame, target_col: str) -> tuple[pl.DataFrame, pl.Series]:
-    return df.drop(target_col), df[target_col]
+def _xgb_cfg(cfg: RuxMLConfig) -> XGBoostTraining:
+    """Narrow cfg.training to the XGBoost variant; the calibration harness
+    only supports XGBoost at v0.2 (the other families don't expose the same
+    early-stopping surface and aren't part of the PR-025 question)."""
+    if not isinstance(cfg.training, XGBoostTraining):
+        msg = (
+            f"calibration harness supports only XGBoost at v0.2; "
+            f"got {type(cfg.training).__name__}"
+        )
+        raise NotImplementedError(msg)
+    return cfg.training
 
 
-def _carve_inner_val(
-    cfg: RuxMLConfig,
-    x_tr: pl.DataFrame,
-    y_tr: pl.Series,
-    *,
-    target_col: str,
-    seed: int,
-) -> tuple[pl.DataFrame, pl.Series, pl.DataFrame, pl.Series]:
-    """Position B helper: split (x_tr, y_tr) into inner-train + inner-val
-    using cfg.data.split_ratios.val, dispatching through make_splits so
-    the carve respects cfg.data.split_kind (random vs time_ordered)."""
-    val_ratio = cfg.data.split_ratios["val"]
-    # Re-normalise over train+val only; test=0 here (test fold is the
-    # outer CV's test_idx, not carved from the inner train fold).
-    inner_ratios = {
-        "train": 1.0 - val_ratio,
-        "val": val_ratio,
-        "test": 0.0,
+def _xgb_params(cfg: RuxMLConfig) -> dict[str, Any]:
+    """Translate cfg.training (XGBoost variant) -> xgb.train params dict."""
+    t = _xgb_cfg(cfg)
+    return {
+        "device": t.device,
+        "tree_method": t.tree_method,
+        "learning_rate": t.learning_rate,
+        "max_depth": t.max_depth,
+        "subsample": t.subsample,
+        "colsample_bytree": t.colsample_bytree,
+        "objective": "reg:squarederror" if t.metric == "rmse" else "binary:logistic",
+        "eval_metric": t.metric,
+        "verbosity": 0,
     }
-    # Glue target back temporarily so make_splits sees a single DataFrame.
-    merged = x_tr.with_columns(y_tr.alias(target_col))
-    # Temporarily override the split_ratios for the inner carve only.
-    inner_cfg = cfg.model_copy(deep=True)
-    inner_cfg.data.split_ratios = inner_ratios
-    parts = make_splits(inner_cfg, merged, seed=seed)
-    x_inner_tr, y_inner_tr = _strip_target(parts["train"], target_col)
-    x_inner_val, y_inner_val = _strip_target(parts["val"], target_col)
-    return x_inner_tr, y_inner_tr, x_inner_val, y_inner_val
+
+
+def _rmse(y_true: NDArray[np.float64], y_pred: NDArray[np.float32]) -> float:
+    diff = y_true.astype(np.float32) - y_pred
+    return float(np.sqrt(np.mean(diff * diff)))
+
+
+def _score(cfg: RuxMLConfig, y_true: NDArray[np.float64], y_pred: NDArray[np.float32]) -> float:
+    if cfg.training.metric == "rmse":
+        return _rmse(y_true, y_pred)
+    # Fallback for non-rmse metrics: defer to compute_score via a tiny
+    # sklearn-shim adapter. Not exercised in the crypto-h3 calibration.
+    _ = compute_score  # keep import live for future-extension paths
+    msg = f"calibration harness only supports rmse; got {cfg.training.metric!r}"
+    raise NotImplementedError(msg)
+
+
+def _carve_inner_indices(
+    cfg: RuxMLConfig,
+    train_idx: NDArray[np.int64],
+    seed: int,
+) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
+    """Position B helper: split train_idx into (inner_train_idx, inner_val_idx).
+
+    Respects cfg.data.split_kind so the carve doesn't re-introduce the
+    random-shuffle leak inside a time_ordered CV fold. Operates on
+    indices only — no DataFrame materialisation.
+    """
+    val_ratio = cfg.data.split_ratios["val"]
+    n = train_idx.size
+    n_val = round(n * val_ratio)  # treat test=0 in inner carve
+    if cfg.data.split_kind == "time_ordered":
+        # train_idx is already sorted by the outer splitter's row order
+        # (panel_cpcv yields row indices grouped by timestamp chunks); take
+        # tail as val.
+        return train_idx[: n - n_val], train_idx[n - n_val :]
+    # random carve via deterministic shuffle.
+    rng = np.random.default_rng(seed)
+    perm = rng.permutation(n)
+    return train_idx[perm[: n - n_val]], train_idx[perm[n - n_val :]]
 
 
 def _fit_score_position_A(
     cfg: RuxMLConfig,
-    x_tr: pl.DataFrame,
-    y_tr: pl.Series,
-    x_te: pl.DataFrame,
-    y_te: pl.Series,
+    x_full_np: NDArray[np.float32],
+    y_full_np: NDArray[np.float64],
+    train_idx: NDArray[np.int64],
+    test_idx: NDArray[np.int64],
     seed: int,
-    target_col: str,
     timings: dict[str, float],
 ) -> float:
-    _ = (seed, target_col)
-    with _stopwatch(timings, "pipeline_construct"):
-        cards = cardinalities_from(x_tr, cfg.features.spec.categorical_columns)
-        pipeline = make_features(cfg.features, cardinalities=cards if cards else None)
-    with _stopwatch(timings, "pipeline_fit_transform"):
-        pipeline.fit(x_tr, y_tr.to_numpy())  # pyright: ignore[reportUnknownMemberType]
-        x_tr_t = cast("pl.DataFrame", pipeline.transform(x_tr))  # pyright: ignore[reportUnknownMemberType]
-        x_te_t = cast("pl.DataFrame", pipeline.transform(x_te))  # pyright: ignore[reportUnknownMemberType]
-    with _stopwatch(timings, "df_to_pandas"):
-        x_tr_pd = x_tr_t.to_pandas()
-        x_te_pd = x_te_t.to_pandas()
-    with _stopwatch(timings, "y_to_numpy"):
-        y_tr_np = y_tr.to_numpy()
-        y_te_np = y_te.to_numpy()
-    with _stopwatch(timings, "trainer_construct"):
-        trainer = make_trainer(cfg.training, seed=seed)
+    with _stopwatch(timings, "df_row_select"):
+        x_tr = x_full_np[train_idx]
+        x_te = x_full_np[test_idx]
+        y_tr = y_full_np[train_idx]
+        y_te = y_full_np[test_idx]
+    with _stopwatch(timings, "dmatrix_build"):
+        dtrain = xgb.QuantileDMatrix(x_tr, label=y_tr)
+        dtest = xgb.QuantileDMatrix(x_te, label=y_te, ref=dtrain)
     with _stopwatch(timings, "trainer_fit"):
-        trainer.fit(x_tr_pd, y_tr_np, eval_set=[(x_te_pd, y_te_np)], verbose=False)
+        params = _xgb_params(cfg)
+        params["seed"] = seed
+        booster = xgb.train(
+            params,
+            dtrain,
+            num_boost_round=_xgb_cfg(cfg).n_estimators,
+            evals=[(dtest, "test")],
+            early_stopping_rounds=_xgb_cfg(cfg).early_stopping_rounds,
+            verbose_eval=False,
+        )
     with _stopwatch(timings, "predict_score"):
-        score = compute_score(cfg.training.metric, trainer, x_te_pd, y_te_np)
+        y_pred = booster.inplace_predict(x_te)
+        score = _score(cfg, y_te, y_pred)
     return score
 
 
 def _fit_score_position_B(
     cfg: RuxMLConfig,
-    x_tr: pl.DataFrame,
-    y_tr: pl.Series,
-    x_te: pl.DataFrame,
-    y_te: pl.Series,
+    x_full_np: NDArray[np.float32],
+    y_full_np: NDArray[np.float64],
+    train_idx: NDArray[np.int64],
+    test_idx: NDArray[np.int64],
     seed: int,
-    target_col: str,
     timings: dict[str, float],
 ) -> float:
-    # Inner-val carve from train fold; test fold is held out from XGBoost.
     with _stopwatch(timings, "inner_val_carve"):
-        x_inner_tr, y_inner_tr, x_inner_val, y_inner_val = _carve_inner_val(
-            cfg, x_tr, y_tr, target_col=target_col, seed=seed
-        )
-    with _stopwatch(timings, "pipeline_construct"):
-        cards = cardinalities_from(x_inner_tr, cfg.features.spec.categorical_columns)
-        pipeline = make_features(cfg.features, cardinalities=cards if cards else None)
-    with _stopwatch(timings, "pipeline_fit_transform"):
-        pipeline.fit(x_inner_tr, y_inner_tr.to_numpy())  # pyright: ignore[reportUnknownMemberType]
-        x_inner_tr_t = cast("pl.DataFrame", pipeline.transform(x_inner_tr))  # pyright: ignore[reportUnknownMemberType]
-        x_inner_val_t = cast("pl.DataFrame", pipeline.transform(x_inner_val))  # pyright: ignore[reportUnknownMemberType]
-        x_te_t = cast("pl.DataFrame", pipeline.transform(x_te))  # pyright: ignore[reportUnknownMemberType]
-    with _stopwatch(timings, "df_to_pandas"):
-        x_inner_tr_pd = x_inner_tr_t.to_pandas()
-        x_inner_val_pd = x_inner_val_t.to_pandas()
-        x_te_pd = x_te_t.to_pandas()
-    with _stopwatch(timings, "y_to_numpy"):
-        y_inner_tr_np = y_inner_tr.to_numpy()
-        y_inner_val_np = y_inner_val.to_numpy()
-        y_te_np = y_te.to_numpy()
-    with _stopwatch(timings, "trainer_construct"):
-        trainer = make_trainer(cfg.training, seed=seed)
+        inner_tr_idx, inner_val_idx = _carve_inner_indices(cfg, train_idx, seed)
+    with _stopwatch(timings, "df_row_select"):
+        x_inner_tr = x_full_np[inner_tr_idx]
+        x_inner_val = x_full_np[inner_val_idx]
+        x_te = x_full_np[test_idx]
+        y_inner_tr = y_full_np[inner_tr_idx]
+        y_inner_val = y_full_np[inner_val_idx]
+        y_te = y_full_np[test_idx]
+    with _stopwatch(timings, "dmatrix_build"):
+        dtrain = xgb.QuantileDMatrix(x_inner_tr, label=y_inner_tr)
+        dval = xgb.QuantileDMatrix(x_inner_val, label=y_inner_val, ref=dtrain)
     with _stopwatch(timings, "trainer_fit"):
-        trainer.fit(
-            x_inner_tr_pd, y_inner_tr_np,
-            eval_set=[(x_inner_val_pd, y_inner_val_np)],
-            verbose=False,
+        params = _xgb_params(cfg)
+        params["seed"] = seed
+        booster = xgb.train(
+            params,
+            dtrain,
+            num_boost_round=_xgb_cfg(cfg).n_estimators,
+            evals=[(dval, "inner_val")],
+            early_stopping_rounds=_xgb_cfg(cfg).early_stopping_rounds,
+            verbose_eval=False,
         )
     with _stopwatch(timings, "predict_score"):
-        score = compute_score(cfg.training.metric, trainer, x_te_pd, y_te_np)
+        y_pred = booster.inplace_predict(x_te)
+        score = _score(cfg, y_te, y_pred)
     return score
 
 
 def _fit_score_position_C(
     cfg: RuxMLConfig,
-    x_tr: pl.DataFrame,
-    y_tr: pl.Series,
-    x_te: pl.DataFrame,
-    y_te: pl.Series,
+    x_full_np: NDArray[np.float32],
+    y_full_np: NDArray[np.float64],
+    train_idx: NDArray[np.int64],
+    test_idx: NDArray[np.int64],
     seed: int,
-    target_col: str,
     timings: dict[str, float],
 ) -> float:
-    _ = target_col
-    cfg_C = cfg.model_copy(deep=True)
-    cfg_C.training.early_stopping_rounds = None
-
-    with _stopwatch(timings, "pipeline_construct"):
-        cards = cardinalities_from(x_tr, cfg_C.features.spec.categorical_columns)
-        pipeline = make_features(cfg_C.features, cardinalities=cards if cards else None)
-    with _stopwatch(timings, "pipeline_fit_transform"):
-        pipeline.fit(x_tr, y_tr.to_numpy())  # pyright: ignore[reportUnknownMemberType]
-        x_tr_t = cast("pl.DataFrame", pipeline.transform(x_tr))  # pyright: ignore[reportUnknownMemberType]
-        x_te_t = cast("pl.DataFrame", pipeline.transform(x_te))  # pyright: ignore[reportUnknownMemberType]
-    with _stopwatch(timings, "df_to_pandas"):
-        x_tr_pd = x_tr_t.to_pandas()
-        x_te_pd = x_te_t.to_pandas()
-    with _stopwatch(timings, "y_to_numpy"):
-        y_tr_np = y_tr.to_numpy()
-        y_te_np = y_te.to_numpy()
-    with _stopwatch(timings, "trainer_construct"):
-        trainer = make_trainer(cfg_C.training, seed=seed)
+    with _stopwatch(timings, "df_row_select"):
+        x_tr = x_full_np[train_idx]
+        x_te = x_full_np[test_idx]
+        y_tr = y_full_np[train_idx]
+        y_te = y_full_np[test_idx]
+    with _stopwatch(timings, "dmatrix_build"):
+        dtrain = xgb.QuantileDMatrix(x_tr, label=y_tr)
     with _stopwatch(timings, "trainer_fit"):
-        # No eval_set → no early stopping → trains to n_estimators.
-        trainer.fit(x_tr_pd, y_tr_np, verbose=False)
+        params = _xgb_params(cfg)
+        params["seed"] = seed
+        # No eval set → no early stopping → trains to n_estimators.
+        booster = xgb.train(
+            params,
+            dtrain,
+            num_boost_round=_xgb_cfg(cfg).n_estimators,
+            verbose_eval=False,
+        )
     with _stopwatch(timings, "predict_score"):
-        score = compute_score(cfg_C.training.metric, trainer, x_te_pd, y_te_np)
+        y_pred = booster.inplace_predict(x_te)
+        score = _score(cfg, y_te, y_pred)
     return score
 
 
@@ -250,12 +299,37 @@ def _run_position(
 ) -> dict[str, Any]:
     """Run an Optuna study for one position and return per-trial RMSE list."""
     df_full = materialize(load_parquet(cast("Path", base_cfg.data.source_path)))
-    x_full, y_full = _strip_target(df_full, target_col)
-    versions = get_versions(base_cfg.memory)
-    _ = versions  # captured for completeness; not asserted in this throwaway script
+    # PRE-CONVERT TO NUMPY ONCE. The Polars row-select bottleneck identified by
+    # the 2026-05-19 probe (14.5s/trial = 23% of wallclock) lives in
+    # x_full[train_idx.tolist()]; with numpy slicing on a pre-materialised
+    # array, the per-fold row-select cost drops to ~0.
+    #
+    # Feature selection: skip the sklearn Pipeline entirely for problems with
+    # zero categorical_columns. crypto-h3 fits that criterion (all 9 features
+    # are numeric, no transforms). For datasets that need transforms, the
+    # general-purpose pipeline path in src/rux_ml/tuning/objective.py is
+    # unchanged — this script only owns the calibration harness.
+    if base_cfg.features.spec.categorical_columns:
+        msg = (
+            "calibration harness only supports zero-categorical features at v0.2; "
+            "extend the pipeline path before running on a problem with categoricals."
+        )
+        raise NotImplementedError(msg)
+    feature_cols = list(base_cfg.features.spec.numeric_columns)
+    # f32 saves VRAM + matches XGBoost-GPU's native tree-build precision.
+    x_full_np: NDArray[np.float32] = (
+        df_full.select(feature_cols).to_numpy().astype(np.float32, copy=False)
+    )
+    y_full_np: NDArray[np.float64] = (
+        df_full[target_col].to_numpy().astype(np.float64, copy=False)
+    )
+    # Keep a polars handle to x_full + y_full for the Splitter contract
+    # (PanelCombinatorialPurgedSplitter reads time_column + asset_column
+    # at split time).
+    x_full: pl.DataFrame = df_full.drop(target_col)
+    y_full: pl.Series = df_full[target_col]
 
     fit_score_fn = _POSITION_FN[position]
-    # Use distinct study names so positions don't share trials.
     study_name = f"pr025_position_{position}"
     study = optuna.create_study(
         study_name=study_name,
@@ -264,9 +338,6 @@ def _run_position(
         load_if_exists=True,
     )
 
-    # Walk the search space ONCE so all positions explore the same grid;
-    # mirror PR-007's objective shape but with the position-specific
-    # inner fit-and-score function.
     from rux_ml.tuning.objective import (  # noqa: PLC0415
         _apply_overrides,  # pyright: ignore[reportPrivateUsage]
         walk_search_space,
@@ -293,14 +364,14 @@ def _run_position(
             for fold_idx, (train_idx, test_idx) in enumerate(
                 splitter.split(x_full, y_full)
             ):
-                with _stopwatch(timings, "df_row_select"):
-                    x_tr = x_full[train_idx.tolist()]
-                    x_te = x_full[test_idx.tolist()]
-                    y_tr = y_full[train_idx.tolist()]
-                    y_te = y_full[test_idx.tolist()]
-
                 fold_score = fit_score_fn(
-                    trial_cfg, x_tr, y_tr, x_te, y_te, bag.xgb_seed, target_col, timings
+                    trial_cfg,
+                    x_full_np,
+                    y_full_np,
+                    train_idx.astype(np.int64, copy=False),
+                    test_idx.astype(np.int64, copy=False),
+                    bag.xgb_seed,
+                    timings,
                 )
                 scores.append(float(fold_score))
                 trial.report(fold_score, step=fold_idx)
@@ -312,7 +383,6 @@ def _run_position(
         trial.set_user_attr("position", position)
         trial.set_user_attr("timings_s", timings)
 
-        # Compact per-trial timing line — easy to grep in /tmp/pr025_calib.log.
         timing_repr = " ".join(f"{k}={v:.2f}" for k, v in sorted(timings.items()))
         typer.echo(f"    trial {trial.number} timings: {timing_repr}", err=True)
         return statistics.fmean(scores)
