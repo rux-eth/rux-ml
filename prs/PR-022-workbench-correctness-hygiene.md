@@ -1,6 +1,6 @@
 # PR-022: Workbench correctness hygiene — discriminator-carryover prevention + CV-eval_set doc accuracy
 
-**Landed-in:** (not yet landed)
+**Landed-in:** v0.1.1
 
 ## Before Implementation (NON-NEGOTIABLE)
 

@@ -1,6 +1,6 @@
 # PR-027: Int64-timestamp time-unit handling in `TimeSeriesSplitter._effective_gap`
 
-**Landed-in:** (not yet landed)
+**Landed-in:** v0.2.0
 
 ## Before Implementation (NON-NEGOTIABLE)
 

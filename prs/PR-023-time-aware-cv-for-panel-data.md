@@ -1,6 +1,6 @@
 # PR-023: Time-aware CV for panel data — time-unit embargo + label-overlap purge
 
-**Landed-in:** v0.2.0 (rolled in PR-026)
+**Landed-in:** v0.2.0
 
 ## Before Implementation (NON-NEGOTIABLE)
 

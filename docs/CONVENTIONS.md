@@ -372,7 +372,7 @@ Note: PR-018 introduced the `[project.optional-dependencies]` table for the firs
 
 ## Solver layer (per PR-020)
 
-The Solver layer is a parallel top-level surface alongside the Trainer layer. Per `docs/0.1/DESIGN-log.md` Q1 + PR-020 Q-Shape (partial mirror), the solving layer reuses the workbench's config/registry/factory/study/provenance substrate but bypasses `cfg.data` / `cfg.cv` / fittable-model registry.
+The Solver layer is a parallel top-level surface alongside the Trainer layer. Per `docs/0.1/DESIGN-log.md` Q1 + PR-020 Q-Shape (partial mirror), <!-- rewrite-doc-refs:skip-line --> the solving layer reuses the workbench's config/registry/factory/study/provenance substrate but bypasses `cfg.data` / `cfg.cv` / fittable-model registry.
 
 **Subpackage layout** mirrors the Trainer layer:
 
@@ -435,7 +435,7 @@ Metric translation: if the family doesn't accept the workbench's metric-registry
 
 ## Multi-family Trainer extensibility (per PR-017)
 
-Per `docs/0.1/DESIGN-log.md` Q1–Q5 + Q6:
+Per `docs/0.1/DESIGN-log.md` Q1–Q5 + Q6: <!-- rewrite-doc-refs:skip-line -->
 
 **Subpackage per family.** Every Trainer family lives at `src/rux_ml/training/<family>/`:
 
