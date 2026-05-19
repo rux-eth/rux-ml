@@ -4,6 +4,14 @@ All notable user-facing changes to `rux-ml`. Format: [Keep a Changelog 1.1.0](ht
 
 ## [Unreleased]
 
+### Fixed
+- `configs/base.toml [cv]` no longer carries variant-specific defaults. `shuffle = true` (a `KFoldCV`-only field) and `n_splits = 5` (absent from `CombinatorialPurgedCV`, which uses `n_folds`) leaked across the discriminator on `deep_merge` and tripped Pydantic's `extra="forbid"` whenever a problem TOML switched `kind` to `time_series` / `group_kfold` / `cpcv`. Both fields are now schema-defaults (preserving identical behavior for kfold users). New `tests/config/test_base_toml_discriminator_hygiene.py` walks every top-level discriminated union (`[cv]`, `[training]`, `[solving]`) and asserts no variant-specific field lives at the base-table position — future regressions of the same shape fail CI, not the user at runtime (PR-022).
+- `docs/CONVENTIONS.md` HPO objective section + `docs/ARCHITECTURE.md` HPO components section now honestly characterize the test-fold-as-eval_set design as a research-acknowledged pragmatic deviation from textbook CV (Position A of four practitioner positions), not as a clean pattern inherited from Optuna's WilcoxonPruner recipe. The HPO bias compounding risk is now documented, and the two alternatives (Position B — inner val from train fold, sklearn's `HistGradientBoosting*` default; Position C — no early stopping in CV with post-CV retrain, XGBoost's own recommendation) are noted as explicitly available, deferred to a future Tier-2 study (PR-022 Phase 3 research, 2026-05-18).
+
+### Added
+- `docs/CONVENTIONS.md` Configuration Conventions: new subsection on **base.toml discriminator-table hygiene** — variant-specific knobs go in `configs/problems/<n>.toml`, not base. Enforced by the new structural test. Documents `kind` vs `type` discriminator field distinction (PR-022).
+- `docs/CONVENTIONS.md` CV strategy conventions: new subsection on **`TimeSeriesSplitCV.gap` row-vs-time semantics** — `gap` is row-count not time-units; on stacked panels this collapses to <1 hour of per-asset embargo when many assets share each timestamp. Forward-references PR-023 (time-aware embargo for panel data). Live finding from the 2026-05-18 first-real-dataset run (PR-022).
+
 ## [0.1.0] - 2026-05-18
 
 ### Added

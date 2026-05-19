@@ -220,7 +220,9 @@ pruner:
   NopPruner ("none")                                                 # disables pruning
 ```
 
-**Important**: `XGBoostPruningCallback` is **NOT** wired inside the CV loop (Optuna #3203 — duplicate `step=0,1,…` reports per fold break iteration-level pruners). Per-fold XGBoost-internal `early_stopping_rounds` handles within-fold pruning; Optuna pruning operates only at fold granularity via `trial.report(fold_score, fold_idx)`.
+**Important**: `XGBoostPruningCallback` is **NOT** wired inside the CV loop (Optuna #3203 — duplicate `step=0,1,…` reports per fold break iteration-level pruners). Per-fold XGBoost-internal `early_stopping_rounds` handles within-fold convergence by using the held-out test fold as its `eval_set`; Optuna pruning operates only at fold granularity via `trial.report(fold_score, fold_idx)`.
+
+**This eval_set placement is a research-acknowledged pragmatic deviation, not a textbook-clean pattern.** Per PR-022 Phase 3 research (2026-05-18), it matches the library-blessed default of `xgboost.cv()` / `lightgbm.cv()` / `catboost.cv()` but produces an optimism bias in CV-reported metrics that compounds across HPO trials. Workbench CV scores should be treated as point estimates for HP ranking, not as unbiased generalization estimates. Alternative patterns (Position B: inner val carved from train fold, sklearn's `HistGradientBoosting*` default; Position C: no early stopping in CV with post-CV retrain, XGBoost's own recommendation) are explicitly available; switching to either is deferred to a future Tier-2 study per memory `project_cv_strategy_tier2`. See `docs/CONVENTIONS.md` "HPO objective shape" for the full reframe + cited sources.
 
 **TPE + Wilcoxon caveat**: Optuna's WilcoxonPruner docs note "TPESampler currently cannot utilize the information of pruned trials effectively" under Wilcoxon. Real tradeoff documented; mitigation is `cfg.tuning.pruner = "median"` for users who want the TPE feedback loop to learn from pruned trials.
 
