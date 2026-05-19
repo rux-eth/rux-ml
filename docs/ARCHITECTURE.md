@@ -128,6 +128,8 @@ The Splitter chosen for a problem is driven by the **shape of `(time, group)` in
 
 The structural test `tests/config/test_base_toml_discriminator_hygiene.py` walks every variant of `CVConfig` and asserts no variant-specific knob sits at the base-table position — panel-aware fields (`time_column`, `asset_column`, `embargo_time`, `target_horizon_bars`, `embargo_pct`) all default to `None` / `0` / `0.0` so the rule is honored without manual upkeep.
 
+**One-off baseline path (`rux-ml train`)** also routes via `data.split_kind` ∈ `{"random", "time_ordered"}` (PR-024). When CV is temporal (`cv.kind` ∈ `{"time_series", "cpcv", "panel_cpcv"}`), `RuxMLConfig`'s cross-field model_validator requires `data.split_kind == "time_ordered"` AND `data.time_column` set — otherwise the baseline would random-shuffle while the HPO loop honors temporal ordering, re-introducing the foot-gun this rule fixes. The temporal split is deterministic (sorts by `time_column`; no seed), so promotion-time re-fit reproduces the trial's layout without seed plumbing.
+
 ### CatBoost ingest + categorical handling (per PR-019)
 
 CatBoost's ``fit(DataFrame, y)`` accepts pandas/polars DataFrames directly; no ``Pool`` construction is required (Q-Wrap §9 PROVEN at v1.2.10). ``Pool`` is the optional ``DMatrix``/``Dataset`` analog and is exposed by ``src/rux_ml/training/catboost/ingest.py::build_pool`` as a utility for advanced users (e.g., explicit ``baseline=``, ``weights=``, ``timestamp=`` knobs), but the factory does not call it.

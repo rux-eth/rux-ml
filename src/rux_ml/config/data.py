@@ -1,6 +1,7 @@
-"""Data layer config (per D3, D9, D14)."""
+"""Data layer config (per D3, D9, D14; PR-024 split_kind + time_column)."""
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 
@@ -24,3 +25,17 @@ class DataConfig(StrictModel):
     split_ratios: dict[str, float] = Field(
         default_factory=lambda: {"train": 0.7, "val": 0.15, "test": 0.15}
     )
+
+    # PR-024: one-off baseline split policy. ``random`` shuffles rows (v0.1
+    # default — preserves backward compat); ``time_ordered`` sorts by
+    # ``time_column`` and slices into temporally-ordered partitions. Selected
+    # at config validation time; ``time_ordered`` requires ``time_column`` to
+    # be set. Cross-field validation lives on ``RuxMLConfig`` (data ↔ cv.kind
+    # consistency check).
+    split_kind: Literal["random", "time_ordered"] = "random"
+
+    # PR-024: column holding the timestamp used by ``time_ordered`` splits and
+    # by PR-023's time-aware CV variants (``TimeSeriesSplitCV.time_column``,
+    # ``PanelCombinatorialPurgedCV.time_column``). Set per problem; absent in
+    # base.toml. None is valid when ``split_kind == "random"``.
+    time_column: str | None = None

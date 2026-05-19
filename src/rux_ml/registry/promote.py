@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any, cast
 from rux_ml._internal.hashing import sha256_canonical
 from rux_ml._internal.seeds import SeedBag, make_seed_bag_from_hex
 from rux_ml.config import RuxMLConfig
-from rux_ml.data import load_parquet, materialize, train_val_test_split
+from rux_ml.data import load_parquet, make_splits, materialize
 from rux_ml.features import cardinalities_from, make_features
 from rux_ml.registry.bundle import save_bundle
 from rux_ml.registry.champion import write_champion
@@ -107,7 +107,7 @@ def _refit(cfg: RuxMLConfig, *, bag: SeedBag) -> tuple[Pipeline, xgb.Booster]:
         raise ValueError(msg)
 
     df = materialize(load_parquet(cfg.data.source_path))
-    splits = train_val_test_split(df, ratios=cfg.data.split_ratios, seed=bag.split_seed)
+    splits = make_splits(cfg, df, seed=bag.split_seed)
     x_train = splits["train"].drop(cfg.data.target_column)
     y_train = splits["train"][cfg.data.target_column]
     x_val = splits["val"].drop(cfg.data.target_column)

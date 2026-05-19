@@ -25,7 +25,7 @@ from rux_ml._internal.memory import MemoryPressureError, Watchdog
 from rux_ml._internal.seeds import SeedBag, make_seed_bag
 from rux_ml.cli._shared import get_options
 from rux_ml.config import RuxMLConfig
-from rux_ml.data import load_parquet, materialize, train_val_test_split
+from rux_ml.data import load_parquet, make_splits, materialize
 from rux_ml.features import cardinalities_from, make_features
 from rux_ml.runs import (
     TrialAttrs,
@@ -62,12 +62,15 @@ def _fit_and_score(
     """Fit + score one baseline using PR-013-derived seeds for split + trainer.
 
     The one-off baseline shares the data-fold layout with the registry-side
-    re-fit at promote time (both consume ``train_val_test_split`` with the
-    same ``bag.split_seed``), so a promoted bundle reproduces the exact
-    baseline configuration the user saw at training.
+    re-fit at promote time (both consume :func:`make_splits` with the same
+    ``bag.split_seed``), so a promoted bundle reproduces the exact baseline
+    configuration the user saw at training. ``make_splits`` dispatches
+    between random and temporal split per ``cfg.data.split_kind`` (PR-024);
+    the temporal path is deterministic and ignores the seed, so the same
+    reproducibility contract holds.
     """
     df = materialize(load_parquet(source_path))
-    splits = train_val_test_split(df, ratios=cfg.data.split_ratios, seed=bag.split_seed)
+    splits = make_splits(cfg, df, seed=bag.split_seed)
     x_train, y_train = _strip_target(splits["train"], target_col)
     x_val, y_val = _strip_target(splits["val"], target_col)
 

@@ -182,10 +182,17 @@ Per D13, no Rust at v0. When the first crate lands:
 
 The workbench distinguishes **one-shot** and **repeated** splitting at the API level:
 
-- **One-shot** — `rux_ml.data.splits.train_val_test_split(df, *, ratios, seed) → dict[str, pl.DataFrame]`. Returns three materialised Polars frames in one call. Used by `rux-ml train` for the single-baseline path; pre-dates the Splitter Protocol and does not consume `cfg.cv`.
+- **One-shot** — `rux_ml.data.splits.train_val_test_split(df, *, ratios, seed) → dict[str, pl.DataFrame]` for the random / IID path, and `rux_ml.data.splits.temporal_train_val_test_split(df, *, time_column, ratios) → dict[str, pl.DataFrame]` for the time-ordered / time-series path (PR-024). Both return three materialised Polars frames. `rux-ml train` and `registry/promote.py` route through `make_splits(cfg, df, *, seed)` which dispatches on `cfg.data.split_kind ∈ {"random", "time_ordered"}` — two separate functions, no kind-knob (≥3-cited convention: sktime `temporal_train_test_split`, Darts `TimeSeries.split_before/split_after`, AutoGluon TimeSeriesPredictor, Nixtla `mlforecast.cross_validation`, mlfinlab).
 - **Repeated CV** — `rux_ml.data.cv.Splitter` Protocol (`split(X: pl.DataFrame, y, *, groups) → Iterator[(np.ndarray, np.ndarray)]`). Yields row-index pairs per sklearn convention. Used by PR-007's Optuna objective and any future HPO loop. The Splitter is constructed inside the trial subprocess via `make_splitter(cfg.cv, seed=…)`.
 
 The shapes intentionally differ — one-shot returns DataFrames (cheap when K=1); repeated returns indices (avoids materialising K × DataFrames in memory-bound trials).
+
+**`data.split_kind` × `cv.kind` consistency** (PR-024). The `RuxMLConfig` model_validator enforces two cross-field rules at config-load time (fail-fast, ValueError):
+
+- `data.split_kind == "time_ordered"` requires `data.time_column` to be set.
+- `cv.kind ∈ {"time_series", "cpcv", "panel_cpcv"}` requires `data.split_kind == "time_ordered"` — otherwise the one-off `rux-ml train` baseline would random-shuffle while the HPO loop respects temporal ordering, producing meaningfully different train/val/test layouts between the two CLI paths and re-introducing the leakage profile PR-023 closed.
+
+The temporal one-off split is **deterministic** (sort by `time_column` then slice by ratio; no seed). This preserves the reproducibility contract between `cli/train.py` and `registry/promote.py` automatically — promotion-time re-fit reproduces the same train/val/test layout the trial saw without any seed plumbing. Single-asset users can leave `data.split_kind = "random"` (default) for v0.1.1-identical behavior.
 
 **Groups column-to-array convention** (`GroupKFoldCV`): the config carries `groups_column: str` (a column name on the input DataFrame). The **caller** resolves it to `np.ndarray` via `df[col].to_numpy()` before calling `splitter.split(..., groups=arr)`. The Splitter never holds DataFrame state. Two cited production precedents: sklearn user guide on Group K-Fold; mlxtend `GroupTimeSeriesSplit` user guide. This keeps the Splitter Protocol stateless and pickle-friendly even though PR-015's design builds the Splitter inside the trial child (so cross-process pickling is not exercised at v0).
 

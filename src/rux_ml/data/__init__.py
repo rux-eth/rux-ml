@@ -16,7 +16,7 @@ from rux_ml.data.cv import (
 )
 from rux_ml.data.data_iter import ParquetDataIter
 from rux_ml.data.loaders import load_parquet, materialize
-from rux_ml.data.splits import train_val_test_split
+from rux_ml.data.splits import make_splits, temporal_train_val_test_split, train_val_test_split
 from rux_ml.data.versioning import (
     Manifest,
     compute_data_hash,
@@ -39,10 +39,12 @@ __all__ = [
     "compute_data_hash",
     "list_manifests",
     "load_parquet",
+    "make_splits",
     "make_splitter",
     "materialize",
     "read_manifest",
     "snapshot",
+    "temporal_train_val_test_split",
     "train_val_test_split",
     "write_manifest",
 ]
