@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import json
 import statistics
+import subprocess
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -57,6 +58,25 @@ from rux_ml._internal.seeds import make_seed_bag
 from rux_ml.config import RuxMLConfig, XGBoostTraining
 from rux_ml.data import load_parquet, make_splitter, materialize
 from rux_ml.training import compute_score
+
+
+def _gpu_mem_used_mib() -> int:
+    """Snapshot current GPU memory usage via nvidia-smi (single int call).
+
+    Returns the highest in-use number across all visible devices; on the
+    workbench's single-GPU setup that's effectively device 0.
+    """
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=5,
+        )
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return 0
+    return max((int(line.strip()) for line in out.stdout.splitlines() if line.strip()), default=0)
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -357,10 +377,11 @@ def _run_position(
 
         scores: list[float] = []
         trial_t0 = time.perf_counter()
+        gpu_mib_peak = _gpu_mem_used_mib()
         with Watchdog(
             threshold_gb=trial_cfg.memory.watchdog_threshold_gb,
             sample_hz=trial_cfg.memory.watchdog_sample_hz,
-        ):
+        ) as wd:
             for fold_idx, (train_idx, test_idx) in enumerate(
                 splitter.split(x_full, y_full)
             ):
@@ -374,10 +395,16 @@ def _run_position(
                     timings,
                 )
                 scores.append(float(fold_score))
+                # Sample GPU between folds — cheap nvidia-smi spawn.
+                gpu_mib_peak = max(gpu_mib_peak, _gpu_mem_used_mib())
                 trial.report(fold_score, step=fold_idx)
                 if trial.should_prune():
                     raise optuna.TrialPruned
         timings["trial_total"] = time.perf_counter() - trial_t0
+        # Memory peaks for the trial — host via Watchdog (per-trial sampling),
+        # GPU via nvidia-smi between-fold snapshots.
+        timings["peak_host_rss_mb"] = float(wd.peak_mb)
+        timings["peak_gpu_mib"] = float(gpu_mib_peak)
 
         trial.set_user_attr("fold_scores", scores)
         trial.set_user_attr("position", position)
