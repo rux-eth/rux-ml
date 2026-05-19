@@ -22,12 +22,12 @@ _To be populated by `PROCEDURE-pr-research.md`. Do not begin implementation unti
 
 **Open research questions** (must be resolved before implementation):
 
-1. **Discriminator-hygiene enforcement** — the root cause of the `[cv] shuffle = true` bug (hit live during the 2026-05-18 run) was that fields in a `base.toml` discriminator-table leak across variants on `deep_merge`. The same risk exists today for every discriminated union in the schema. Open: what's the right enforcement mechanism?
-   - **A**: Programmatic test that walks `base.toml`, introspects each Pydantic discriminator's variant set, and asserts every base field is in EVERY variant. Test failure = caught before merge, not at user time.
-   - **B**: Schema-level marker — declare in code which fields are "base-safe" per discriminator. Heavier; requires schema annotation.
+1. **Discriminator-hygiene enforcement** — the root cause of the `[cv] shuffle = true` bug (hit live during the 2026-05-18 run) is **base.toml content**, not runtime behavior. Pydantic's strict validation (`extra="forbid"` on `StrictModel`) and `deep_merge`'s plain-dict merge are both working as designed — and the resulting `ValidationError` is actually a *good* diagnostic that points straight at the leaked field. Silent discriminator-aware field-dropping would be worse for debugging. The fix lives in `configs/base.toml`: only fields common to every variant of a discriminator belong at the base-table position. The same risk exists today for every discriminated union. Open: what's the right enforcement mechanism so this kind of base-TOML hygiene violation can't recur silently?
+   - **A**: Programmatic test that introspects each Pydantic discriminator's variant set and asserts every field at `base.toml`'s discriminator table is in EVERY variant. Test failure = caught at PR review, not at user time. **No `src/` code change** — just a new test file under `tests/config/`.
+   - **B**: Schema-level marker — declare in code which fields are "base-safe" per discriminator. Heavier; requires per-field schema annotation.
    - **C**: Move all discriminator tables out of `base.toml` entirely (require every problem TOML to set them). Strictest; loses the "shared default" affordance.
    
-   Phase 3 may not need web research (Pydantic-specific); decide between A / B / C in Phase 4 synthesis. Lean (intuition, flagged): **A** — single test in `tests/config/`, no schema annotation churn, fails CI early.
+   Phase 3 may not need web research (the problem is Pydantic-discriminator + multi-layer TOML, project-specific); decide between A / B / C in Phase 4 synthesis. Lean (intuition, flagged): **A** — single test, no schema annotation churn, fails CI early, leaves runtime behavior untouched.
 
 2. **CV eval_set / test-fold leakage** — `src/rux_ml/tuning/objective.py` (`_fold_scores`) passes the test fold as XGBoost's `eval_set` then scores against the same fold. `best_iteration_` is HP-selected on the same fold the score is computed on → metric is better-than-real. Affects every CV run regardless of trainer family. Open: how to remove the leak across all 3 families (XGBoost, LightGBM, CatBoost — each has its own early-stopping mechanism per PR-017/018/019)?
    - **A**: Carve an inner val slice from each train fold using the existing `cfg.data.split_ratios.val` knob. eval_set = inner val; score on the untouched test fold. No new config.
@@ -51,10 +51,12 @@ Three items, all model-/family-agnostic and prevention-oriented. Concrete implem
 
 ### Item 1 — base.toml `[cv] shuffle = true` + structural prevention
 
-- Remove `shuffle = true` from `base.toml [cv]` (concrete fix for the live bug).
-- Add an enforcement test (mechanism per Q1) that walks every discriminated union in the schema and asserts no base-table field is variant-specific. Future regressions of the same shape — e.g., a contributor adding `learning_rate = 0.1` to `base.toml [training]` (would break problem-level `kind = "catboost"` since CatBoost has no `learning_rate`-equivalent in our schema — wait, it does, but `subsample` doesn't always exist; the point stands) — fail the test, not the user.
+This is a **config (TOML content) fix**, not a runtime behavior change. Pydantic's `extra="forbid"` and `deep_merge` both stay as-is.
 
-Applies to every discriminated union in the schema: `[cv]` (5 variants), `[training]` (3 variants), `[solving]` (1 variant today), `[tuning.search_space.*]` (3 variants — internal but worth verifying). All 4 are covered by a single parametrized test, not per-union code.
+- Remove `shuffle = true` from `base.toml [cv]` (concrete fix for the live bug).
+- Add an enforcement test (mechanism per Q1) that walks every discriminated union in the schema and asserts no base-table field is variant-specific. Future regressions of the same shape — e.g., a contributor adding `subsample = 0.8` to `base.toml [training]` would break problem-level `kind = "lightgbm"` (LightGBM's schema has `bagging_fraction`, not `subsample`) — fail the test at CI time, not the user at runtime.
+
+Applies to every discriminated union in the schema: `[cv]` (5 variants), `[training]` (3 variants), `[solving]` (1 variant today), `[tuning.search_space.*]` (3 variants — internal but worth verifying). All 4 are covered by a single parametrized test, not per-union code. **No changes under `src/`** — TOML edit + new test file under `tests/config/`.
 
 ### Item 2 — `objective.py` eval_set / test-fold leakage
 
@@ -62,9 +64,9 @@ Applies to every discriminated union in the schema: `[cv]` (5 variants), `[train
 - Affects `tests/tuning/test_objective.py` (existing tests pinning specific metric values must update to reflect the corrected, slightly-higher metric).
 - Calibration check: re-run the crypto baseline (PR-021 reference: RMSE=0.02547 at c29886c → cdbffd2) and report the delta. Expected: small rise (early stopping was overfitting to test fold). Delta is documented in the PR description, not pinned in a test.
 
-### Item 3 — `docs/CONVENTIONS.md` discriminator-carryover + `TimeSeriesSplit.gap` semantics
+### Item 3 — `docs/CONVENTIONS.md` base.toml-hygiene + `TimeSeriesSplit.gap` semantics
 
-- Document the discriminator-carryover gotcha (forward-references Item 1's test as the structural enforcement).
+- Document the **base.toml discriminator-table rule**: only fields common to every variant of a discriminator (`[cv]`, `[training]`, `[solving]`, `[tuning.search_space.*]`) belong at the base-table position. Variant-specific knobs go in `configs/problems/<n>.toml`. Reference Item 1's enforcement test as the structural backstop. Make clear that Pydantic's strict validation + `deep_merge`'s plain-dict semantics are intentional — the rule is about TOML *content*, not runtime behavior.
 - Document `TimeSeriesSplit.gap` as row-count, with the panel-data implication and forward-reference to PR-023 for time-aware embargo.
 
 ### Out of scope
