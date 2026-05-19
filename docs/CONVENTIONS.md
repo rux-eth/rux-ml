@@ -150,6 +150,8 @@ Per D17, the three-tier composition layers in this order (lowest → highest pri
 
 `extra="forbid"` is set on all Pydantic models so typos surface as validation errors instead of silently ignored fields.
 
+**base.toml discriminator-table hygiene** (per PR-022): when a `base.toml` table corresponds to a Pydantic discriminated union (`[cv]`, `[training]`, `[solving]`, and `[tuning.search_space.*]` once those become base-settable), only fields present in EVERY variant of that union may live at the base-table position. Variant-specific knobs (`kfold.shuffle`, `xgboost.tree_method`, `time_series.gap`, `cpcv.embargo_size`, `cpcv.n_folds`, ...) go in `configs/problems/<n>.toml`. Reason: `deep_merge` is a plain-dict merge that carries base fields across the discriminator on `kind` switches; Pydantic's `extra="forbid"` then rejects fields the new variant doesn't declare. Both behaviors are intentional — the rule is about TOML *content*, not runtime behavior. The discriminator field itself is `kind` for `[cv]` / `[training]` / `[solving]` and `type` for `[tuning.search_space.*]` — the structural test handles both. Enforced by `tests/config/test_base_toml_discriminator_hygiene.py`; future contributors adding a variant-specific field to base fail CI, not the user at runtime.
+
 Hash elision: paths, timestamps, and runtime-only fields (`logs.path`, `studies.storage_url`) are excluded from `*_cfg_hash` computation. The elision list lives as a constant `_HASH_ELIDED_FIELDS` in `src/rux_ml/config/root.py`.
 
 ---
@@ -201,6 +203,8 @@ These are starting-point defaults; final choice is per-problem and lives in `con
 
 **ExtMem compatibility:** only `TimeSeriesSplitCV` is `extmem_compatible` at v0; pairing any other Splitter with `ExtMemQuantileDMatrix` raises `NotImplementedError` at training time (materialised fallback deferred to a follow-up PR).
 
+**`TimeSeriesSplitCV.gap` is row-count, not time-units** (per PR-022). The `gap` field excludes N **rows** between train-end and test-start — directly from sklearn's `TimeSeriesSplit` semantics. On a stacked panel with K rows per timestamp (e.g., K assets × hourly bars), `gap=N` rows ≈ `N/K` timestamps of separation per asset. Setting `gap=24` on a 1084-asset panel produces <1 hour of per-asset embargo, not 24 hours. For single-asset time series this isn't an issue (1 row = 1 bar); for panels you must compute `gap = N_assets × h_horizon_bars` yourself, OR wait for time-unit embargo support landing in PR-023 (time-aware CV for panel data). Live finding from the 2026-05-18 first-real-dataset run.
+
 ---
 
 ## HPO objective shape (per PR-007)
@@ -211,7 +215,12 @@ The Optuna objective is **K-fold CV-mean** per the PR-007 Tier-2 research findin
 - Per-fold scores are reported via `trial.report(fold_score, step=fold_idx)` so `WilcoxonPruner` (the default — purpose-built for K-fold CV per Optuna 3.6+) can paired-test against running trials.
 - The trial returns `statistics.fmean(fold_scores)` as the aggregate objective value (arithmetic mean; switch to median only after measured outlier evidence per Q1.b research).
 - Features pipeline is re-fit per fold for leakage hygiene (cardinalities re-computed on each fold's train set).
-- XGBoost-internal `early_stopping_rounds` runs against each fold's val partition (the test fold).
+- XGBoost-internal `early_stopping_rounds` runs against each fold's test partition (the held-out fold is passed as `eval_set`). **This is a pragmatic deviation from textbook CV, not a clean convention** — research-backed in PR-022 Phase 3 (2026-05-18). Specifically:
+  - It matches the library-blessed default of `xgboost.cv()` / `lightgbm.cv()` / `catboost.cv()` (the built-ins use the held-out fold as their early-stopping watch-list) and the XGBoost sklearn-API doc example.
+  - It produces an **optimism bias** in the per-fold metric, because `best_iteration_` is HP-selected on the same fold the score is computed on. XGBoost's own docs call this out: *"using early stopping during cross validation may not be a perfect approach because it changes the model's number of trees for each validation fold."* — https://xgboost.readthedocs.io/en/stable/python/sklearn_estimator.html#early-stopping
+  - The bias **compounds across HPO trials**: Optuna selects HPs whose `best_iteration` on the test fold maximizes test-fold score. Across hundreds of trials, the selection itself adapts to the test folds. Workbench CV metrics should be treated as point estimates for HP *ranking* — not as unbiased generalization estimates.
+  - It is **not** inherited from Optuna's WilcoxonPruner recipe; that tutorial uses independent problem instances, not CV folds with early stopping (https://optuna.readthedocs.io/en/latest/tutorial/20_recipes/013_wilcoxon_pruner.html). The workbench's "clean responsibility separation" framing (XGBoost owns within-fold, Optuna owns across-fold) is a deliberate workbench *choice* given this tradeoff.
+  - **Alternatives explicitly available**: Position B (carve an inner val from the train fold; sklearn's `HistGradientBoosting*` default) and Position C (no early stopping in CV; XGBoost's *own* recommendation for CV-with-HPO — *"A better approach is to retrain the model after cross validation using the best hyperparameters along with early stopping."*). Switching to either is deferred to a future Tier-2 study per memory `project_cv_strategy_tier2`.
 - **`XGBoostPruningCallback` is NOT wired inside the CV loop** — Optuna #3203 documents that the callback's per-fold `step=0,1,…` reports break iteration-level pruners. Within-fold pruning is owned by XGBoost; cross-fold pruning is owned by Optuna's fold-level pruner.
 
 A future single-fit objective regime (no CV; one fit per trial) would re-enable `XGBoostPruningCallback` for iteration-level pruning. That regime is not exposed at v0; the literal preserves `hyperband` / `successive_halving` pruner choices for it.

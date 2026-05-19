@@ -42,9 +42,15 @@ kind = "xgboost"
 # set explicitly because empty `[cv]` can't disambiguate the discriminator.
 # Switch via kind ∈ {kfold, stratified_kfold, time_series, group_kfold, cpcv}.
 # CPCV (skfolio) requires per-problem embargo_size / purged_size for AFML use.
+#
+# Only fields present in EVERY variant of CVConfig may live here — variant-
+# specific knobs (kfold.shuffle, time_series.gap, cpcv.embargo_size, cpcv.n_folds, ...)
+# go in configs/problems/<name>.toml. Enforced by
+# tests/config/test_base_toml_discriminator_hygiene.py. The KFoldCV /
+# StratifiedKFoldCV / TimeSeriesSplitCV / GroupKFoldCV schemas all default
+# n_splits=5; CombinatorialPurgedCV uses n_folds (default 10). Set per
+# problem when overriding either.
 kind = "kfold"
-n_splits = 5
-shuffle = true
 
 [memory]
 # Defaults: watchdog_threshold_gb=28.0 (BEST-GUESS per D10),
