@@ -1,0 +1,33 @@
+# 10-trial baseline calibration sweep for the crypto_breakout_h3 problem.
+#
+# Activate via the PR-025 calibration script:
+#   uv run python scripts/calibrate_pr025.py \
+#       --problem crypto_breakout_h3 \
+#       --study crypto_breakout_h3_baseline \
+#       --positions A,B,C \
+#       --output-json prs/PR-025-calibration-results.json
+#
+# Bumped from the 2026-05-18 sanity-check n_trials=3 to 10 trials so the
+# PR-025 Phase 3 calibration has enough samples for a stable median + IQR
+# under each eval_set position (A/B/C). Search space stays deliberately
+# narrow — the calibration measures eval_set placement effects, not real
+# HPO. Real HPO is a follow-up Tier-2 PR.
+
+[tuning]
+sampler = "tpe"
+pruner = "wilcoxon"
+n_trials = 10
+n_startup_trials = 10  # all trials are TPE startup-random for the calibration
+
+# CV inherits from configs/problems/crypto_breakout_h3.toml [cv] (panel_cpcv).
+
+[search_space."training.learning_rate"]
+type = "float"
+low = 0.03
+high = 0.10
+log = true
+
+[search_space."training.max_depth"]
+type = "int"
+low = 5
+high = 8
