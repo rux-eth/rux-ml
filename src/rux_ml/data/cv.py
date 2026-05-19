@@ -50,7 +50,7 @@ runtime. Tests assert the runtime contract.
 from __future__ import annotations
 
 from math import comb
-from typing import TYPE_CHECKING, ClassVar, Protocol
+from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
 
 import numpy as np
 import pandas as pd  # used only by TimeSeriesSplitter._effective_gap for Timedelta parsing
@@ -207,6 +207,7 @@ class TimeSeriesSplitter:
         max_train_size: int | None,
         time_column: str | None = None,
         embargo_time: int | str | None = None,
+        time_unit: Literal["ns", "us", "ms", "s"] | None = None,
         seed: int | None = None,
     ) -> None:
         _ = seed  # TimeSeriesSplit is deterministic.
@@ -215,6 +216,7 @@ class TimeSeriesSplitter:
         self._max_train_size = max_train_size
         self._time_column = time_column
         self._embargo_time = embargo_time
+        self._time_unit: Literal["ns", "us", "ms", "s"] | None = time_unit
 
     def _effective_gap(self, X: pl.DataFrame) -> int:
         if self._embargo_time is None:
@@ -234,10 +236,41 @@ class TimeSeriesSplitter:
                 f"in DataFrame columns: {X.columns}"
             )
             raise ValueError(msg)
+
+        # PR-027 behavior matrix: explicit time_unit handling for pl.Int64
+        # columns; pl.Datetime columns carry their own unit and reject
+        # time_unit as user-confusion (fail-fast per PR-024 convention).
+        col = X[self._time_column]
+        is_int = col.dtype == pl.Int64
+        is_datetime = col.dtype.is_temporal()
+        if is_int and self._time_unit is None:
+            msg = (
+                f"TimeSeriesSplitCV.time_column={self._time_column!r} is pl.Int64 "
+                f"and requires TimeSeriesSplitCV.time_unit to be set. Pick one of "
+                f"'ns', 'us', 'ms', 's' per the integer's interpretation "
+                f"(e.g. 's' for Unix-seconds)."
+            )
+            raise ValueError(msg)
+        if is_datetime and self._time_unit is not None:
+            msg = (
+                f"TimeSeriesSplitCV.time_unit={self._time_unit!r} is meaningless "
+                f"on a pl.Datetime column (the column carries its own unit). "
+                f"Remove time_unit from the config."
+            )
+            raise ValueError(msg)
+
         duration_ns: int = int(pd.Timedelta(self._embargo_time).value)
-        times_ns: NDArray[np.int64] = (
-            X[self._time_column].cast(pl.Datetime("ns")).to_numpy().astype(np.int64)
-        )
+        times_ns: NDArray[np.int64]
+        if is_int:
+            # Promote Int64 -> Datetime("ns") via polars' explicit-unit cast.
+            # pl.from_epoch is the polars-canonical primitive for this.
+            # `is_int` implies `self._time_unit is not None` (rejected above).
+            assert self._time_unit is not None
+            datetime_col = pl.from_epoch(col, time_unit=self._time_unit)
+            times_ns = datetime_col.cast(pl.Datetime("ns")).to_numpy().astype(np.int64)
+        else:
+            times_ns = col.cast(pl.Datetime("ns")).to_numpy().astype(np.int64)
+
         unique_ns: NDArray[np.int64] = np.unique(times_ns)
         if unique_ns.size < _MIN_TS_FOR_DELTA:
             return 0
@@ -513,6 +546,7 @@ def make_splitter(cfg: CVConfig, *, seed: int | None = None) -> Splitter:
                 max_train_size=cfg.max_train_size,
                 time_column=cfg.time_column,
                 embargo_time=cfg.embargo_time,
+                time_unit=cfg.time_unit,
                 seed=seed,
             )
         case GroupKFoldCV():

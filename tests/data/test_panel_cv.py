@@ -431,6 +431,116 @@ def test_time_series_embargo_time_none_falls_back_to_gap() -> None:
         assert np.array_equal(te_a, te_b)
 
 
+# ---------- PR-027 Int64 timestamp handling (time_unit field) ----------
+
+
+def _int64_panel(n_assets: int, n_hours: int) -> pl.DataFrame:
+    """Stacked panel with ``ts`` as ``pl.Int64`` Unix-seconds (crypto-h3 shape)."""
+    base = int(datetime(2026, 1, 1, tzinfo=UTC).timestamp())
+    rows: dict[str, list[object]] = {"ts": [], "asset": [], "feature": []}
+    for h in range(n_hours):
+        unix_s = base + h * 3600
+        for a in range(n_assets):
+            rows["ts"].append(unix_s)
+            rows["asset"].append(f"A{a}")
+            rows["feature"].append(float(h * 10 + a))
+    return pl.DataFrame(rows).with_columns(pl.col("ts").cast(pl.Int64))
+
+
+def test_time_series_int64_without_time_unit_raises() -> None:
+    """``pl.Int64`` time_column requires ``time_unit`` to be set; otherwise
+    the splitter would silently mis-cast (PR-027 bug: ``polars`` ``cast(Datetime("ns"))``
+    on Int64 reinterprets integers as ns, producing nonsense gaps)."""
+    df = _int64_panel(n_assets=6, n_hours=30)
+    sp = TimeSeriesSplitter(
+        n_splits=4,
+        gap=0,
+        max_train_size=None,
+        time_column="ts",
+        embargo_time="2h",
+        time_unit=None,
+    )
+    with pytest.raises(ValueError, match="time_unit"):
+        list(sp.split(df))
+
+
+def test_time_series_int64_with_time_unit_translates_correctly() -> None:
+    """``pl.Int64`` Unix-seconds + ``time_unit='s'`` produces the same effective
+    gap as the equivalent ``pl.Datetime`` column.
+
+    Pre-fix: this raised ``ValueError: Too many splits=4 ... gap=7.2e12``.
+    Post-fix: the splitter routes Int64 through ``pl.from_epoch`` and computes
+    the same row-count gap as the datetime path."""
+    df_int = _int64_panel(n_assets=6, n_hours=30)
+    df_dt = _datetime_panel(n_assets=6, n_hours=30)
+
+    sp_int = TimeSeriesSplitter(
+        n_splits=4,
+        gap=0,
+        max_train_size=None,
+        time_column="ts",
+        embargo_time="2h",
+        time_unit="s",
+    )
+    sp_dt = TimeSeriesSplitter(
+        n_splits=4,
+        gap=0,
+        max_train_size=None,
+        time_column="ts",
+        embargo_time="2h",
+    )
+
+    int_folds = list(sp_int.split(df_int))
+    dt_folds = list(sp_dt.split(df_dt))
+    assert len(int_folds) == len(dt_folds) == 4
+    for (tr_i, te_i), (tr_d, te_d) in zip(int_folds, dt_folds, strict=True):
+        assert np.array_equal(tr_i, tr_d)
+        assert np.array_equal(te_i, te_d)
+
+
+def test_time_series_datetime_with_time_unit_set_raises() -> None:
+    """Setting ``time_unit`` on a ``pl.Datetime`` column is user-confusion
+    (the column carries its own unit). Fail-fast per the PR-024 cross-field
+    validator pattern."""
+    df = _datetime_panel(n_assets=6, n_hours=30)
+    sp = TimeSeriesSplitter(
+        n_splits=4,
+        gap=0,
+        max_train_size=None,
+        time_column="ts",
+        embargo_time="2h",
+        time_unit="s",
+    )
+    with pytest.raises(ValueError, match="time_unit"):
+        list(sp.split(df))
+
+
+def test_time_series_datetime_without_time_unit_unchanged() -> None:
+    """Regression check: ``pl.Datetime`` + ``time_unit=None`` preserves the
+    pre-PR-027 behavior bit-for-bit."""
+    df = _datetime_panel(n_assets=6, n_hours=30)
+    sp_old_style = TimeSeriesSplitter(
+        n_splits=4,
+        gap=0,
+        max_train_size=None,
+        time_column="ts",
+        embargo_time="2h",
+    )
+    sp_explicit_none = TimeSeriesSplitter(
+        n_splits=4,
+        gap=0,
+        max_train_size=None,
+        time_column="ts",
+        embargo_time="2h",
+        time_unit=None,
+    )
+    for (tr_a, te_a), (tr_b, te_b) in zip(
+        sp_old_style.split(df), sp_explicit_none.split(df), strict=True
+    ):
+        assert np.array_equal(tr_a, tr_b)
+        assert np.array_equal(te_a, te_b)
+
+
 # ---------- Factory dispatch ----------
 
 

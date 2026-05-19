@@ -68,9 +68,21 @@ class TimeSeriesSplitCV(StrictModel):
     ``time_column`` to be set; the splitter then translates the requested
     duration into row counts by inspecting the input DataFrame's timestamps.
 
+    **Int64 timestamp handling (PR-027)**: ``time_unit`` declares how to
+    interpret ``time_column`` when the column dtype is ``pl.Int64`` (e.g.,
+    Unix-seconds from a database column). When the column is already
+    ``pl.Datetime``, the column carries its own unit; setting ``time_unit``
+    on a ``pl.Datetime`` column raises ``ValueError``. When the column is
+    ``pl.Int64``, ``time_unit`` MUST be set or the splitter raises
+    ``ValueError`` at split time. Convention inherited from polars
+    ``pl.from_epoch(time_unit=...)`` and pandas ``pd.to_datetime(unit=...)``
+    (4-of-6 surveyed CV / time-series libraries enforce explicit unit
+    declaration; see PR-027 Phase 3).
+
     Defaults preserve v0.1 row-count behavior. Single-asset time-aligned
     panels should leave both fields ``None``; stacked panels with many rows
-    per timestamp set ``time_column`` + ``embargo_time``.
+    per timestamp set ``time_column`` + ``embargo_time`` (+ ``time_unit`` if
+    the column is ``pl.Int64``).
     """
 
     kind: Literal["time_series"] = "time_series"
@@ -79,6 +91,7 @@ class TimeSeriesSplitCV(StrictModel):
     max_train_size: int | None = None
     time_column: str | None = None
     embargo_time: int | str | None = None
+    time_unit: Literal["ns", "us", "ms", "s"] | None = None
 
 
 class GroupKFoldCV(StrictModel):
