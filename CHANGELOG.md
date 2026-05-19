@@ -4,6 +4,9 @@ All notable user-facing changes to `rux-ml`. Format: [Keep a Changelog 1.1.0](ht
 
 ## [Unreleased]
 
+### Changed
+- `PROCEDURE-pr-research.md` syncs three additions from the `vibe-rails` template (commit `fb0eec9`, itself propagated from `Casus PR-032`): (1) Phase 1 gains a **prior-art audit step** — for every file the PR will touch, run `git log -p` and skim per-commit diffs to surface previously-validated patterns that constrain Phase 3 (so research doesn't re-derive them) and Phase 4 (so synthesis doesn't drop them); (2) Phase 3 Rules gain a non-negotiable **cite-or-flag clause** — every identifier in a recommendation needs a source-of-truth cite, every combination needs a cited working example using the EXACT combination, missing either → `best-guess-given-constraints` + flag (rationale: synthesis from disparate sources is a more pernicious agent-research failure mode than outright fabrication); (3) Phase 3 gains a **Group D MCP-Verification Round** (mandatory before locking Phase 4, ≤30 min, bounded) with three named probes — Schema-Integrity (verify named identifiers exist in the canonical schema documenter), Synthesis-Verification (verify combinations have a cited working example), Binding-at-creation (for vendor-side bindings, confirm registration occurs at the expected lifecycle moment via MCP introspection). Rux-ml's 4 versioned-path lines (`docs/0.2/...` instead of bare `docs/...`) are preserved per the hybrid layout convention. No source / test / config changes — procedural refactor only (PR-028).
+
 ## [0.2.0] - 2026-05-19
 
 ### Fixed

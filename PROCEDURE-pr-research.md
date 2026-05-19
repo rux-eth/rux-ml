@@ -21,6 +21,7 @@ Research findings are appended to the PR file itself under the `## Research find
 3. Read the last N PRs that landed in related areas — what surfaced, what changed
 4. Re-read relevant `docs/ARCHITECTURE.md` + `docs/CONSTRAINTS.md` sections — current locked decisions
 5. Check `docs/0.2/DESIGN-log.md` for any decisions that might have drifted
+6. **Prior-art audit** — for every file the PR will touch (or every file in the area of code the PR will introduce), run `git log -p <file>` and skim the per-commit diffs. Identify prior empirically-validated patterns in the same area (e.g., a filter expression that was fixed once already — carry that fix forward, don't re-derive). Also survey the last 3–5 PRs that touched related infrastructure (CI workflows, deployment glue, payload shapes, etc.) for known-bad patterns + known-good patterns. The output of this step is a list of "things prior PRs already learned the hard way" that constrains Phase 3 (so research doesn't re-discover them) and Phase 4 (so synthesis doesn't drop them on the floor).
 
 **Output** (appended to PR's `## Research findings` section):
 
@@ -81,10 +82,11 @@ Research findings are appended to the PR file itself under the `## Research find
 - **Unbiased presentation**: every finding MUST include at least one alternative / competing option with its own cited evidence — not just support for a preferred answer. Actively search for disconfirming evidence against the leaning option. If genuinely none exists after search, say so explicitly and record the search attempts made.
 - **Pros/cons for each option** — structured, cited, with concrete implications (performance, correctness, ergonomics, maintainability, security). Avoid vague adjectives ("clean", "simple") — describe the specific technical tradeoff.
 - Parallel agents for independent questions; sequential for dependent ones.
+- **Cite-or-flag** (non-negotiable; agent prompts must include this clause verbatim): every specific identifier in a recommendation (payload field name, action input, env var, flag, API endpoint, etc.) must include a source-of-truth file path + line/SHA citation. Every **combination** in a recommendation (filter conjunctions, multi-step workflows, configuration tuples, action+input pairings) must include at least one cited working example using the **exact** combination — not a synthesis from multiple files that each contribute one element. If either citation is missing, the finding is labeled `best-guess-given-constraints` and the gap is flagged in the output. Rationale: a common research-agent failure mode is **synthesis**, not fabrication — the agent's individual identifiers are real, but the combination it recommends has no cited example using all of them together.
 - Every finding labeled with its epistemic status:
   - **Proven** — widely deployed with direct cited evidence (production source, RFC, post-mortem showing the choice works / fails).
   - **Convention** — common practice in cited production systems, but without rigorous proof. **Must cite at least 2 independent systems using this convention.** Single-source "convention" is not allowed.
-  - **Best-guess-given-constraints** — explicitly flagged when evidence is thin or unavailable after genuine search. Not a default.
+  - **Best-guess-given-constraints** — explicitly flagged when evidence is thin or unavailable after genuine search. Not a default. Also the required label whenever the cite-or-flag rule above is not fully satisfied.
 
 **Output** (appended to PR's `## Research findings` section):
 
@@ -113,7 +115,52 @@ Research findings are appended to the PR file itself under the `## Research find
 - **Risks accepted**: [explicit cons of the chosen option that we're living with]
 ```
 
-**Exit criteria**: every must-answer question has ≥2 cited options with pros/cons, an explicit disconfirming-evidence section, and a recommendation with status label backed by the sources cited.
+#### Group D: MCP-Verification Round (mandatory before locking Phase 4)
+
+After all dispatched agent groups (A/B/C — whatever the round is organized by) complete, run a **Group D MCP-Verification Round** before locking Phase 4 Synthesis. Group D is the driver's (Claude-the-driver, with MCP tools in-conversation) ground-truth pass on the load-bearing claims from agent research. It is bounded (≤30 min), structured (per the probes below), and recorded explicitly in the PR file.
+
+**Scope filter** — only run probes against claims that are (a) vendor-specific or identifier-specific, (b) option-driving (i.e., the recommendation would change if the claim is false), and (c) not pure methodology. Pure-methodology claims ("long-lived release branches are a known pattern") are out of scope.
+
+**Probe 1 — Schema-Integrity Probe.** For every recommendation that names a specific identifier (payload field name, env var, API endpoint, action input, flag, CLI argument), verify the identifier exists by reading the **canonical schema documenter** for the surface in question:
+
+- Webhook / dispatch payloads → the vendor's payload-printing/debug source (e.g., a debug action that prints every field, or the vendor's published webhook samples).
+- TypeScript / typed APIs → the published `.d.ts` / TypeScript interface in the SDK source.
+- OpenAPI / OAS surfaces → the published OAS file in the vendor's docs repo or the live `/openapi.json`.
+- Action inputs → the action's `action.yaml` `inputs:` block PLUS tracing each input to its `core.getInput(...)` usage site in the action's source.
+- CLI flags → the help-text source / `--help` output of the version pinned by the recommendation.
+
+If the identifier is NOT present in the canonical documenter, downgrade the recommendation to `best-guess-given-constraints` (or remove the identifier) and re-derive the spec from the documenter. Record the divergence in the PR file's Group D output.
+
+**Probe 2 — Synthesis-Verification Probe.** For every recommendation that **combines** multiple identifiers or steps (filter conjunctions, multi-step workflows, configuration tuples, action+input pairings, env+secret combinations), find at least one cited working example that uses the EXACT combination. Independent citations of each element are not sufficient — synthesis from disparate sources is the most pernicious agent-research failure mode (the individual identifiers spot-check pass; only the combination fails).
+
+- Acceptable evidence: a single working file (workflow YAML, configuration sample, integration test, production source) at a named commit SHA that contains all the combined elements together AND is in a context where the combination is required (not coincidental).
+- If no such cite is found after a genuine search, the combination is labeled `best-guess-given-constraints` and the gap is flagged. The recommendation may still ship if the user accepts the risk, but the BGGC label is honest about what the research couldn't prove.
+
+**Probe 3 — Binding-at-creation (or equivalent live-state probe).** For PRs that introduce or modify vendor-side bindings (deployment checks, commit-status contexts, webhook subscriptions, dashboard settings), include a probe that confirms binding/registration occurs at the expected lifecycle moment — separately from end-to-end success. Mechanism: vendor MCP introspection or `gh api`-style queries against the live deployment record immediately after dispatch.
+
+**Output** (appended to PR's `## Research findings` section):
+
+```markdown
+### Group D: MCP Verification (YYYY-MM-DD)
+
+**Schema-Integrity Probe:**
+
+| Claim | Identifier | Canonical documenter | Verified? | Notes |
+|---|---|---|---|---|
+| Q3 recommendation | `client_payload.X` | `<vendor/repo/path/to/schema-doc>` @ `<SHA>` | yes / no | [if no: how the recommendation was amended] |
+
+**Synthesis-Verification Probe:**
+
+| Claim | Combined elements | Cited working example | Verified? | Notes |
+|---|---|---|---|---|
+| Q7 filter | `field_a` + `field_b` | `<repo>/<path>` @ `<SHA>` | yes / no | [if no: labeled BGGC + risk accepted] |
+
+**Binding-at-creation (if applicable):** [observation method + result]
+
+**Reconciliations:** [any agent claim downgraded from proven/convention → BGGC, or any recommendation amended in response]
+```
+
+**Exit criteria**: every must-answer question has ≥2 cited options with pros/cons, an explicit disconfirming-evidence section, and a recommendation with status label backed by the sources cited. Group D probes have run on every load-bearing claim; any divergences are recorded and either resolved or carried into Phase 4 as Amend candidates.
 
 ### Phase 4: Synthesis
 
