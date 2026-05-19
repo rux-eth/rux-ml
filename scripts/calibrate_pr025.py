@@ -43,8 +43,12 @@ from __future__ import annotations
 import json
 import statistics
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, cast
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 import optuna
 import typer
@@ -61,6 +65,19 @@ if TYPE_CHECKING:
     import polars as pl
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
+
+
+# ---------- Timing instrumentation ----------
+
+
+@contextmanager
+def _stopwatch(timings: dict[str, float], key: str) -> Iterator[None]:
+    """Accumulate per-step wallclock into ``timings[key]`` (seconds)."""
+    t0 = time.perf_counter()
+    try:
+        yield
+    finally:
+        timings[key] = timings.get(key, 0.0) + (time.perf_counter() - t0)
 
 
 # ---------- Position-specific _fold_scores variants ----------
@@ -108,22 +125,29 @@ def _fit_score_position_A(
     y_te: pl.Series,
     seed: int,
     target_col: str,
+    timings: dict[str, float],
 ) -> float:
     _ = (seed, target_col)
-    cards = cardinalities_from(x_tr, cfg.features.spec.categorical_columns)
-    pipeline = make_features(cfg.features, cardinalities=cards if cards else None)
-    pipeline.fit(x_tr, y_tr.to_numpy())  # pyright: ignore[reportUnknownMemberType]
-    x_tr_t = cast("pl.DataFrame", pipeline.transform(x_tr))  # pyright: ignore[reportUnknownMemberType]
-    x_te_t = cast("pl.DataFrame", pipeline.transform(x_te))  # pyright: ignore[reportUnknownMemberType]
-
-    trainer = make_trainer(cfg.training, seed=seed)
-    trainer.fit(
-        x_tr_t.to_pandas(),
-        y_tr.to_numpy(),
-        eval_set=[(x_te_t.to_pandas(), y_te.to_numpy())],
-        verbose=False,
-    )
-    return compute_score(cfg.training.metric, trainer, x_te_t.to_pandas(), y_te.to_numpy())
+    with _stopwatch(timings, "pipeline_construct"):
+        cards = cardinalities_from(x_tr, cfg.features.spec.categorical_columns)
+        pipeline = make_features(cfg.features, cardinalities=cards if cards else None)
+    with _stopwatch(timings, "pipeline_fit_transform"):
+        pipeline.fit(x_tr, y_tr.to_numpy())  # pyright: ignore[reportUnknownMemberType]
+        x_tr_t = cast("pl.DataFrame", pipeline.transform(x_tr))  # pyright: ignore[reportUnknownMemberType]
+        x_te_t = cast("pl.DataFrame", pipeline.transform(x_te))  # pyright: ignore[reportUnknownMemberType]
+    with _stopwatch(timings, "df_to_pandas"):
+        x_tr_pd = x_tr_t.to_pandas()
+        x_te_pd = x_te_t.to_pandas()
+    with _stopwatch(timings, "y_to_numpy"):
+        y_tr_np = y_tr.to_numpy()
+        y_te_np = y_te.to_numpy()
+    with _stopwatch(timings, "trainer_construct"):
+        trainer = make_trainer(cfg.training, seed=seed)
+    with _stopwatch(timings, "trainer_fit"):
+        trainer.fit(x_tr_pd, y_tr_np, eval_set=[(x_te_pd, y_te_np)], verbose=False)
+    with _stopwatch(timings, "predict_score"):
+        score = compute_score(cfg.training.metric, trainer, x_te_pd, y_te_np)
+    return score
 
 
 def _fit_score_position_B(
@@ -134,26 +158,40 @@ def _fit_score_position_B(
     y_te: pl.Series,
     seed: int,
     target_col: str,
+    timings: dict[str, float],
 ) -> float:
     # Inner-val carve from train fold; test fold is held out from XGBoost.
-    x_inner_tr, y_inner_tr, x_inner_val, y_inner_val = _carve_inner_val(
-        cfg, x_tr, y_tr, target_col=target_col, seed=seed
-    )
-    cards = cardinalities_from(x_inner_tr, cfg.features.spec.categorical_columns)
-    pipeline = make_features(cfg.features, cardinalities=cards if cards else None)
-    pipeline.fit(x_inner_tr, y_inner_tr.to_numpy())  # pyright: ignore[reportUnknownMemberType]
-    x_inner_tr_t = cast("pl.DataFrame", pipeline.transform(x_inner_tr))  # pyright: ignore[reportUnknownMemberType]
-    x_inner_val_t = cast("pl.DataFrame", pipeline.transform(x_inner_val))  # pyright: ignore[reportUnknownMemberType]
-    x_te_t = cast("pl.DataFrame", pipeline.transform(x_te))  # pyright: ignore[reportUnknownMemberType]
-
-    trainer = make_trainer(cfg.training, seed=seed)
-    trainer.fit(
-        x_inner_tr_t.to_pandas(),
-        y_inner_tr.to_numpy(),
-        eval_set=[(x_inner_val_t.to_pandas(), y_inner_val.to_numpy())],
-        verbose=False,
-    )
-    return compute_score(cfg.training.metric, trainer, x_te_t.to_pandas(), y_te.to_numpy())
+    with _stopwatch(timings, "inner_val_carve"):
+        x_inner_tr, y_inner_tr, x_inner_val, y_inner_val = _carve_inner_val(
+            cfg, x_tr, y_tr, target_col=target_col, seed=seed
+        )
+    with _stopwatch(timings, "pipeline_construct"):
+        cards = cardinalities_from(x_inner_tr, cfg.features.spec.categorical_columns)
+        pipeline = make_features(cfg.features, cardinalities=cards if cards else None)
+    with _stopwatch(timings, "pipeline_fit_transform"):
+        pipeline.fit(x_inner_tr, y_inner_tr.to_numpy())  # pyright: ignore[reportUnknownMemberType]
+        x_inner_tr_t = cast("pl.DataFrame", pipeline.transform(x_inner_tr))  # pyright: ignore[reportUnknownMemberType]
+        x_inner_val_t = cast("pl.DataFrame", pipeline.transform(x_inner_val))  # pyright: ignore[reportUnknownMemberType]
+        x_te_t = cast("pl.DataFrame", pipeline.transform(x_te))  # pyright: ignore[reportUnknownMemberType]
+    with _stopwatch(timings, "df_to_pandas"):
+        x_inner_tr_pd = x_inner_tr_t.to_pandas()
+        x_inner_val_pd = x_inner_val_t.to_pandas()
+        x_te_pd = x_te_t.to_pandas()
+    with _stopwatch(timings, "y_to_numpy"):
+        y_inner_tr_np = y_inner_tr.to_numpy()
+        y_inner_val_np = y_inner_val.to_numpy()
+        y_te_np = y_te.to_numpy()
+    with _stopwatch(timings, "trainer_construct"):
+        trainer = make_trainer(cfg.training, seed=seed)
+    with _stopwatch(timings, "trainer_fit"):
+        trainer.fit(
+            x_inner_tr_pd, y_inner_tr_np,
+            eval_set=[(x_inner_val_pd, y_inner_val_np)],
+            verbose=False,
+        )
+    with _stopwatch(timings, "predict_score"):
+        score = compute_score(cfg.training.metric, trainer, x_te_pd, y_te_np)
+    return score
 
 
 def _fit_score_position_C(
@@ -164,26 +202,33 @@ def _fit_score_position_C(
     y_te: pl.Series,
     seed: int,
     target_col: str,
+    timings: dict[str, float],
 ) -> float:
     _ = target_col
-    # Override early_stopping_rounds=None for this trainer instance only.
     cfg_C = cfg.model_copy(deep=True)
     cfg_C.training.early_stopping_rounds = None
 
-    cards = cardinalities_from(x_tr, cfg_C.features.spec.categorical_columns)
-    pipeline = make_features(cfg_C.features, cardinalities=cards if cards else None)
-    pipeline.fit(x_tr, y_tr.to_numpy())  # pyright: ignore[reportUnknownMemberType]
-    x_tr_t = cast("pl.DataFrame", pipeline.transform(x_tr))  # pyright: ignore[reportUnknownMemberType]
-    x_te_t = cast("pl.DataFrame", pipeline.transform(x_te))  # pyright: ignore[reportUnknownMemberType]
-
-    trainer = make_trainer(cfg_C.training, seed=seed)
-    trainer.fit(
-        x_tr_t.to_pandas(),
-        y_tr.to_numpy(),
+    with _stopwatch(timings, "pipeline_construct"):
+        cards = cardinalities_from(x_tr, cfg_C.features.spec.categorical_columns)
+        pipeline = make_features(cfg_C.features, cardinalities=cards if cards else None)
+    with _stopwatch(timings, "pipeline_fit_transform"):
+        pipeline.fit(x_tr, y_tr.to_numpy())  # pyright: ignore[reportUnknownMemberType]
+        x_tr_t = cast("pl.DataFrame", pipeline.transform(x_tr))  # pyright: ignore[reportUnknownMemberType]
+        x_te_t = cast("pl.DataFrame", pipeline.transform(x_te))  # pyright: ignore[reportUnknownMemberType]
+    with _stopwatch(timings, "df_to_pandas"):
+        x_tr_pd = x_tr_t.to_pandas()
+        x_te_pd = x_te_t.to_pandas()
+    with _stopwatch(timings, "y_to_numpy"):
+        y_tr_np = y_tr.to_numpy()
+        y_te_np = y_te.to_numpy()
+    with _stopwatch(timings, "trainer_construct"):
+        trainer = make_trainer(cfg_C.training, seed=seed)
+    with _stopwatch(timings, "trainer_fit"):
         # No eval_set → no early stopping → trains to n_estimators.
-        verbose=False,
-    )
-    return compute_score(cfg_C.training.metric, trainer, x_te_t.to_pandas(), y_te.to_numpy())
+        trainer.fit(x_tr_pd, y_tr_np, verbose=False)
+    with _stopwatch(timings, "predict_score"):
+        score = compute_score(cfg_C.training.metric, trainer, x_te_pd, y_te_np)
+    return score
 
 
 _POSITION_FN = {
@@ -235,9 +280,12 @@ def _run_position(
             master_entropy=trial_cfg.tuning.entropy,
             trial_number=trial.number,
         )
-        splitter = make_splitter(trial_cfg.cv, seed=bag.cv_seed)
+        timings: dict[str, float] = {}
+        with _stopwatch(timings, "splitter_construct"):
+            splitter = make_splitter(trial_cfg.cv, seed=bag.cv_seed)
 
         scores: list[float] = []
+        trial_t0 = time.perf_counter()
         with Watchdog(
             threshold_gb=trial_cfg.memory.watchdog_threshold_gb,
             sample_hz=trial_cfg.memory.watchdog_sample_hz,
@@ -245,21 +293,28 @@ def _run_position(
             for fold_idx, (train_idx, test_idx) in enumerate(
                 splitter.split(x_full, y_full)
             ):
-                x_tr = x_full[train_idx.tolist()]
-                x_te = x_full[test_idx.tolist()]
-                y_tr = y_full[train_idx.tolist()]
-                y_te = y_full[test_idx.tolist()]
+                with _stopwatch(timings, "df_row_select"):
+                    x_tr = x_full[train_idx.tolist()]
+                    x_te = x_full[test_idx.tolist()]
+                    y_tr = y_full[train_idx.tolist()]
+                    y_te = y_full[test_idx.tolist()]
 
                 fold_score = fit_score_fn(
-                    trial_cfg, x_tr, y_tr, x_te, y_te, bag.xgb_seed, target_col
+                    trial_cfg, x_tr, y_tr, x_te, y_te, bag.xgb_seed, target_col, timings
                 )
                 scores.append(float(fold_score))
                 trial.report(fold_score, step=fold_idx)
                 if trial.should_prune():
                     raise optuna.TrialPruned
+        timings["trial_total"] = time.perf_counter() - trial_t0
 
         trial.set_user_attr("fold_scores", scores)
         trial.set_user_attr("position", position)
+        trial.set_user_attr("timings_s", timings)
+
+        # Compact per-trial timing line — easy to grep in /tmp/pr025_calib.log.
+        timing_repr = " ".join(f"{k}={v:.2f}" for k, v in sorted(timings.items()))
+        typer.echo(f"    trial {trial.number} timings: {timing_repr}", err=True)
         return statistics.fmean(scores)
 
     t0 = time.monotonic()
@@ -267,6 +322,14 @@ def _run_position(
     elapsed = time.monotonic() - t0
 
     trial_means = [t.value for t in study.trials if t.value is not None]
+    all_timings = [t.user_attrs.get("timings_s", {}) for t in study.trials]
+    timing_keys: set[str] = set()
+    for d in all_timings:
+        timing_keys.update(d.keys())
+    median_timings = {
+        k: statistics.median([d.get(k, 0.0) for d in all_timings if d])
+        for k in timing_keys
+    }
     return {
         "position": position,
         "n_trials": n_trials,
@@ -278,6 +341,8 @@ def _run_position(
         "all_fold_scores": [
             t.user_attrs.get("fold_scores", []) for t in study.trials
         ],
+        "all_timings_s": all_timings,
+        "median_timings_s": median_timings,
     }
 
 
@@ -300,13 +365,20 @@ def main(
     storage_url: Annotated[
         str, typer.Option("--storage-url", help="Optuna SQLite storage URL")
     ] = "sqlite:///studies/pr025_calibration.db",
+    n_trials_override: Annotated[
+        int,
+        typer.Option(
+            "--n-trials-override",
+            help="If >0, use this trial count instead of cfg.tuning.n_trials (for perf probes)",
+        ),
+    ] = 0,
 ) -> None:
     base_cfg = RuxMLConfig.from_layers(config, problem=problem, study=study)
     if base_cfg.data.target_column is None:
         msg = "data.target_column must be set"
         raise typer.BadParameter(msg)
     target_col = base_cfg.data.target_column
-    n_trials = base_cfg.tuning.n_trials
+    n_trials = n_trials_override if n_trials_override > 0 else base_cfg.tuning.n_trials
 
     chosen = [p.strip() for p in positions.split(",") if p.strip()]
     for p in chosen:
