@@ -195,15 +195,26 @@ The shapes intentionally differ — one-shot returns DataFrames (cheap when K=1)
 |---|---|
 | IID tabular, balanced target | `KFoldCV(n_splits=5, shuffle=True)` |
 | IID tabular, imbalanced classification target | `StratifiedKFoldCV` |
-| Time-indexed (fixed horizon labels) | `TimeSeriesSplitCV(gap=<label_horizon>)` |
-| Time-indexed (variable horizon labels, overlapping) | `CombinatorialPurgedCV` with `embargo_size ∈ [0.005·N, 0.02·N]` per AFML §7.4.2 |
+| Single-asset time series (fixed horizon labels) | `TimeSeriesSplitCV(gap=<label_horizon>)` |
+| Single-asset time series (variable horizon labels, overlapping) | `CombinatorialPurgedCV` with `embargo_pct ∈ [0.005, 0.02]` per AFML §7.4.2 |
+| **Stacked panel** (multiple rows per timestamp; per-asset forward labels) | `PanelCombinatorialPurgedCV(time_column=…, asset_column=…, target_horizon_bars=<horizon_in_timestamps>, embargo_pct=…)` per PR-023 D1 |
+| **Stacked panel** (simple walk-forward, fixed time-unit embargo) | `TimeSeriesSplitCV(time_column=…, embargo_time="24h")` per PR-023 D2 |
 | Grouped (entity ID, session ID, etc.) | `GroupKFoldCV(groups_column=…)` |
 
 These are starting-point defaults; final choice is per-problem and lives in `configs/problems/<name>.toml`.
 
-**ExtMem compatibility:** only `TimeSeriesSplitCV` is `extmem_compatible` at v0; pairing any other Splitter with `ExtMemQuantileDMatrix` raises `NotImplementedError` at training time (materialised fallback deferred to a follow-up PR).
+**ExtMem compatibility:** only `TimeSeriesSplitCV` is `extmem_compatible` at v0.1+; pairing any other Splitter with `ExtMemQuantileDMatrix` raises `NotImplementedError` at training time (materialised fallback deferred to a follow-up PR). `PanelCombinatorialPurgedCV` is not ExtMem-compatible (requires the full `time_column` materialised at split time).
 
-**`TimeSeriesSplitCV.gap` is row-count, not time-units** (per PR-022). The `gap` field excludes N **rows** between train-end and test-start — directly from sklearn's `TimeSeriesSplit` semantics. On a stacked panel with K rows per timestamp (e.g., K assets × hourly bars), `gap=N` rows ≈ `N/K` timestamps of separation per asset. Setting `gap=24` on a 1084-asset panel produces <1 hour of per-asset embargo, not 24 hours. For single-asset time series this isn't an issue (1 row = 1 bar); for panels you must compute `gap = N_assets × h_horizon_bars` yourself, OR wait for time-unit embargo support landing in PR-023 (time-aware CV for panel data). Live finding from the 2026-05-18 first-real-dataset run.
+**`TimeSeriesSplitCV.gap` is row-count, not time-units** (per PR-022). The `gap` field excludes N **rows** between train-end and test-start — directly from sklearn's `TimeSeriesSplit` semantics. On a stacked panel with K rows per timestamp (e.g., K assets × hourly bars), `gap=N` rows ≈ `N/K` timestamps of separation per asset. Setting `gap=24` on a 1084-asset panel produces <1 hour of per-asset embargo, not 24 hours. For single-asset time series this isn't an issue (1 row = 1 bar); for panels use the panel-aware paths landed in PR-023 (`TimeSeriesSplitCV.embargo_time="24h"` for simple walk-forward; `PanelCombinatorialPurgedCV` for CPCV). Live finding from the 2026-05-18 first-real-dataset run.
+
+**`TimeSeriesSplitCV.embargo_time` polymorphic semantics** (per PR-023 D2). When set, `embargo_time` wins over `gap`:
+
+- `int` → row-count gap, same semantics as `gap` (kept for the field-uniformity convention).
+- `str` (e.g., `"24h"`, `"3d"`) → requires `time_column`; parsed via `pandas.Timedelta`. The splitter computes the median delta between unique sorted timestamps and the mean rows-per-unique-timestamp, then translates the requested duration into a row-count gap. On regular bars this is exact; on irregular bars it's a **conservative best-guess** (out-of-scope precision improvement tracked in `docs/0.2/RESEARCH-BACKLOG.md` A2). Convention precedent: sktime `SlidingWindowSplitter`, Nixtla `mlforecast.cross_validation`, Darts `historical_forecasts`.
+
+**Panel CPCV** (`PanelCombinatorialPurgedCV`, per PR-023 D1). Folds over **unique sorted timestamps** read from `time_column`; skfolio CPCV runs on the timestamp axis (so `target_horizon_bars` and `embargo_pct` are interpreted in **timestamp units**, not rows). Each timestamp-level fold is mapped back to row indices by selecting every row at that timestamp — per-asset purge is timestamp-atomic (drop a timestamp from train → drop every asset's row at that timestamp). `asset_column` is required and validated at split time so the wrapper fails loudly when given mismatched data. Convention precedent: mlfinlab `StackedCombinatorialPurgedKFold`, Numerai era-wise CV.
+
+**skfolio purge precision gap** (PR-023 D4, MANDATORY note). skfolio's `CombinatorialPurgedCV` uses a **scalar two-sided `purged_size` in indexes** — it drops `purged_size` rows on each side of every test span. This is a row-count simplification of AFML §7.4.2's **interval-overlap purge**, which drops only the train observations whose actual label window overlaps the test indexes. The skfolio model is **conservative-correct** (drops more train rows than strictly needed; never leaks), but coarser than AFML's interval-overlap. Workbench accepts this tradeoff per D4 — it keeps skfolio as the CPCV backend without reinventing the AFML interval algorithm. Users who need interval-overlap precision should reach for `mlfinlab.cross_validation.PurgedKFold` or `timeseriescv` directly; both are paid/licensed alternatives and not bundled. Skfolio docs: `skfolio.model_selection._combinatorial.py:81–220`. AFML reference: López de Prado, *Advances in Financial Machine Learning*, Snippet 7.1 (purge), Snippet 7.3 (`mbrg = int(X.shape[0] * pctEmbargo)`).
 
 ---
 
