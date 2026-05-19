@@ -1,6 +1,6 @@
 # PR-025: CV eval_set Position B/C operational design study
 
-**Landed-in:** v0.2.0 (rolled in PR-026)
+**Landed-in:** v0.2.0
 
 ## Before Implementation (NON-NEGOTIABLE)
 

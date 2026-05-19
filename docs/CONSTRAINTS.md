@@ -48,7 +48,7 @@ Every architectural and significant design decision must be backed by research f
 - Personal blog posts without engineering weight
 - StackOverflow answers without corroborating evidence
 
-**Process:** decisions without research backing must be explicitly flagged as unresearched in the relevant PR or design doc, and researched before implementation begins. `docs/0.1/DESIGN-log.md` tracks which decisions have research and which don't. `PROCEDURE-design-planning.md` integrates research rounds into Phase 2 (Decisions).
+**Process:** decisions without research backing must be explicitly flagged as unresearched in the relevant PR or design doc, and researched before implementation begins. `docs/0.2/DESIGN-log.md` tracks which decisions have research and which don't. `PROCEDURE-design-planning.md` integrates research rounds into Phase 2 (Decisions).
 
 ### PR Research Procedure Required (NON-NEGOTIABLE)
 

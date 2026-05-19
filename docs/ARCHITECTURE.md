@@ -248,9 +248,9 @@ All choices are TOML knobs in `[tuning]`.
 
 ## Key Abstractions
 
-### `Solver` Protocol + solving layer (per PR-020 / docs/0.1/DESIGN-log.md Q1)
+### `Solver` Protocol + solving layer (per PR-020 / docs/0.1/DESIGN-log.md Q1) <!-- rewrite-doc-refs:skip-line -->
 
-The Solver layer is the parallel-Protocol surface to the Trainer layer. Per `docs/0.1/DESIGN-log.md` Q1: two parallel `typing.Protocol`s with no shared parent — `Trainer.fit(X, y) → predict(X)` and `Solver.solve(problem) → SolverResult` have fundamentally different data flow; the workbench unifies the **factory/registry** (string-name dispatch via `make_trainer` / `make_solver`) but NOT the runtime contract.
+The Solver layer is the parallel-Protocol surface to the Trainer layer. Per `docs/0.1/DESIGN-log.md` Q1: <!-- rewrite-doc-refs:skip-line --> two parallel `typing.Protocol`s with no shared parent — `Trainer.fit(X, y) → predict(X)` and `Solver.solve(problem) → SolverResult` have fundamentally different data flow; the workbench unifies the **factory/registry** (string-name dispatch via `make_trainer` / `make_solver`) but NOT the runtime contract.
 
 **Per PR-020 Q-Shape research: B-partial-mirror.** The solving layer reuses cross-cutting infrastructure (config-layer discriminated union, registry dict, factory dispatcher, Optuna study substrate, per-trial provenance triple, conformance test pattern) but BYPASSES semantics-mismatched layers — solver runs have no `cfg.data` (problems are matrices, not Parquet), no `cfg.cv` (single solves have no folds), no fittable-model bundle (solver output is `x_star`, not a reusable estimator).
 
@@ -295,7 +295,7 @@ class Trainer(Protocol):
     def predict(self, X: Any) -> ArrayLike: ...
 ```
 
-**Per-family layout** (per PR-017 / `docs/0.1/DESIGN-log.md` Q2): each Trainer family lives as a subpackage under `src/rux_ml/training/<family>/` with three files — `__init__.py` (public API), `factory.py` (the `make_<family>_trainer` function), `config.py` (the family's Pydantic schema variant of `TrainingConfig`). XGBoost is the first family at `src/rux_ml/training/xgboost/`; LightGBM and CatBoost subpackages land in PR-018 / PR-019.
+**Per-family layout** (per PR-017 / `docs/0.1/DESIGN-log.md` Q2): <!-- rewrite-doc-refs:skip-line --> each Trainer family lives as a subpackage under `src/rux_ml/training/<family>/` with three files — `__init__.py` (public API), `factory.py` (the `make_<family>_trainer` function), `config.py` (the family's Pydantic schema variant of `TrainingConfig`). XGBoost is the first family at `src/rux_ml/training/xgboost/`; LightGBM and CatBoost subpackages land in PR-018 / PR-019.
 
 **B-explicit registry** (per Q4): families are registered in a plain dict in `src/rux_ml/training/__init__.py`:
 

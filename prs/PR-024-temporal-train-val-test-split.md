@@ -1,6 +1,6 @@
 # PR-024: One-off temporal train/val/test split
 
-**Landed-in:** v0.2.0 (rolled in PR-026)
+**Landed-in:** v0.2.0
 
 ## Before Implementation (NON-NEGOTIABLE)
 
