@@ -8,6 +8,7 @@ from rux_ml.config.cv import (
     CVConfig,
     GroupKFoldCV,
     KFoldCV,
+    PanelCombinatorialPurgedCV,
     StratifiedKFoldCV,
     TimeSeriesSplitCV,
 )
@@ -42,6 +43,7 @@ __all__ = [
     "KFoldCV",
     "LightGBMTraining",
     "MemoryConfig",
+    "PanelCombinatorialPurgedCV",
     "RegistryConfig",
     "RunsConfig",
     "RuxMLConfig",

@@ -114,6 +114,20 @@ For a one-off (non-sweep) baseline training, `cli.train.run()` follows the same 
 
 These are runtime branches the workbench must auto-select, based on configuration and observed inputs.
 
+### CV strategy by data shape (per PR-023 D1/D2)
+
+The Splitter chosen for a problem is driven by the **shape of `(time, group)` in the input data**, not by the trainer family. The decision tree:
+
+1. **No temporal ordering** → `KFoldCV` (default) or `StratifiedKFoldCV` (imbalanced classification) or `GroupKFoldCV` (entity-leakage-prone). Standard sklearn semantics.
+2. **Single-asset time series** (1 row per timestamp; ordered) → `TimeSeriesSplitCV` with `gap = label_horizon` (in row units), OR `CombinatorialPurgedCV` for overlapping-label / variable-horizon problems with `embargo_pct ∈ [0.005, 0.02]` per AFML §7.4.2. Here row-count and time-unit semantics coincide.
+3. **Stacked panel** (many assets per timestamp; per-asset forward labels) → **panel-aware** path is required. Two routes:
+   - Simple walk-forward — `TimeSeriesSplitCV(time_column=…, embargo_time="<duration>")`. The splitter translates the duration into a row-count `gap` by inspecting the actual timestamp distribution. Use when problem geometry is "one train window, one test window per fold."
+   - Combinatorial purged CV — `PanelCombinatorialPurgedCV(time_column=…, asset_column=…, target_horizon_bars=<h>, embargo_pct=<p>)`. Folds over **unique sorted timestamps**; skfolio CPCV runs on the timestamp axis; per-asset purge is timestamp-atomic (drop a timestamp from train → drop every asset's row at that timestamp). Use when problem geometry is "multiple combinatorial backtest paths needed for HP ranking."
+
+**Foot-gun**: `TimeSeriesSplitCV.gap` (row-count) on a K-row-per-timestamp panel produces ≈ `gap / K` timestamps of per-asset embargo. The motivating bug: `gap=24` on a 1084-asset hourly panel ≈ 0.022 timestamps of separation, not 24 hours. PR-023's D2 polymorphic `embargo_time` and D1 `PanelCombinatorialPurgedCV` fix this; setting `gap` (only) on a panel still works at the row level but is rarely what the user wanted.
+
+The structural test `tests/config/test_base_toml_discriminator_hygiene.py` walks every variant of `CVConfig` and asserts no variant-specific knob sits at the base-table position — panel-aware fields (`time_column`, `asset_column`, `embargo_time`, `target_horizon_bars`, `embargo_pct`) all default to `None` / `0` / `0.0` so the rule is honored without manual upkeep.
+
 ### CatBoost ingest + categorical handling (per PR-019)
 
 CatBoost's ``fit(DataFrame, y)`` accepts pandas/polars DataFrames directly; no ``Pool`` construction is required (Q-Wrap §9 PROVEN at v1.2.10). ``Pool`` is the optional ``DMatrix``/``Dataset`` analog and is exposed by ``src/rux_ml/training/catboost/ingest.py::build_pool`` as a utility for advanced users (e.g., explicit ``baseline=``, ``weights=``, ``timestamp=`` knobs), but the factory does not call it.
@@ -369,18 +383,20 @@ class Splitter(Protocol):
 
 Concrete strategies (each constructible from its `CVConfig` variant via `make_splitter(cfg, *, seed=…)`):
 
-- `KFoldSplitter` / `StratifiedKFoldSplitter` / `TimeSeriesSplitter` / `GroupKFoldSplitter` — wrap sklearn `KFold` / `StratifiedKFold` / `TimeSeriesSplit(gap, max_train_size)` / `GroupKFold`
-- `CombinatorialPurgedSplitter` — wraps `skfolio.model_selection.CombinatorialPurgedCV` (BSD-3); flattens skfolio's `(train, list[test_path])` yield into the sklearn `(train, test)` shape (per-path decomposition out of scope at v0)
+- `KFoldSplitter` / `StratifiedKFoldSplitter` / `TimeSeriesSplitter` / `GroupKFoldSplitter` — wrap sklearn `KFold` / `StratifiedKFold` / `TimeSeriesSplit(gap, max_train_size)` / `GroupKFold`. `TimeSeriesSplitter` additionally accepts `time_column` + polymorphic `embargo_time: int | str` (PR-023 D2) — duration strings parsed via `pandas.Timedelta` and translated to a row-count gap from the input's timestamp distribution.
+- `CombinatorialPurgedSplitter` — wraps `skfolio.model_selection.CombinatorialPurgedCV` (BSD-3); flattens skfolio's `(train, list[test_path])` yield into the sklearn `(train, test)` shape (per-path decomposition out of scope at v0). Surfaces ergonomic `target_horizon_bars` + `embargo_pct` knobs that convert internally to skfolio's row-count `purged_size` / `embargo_size` (PR-023 D3, AFML Snippet 7.3).
+- `PanelCombinatorialPurgedSplitter` (PR-023 D1) — wraps the same skfolio CPCV but runs it over the **unique sorted timestamps** read from `time_column`, then maps each timestamp-level fold back to row indices via a row-to-timestamp-index map. Per-asset purge is timestamp-atomic (drop a timestamp from train → drop every asset's row at that timestamp). `asset_column` is required and validated at split time.
 
-**Per-strategy leakage guarantees** (Q2.b research output):
+**Per-strategy leakage guarantees** (Q2.b research output, PR-023 panel additions):
 
 | Strategy | Guarantees | Does NOT guarantee |
 |---|---|---|
 | `KFold` (shuffled) | Each row in exactly one test fold | Group separation; class balance; temporal ordering |
 | `StratifiedKFold` | Class proportions per fold | Group separation; temporal ordering |
 | `GroupKFold` | Each group in exactly one test fold | Class balance; equal fold sizes; temporal ordering |
-| `TimeSeriesSplit` | Train precedes test; `gap` excludes adjacent | Group separation; variable-horizon label purging; class balance |
-| `CombinatorialPurgedCV` | Two-sided label-overlap purge + one-sided post-test embargo (AFML §7.4.2) | Class balance; group separation |
+| `TimeSeriesSplit` | Train precedes test; `gap` excludes adjacent. With `embargo_time="<dur>"` + `time_column`, separation honored in **time units** (panel-aware). | Group separation; variable-horizon label purging; class balance |
+| `CombinatorialPurgedCV` | Two-sided label-overlap purge + one-sided post-test embargo in **row units** (AFML §7.4.2). With ergonomic `target_horizon_bars` + `embargo_pct`, equivalent row-count derivation per AFML Snippet 7.3. | Class balance; group separation; panel-atomic timestamp purge |
+| `PanelCombinatorialPurgedCV` | Folds over unique sorted timestamps; per-asset purge is timestamp-atomic (`target_horizon_bars` + `embargo_pct` in timestamp units); combinatorial paths preserved via post-hoc row-index decomposition | Class balance |
 
 **Groups column-to-array convention**: `GroupKFoldCV` carries `groups_column: str`; the caller resolves it via `df[col].to_numpy()` before calling `splitter.split(..., groups=arr)`. Splitter holds no DataFrame state.
 

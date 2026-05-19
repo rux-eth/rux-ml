@@ -1,6 +1,6 @@
 # PR-023: Time-aware CV for panel data — time-unit embargo + label-overlap purge
 
-**Landed-in:** (not yet landed)
+**Landed-in:** v0.2.0 (rolled in PR-026)
 
 ## Before Implementation (NON-NEGOTIABLE)
 
@@ -153,6 +153,40 @@ Each agent gets the same hard requirements as the PR-022 eval_set agent: cited U
 - No prerequisite PRs surfaced: ✓ (PR-024 / PR-025 / PR-026 are post-PR-023, not blockers)
 - User approved updated spec: ✓ (2026-05-19 Phase 3 convergence)
 - Implementation cleared: ✓
+
+### Phase 5 — Implementation outcomes (2026-05-19)
+
+Mini state-assessment: zero days elapsed since Phase 5 Gate Check; `git log` on the target files (`src/rux_ml/config/cv.py`, `src/rux_ml/data/cv.py`, `src/rux_ml/tuning/objective.py`, `configs/base.toml`, `tests/data/`, `tests/config/test_base_toml_discriminator_hygiene.py`) shows no commits between Gate Check (`c8f4fc6`) and implementation start — no drift to handle.
+
+**Code landed** (D1–D7 specifics from the locked design):
+
+- `src/rux_ml/config/cv.py`
+  - **D1**: `PanelCombinatorialPurgedCV` new discriminator variant added to the `CVConfig` tagged union — fields `n_folds`, `n_test_folds`, **`time_column: str`** (required), **`asset_column: str`** (required), `target_horizon_bars: int = 0`, `embargo_pct: float = 0.0`. `kind = "panel_cpcv"`.
+  - **D2**: `TimeSeriesSplitCV` extended with `time_column: str | None = None` + `embargo_time: int | str | None = None`. Defaults preserve v0.1.1 row-count behavior.
+  - **D3**: `CombinatorialPurgedCV` extended with `target_horizon_bars: int = 0` + `embargo_pct: float = 0.0`. Existing `purged_size` / `embargo_size` fields kept; row-count siblings win when both are non-zero (strict opt-in).
+- `src/rux_ml/data/cv.py`
+  - `PanelCombinatorialPurgedSplitter` (D1) — extracts unique sorted timestamps from `time_column`; runs `skfolio.CombinatorialPurgedCV` on the timestamp axis (`purged_size = target_horizon_bars`, `embargo_size = int(n_unique_ts * embargo_pct)`); maps each timestamp-level fold back to row indices via `np.searchsorted(unique_ts, times)`. Per-asset purge is automatic (timestamp-atomic). Validates `time_column` + `asset_column` presence at split time; raises if `n_unique_ts < n_folds`.
+  - `TimeSeriesSplitter` (D2) — inner `TimeSeriesSplit` is now built at `.split()` time (no longer in `__init__`) so the effective `gap` can be computed from the input DataFrame's timestamps. `_effective_gap(X)` computes `ceil(pd.Timedelta(embargo_time) / median_delta) * (X.height / n_unique_ts)` for string durations; row-count `int` and `None` paths preserve v0.1.1 behavior exactly (validated by `test_time_series_embargo_time_none_falls_back_to_gap`).
+  - `CombinatorialPurgedSplitter` (D3) — inner skfolio splitter built at `.split()` time so `embargo_pct` resolves against actual `N`. Conversion: `effective_purged_size = purged_size or target_horizon_bars`; `effective_embargo_size = embargo_size or int(N * embargo_pct)`. Backward-compat asserted by `test_cpcv_ergonomic_knob_defaults_preserve_v0_1_behavior` + `test_cpcv_row_count_wins_when_both_set`.
+  - `make_splitter` dispatcher extended with `PanelCombinatorialPurgedCV` case; threads all new fields through unchanged.
+- `src/rux_ml/data/__init__.py` + `src/rux_ml/config/__init__.py` — re-exports updated.
+- `tests/data/test_panel_cv.py` (NEW; 20 tests, D5 three-layer design)
+  - Layer 1 — hand-verified fixtures: 3 assets × 9 timestamps with C(3,2)=3 splits; per-asset purge timestamp-atomicity assertion on 4 assets × 16 timestamps.
+  - Layer 2 — property tests: pairwise-disjoint train/test; no timestamp appears in both partitions; `C(n_folds, n_test_folds)` splits; missing-column / too-few-timestamps validation; ergonomic-knob equivalence to row-count siblings; `embargo_time` int / str / None paths.
+  - Layer 3 — shuffle-null tripwire: 4 assets × 40 timestamps random target; constant-mean predictor; fold-mean MSE within `[0.6, 1.6]·var(y)` (no-skill baseline) — catches feature-side leakage that pure index assertions miss.
+- `docs/ARCHITECTURE.md` — new `### CV strategy by data shape (per PR-023 D1/D2)` entry in the `## Decision Rules` section + per-strategy leakage-guarantees table updated with `TimeSeriesSplit.embargo_time` row and new `PanelCombinatorialPurgedCV` row.
+- `docs/CONVENTIONS.md` — CV-default-by-shape table gains stacked-panel rows; `TimeSeriesSplitCV.embargo_time` polymorphic semantics subsection; `PanelCombinatorialPurgedCV` subsection; **mandatory skfolio purge precision gap note (D4)** documenting conservative-correctness vs AFML interval-overlap and pointing users to mlfinlab/timeseriescv for interval-precise alternatives.
+- `CHANGELOG.md` `[Unreleased]` — new `### Fixed` entry for stacked-panel under-embargo + `### Added` entries (new variant, ergonomic knobs, docs additions, tests) + `### Changed` entry for `TimeSeriesSplitCV` polymorphic embargo.
+- `docs/0.2/ROADMAP.md` — PR-023 row flipped `[ ]` → `[x]` per `feedback_roadmap_flip_in_pr`.
+
+**Test outcomes**: full default suite `347 passed, 1 skipped, 15 deselected` (was 327 passed on the merge-base `c8f4fc6`; +20 new panel-CV tests). Ruff + basedpyright clean (verified separately).
+
+**Deferred (still owned by sibling PRs)**:
+- `train_val_test_split` random-shuffle leak → PR-024 (untouched here; D6).
+- `eval_set` Position B/C operational debate → PR-025 (untouched here; A4).
+- Walk-forward retrain helper → out of v0.2 (D7). Optional CONVENTIONS.md citing-paragraph not added at this PR (defer until a real deployment use case lands; A3 ambiguity preserved).
+
+**ExtMem compatibility decision** (in-PR): `PanelCombinatorialPurgedSplitter.extmem_compatible = False`. The splitter must read the full `time_column` at split time to compute the timestamp-axis fold; the file-level ExtMem path is incompatible. Documented in CONVENTIONS.md.
 
 ---
 
