@@ -82,7 +82,7 @@ Research findings are appended to the PR file itself under the `## Research find
 - **Unbiased presentation**: every finding MUST include at least one alternative / competing option with its own cited evidence — not just support for a preferred answer. Actively search for disconfirming evidence against the leaning option. If genuinely none exists after search, say so explicitly and record the search attempts made.
 - **Pros/cons for each option** — structured, cited, with concrete implications (performance, correctness, ergonomics, maintainability, security). Avoid vague adjectives ("clean", "simple") — describe the specific technical tradeoff.
 - Parallel agents for independent questions; sequential for dependent ones.
-- **Cite-or-flag** (non-negotiable; agent prompts must include this clause verbatim): every specific identifier in a recommendation (payload field name, action input, env var, flag, API endpoint, etc.) must include a source-of-truth file path + line/SHA citation. Every **combination** in a recommendation (filter conjunctions, multi-step workflows, configuration tuples, action+input pairings) must include at least one cited working example using the **exact** combination — not a synthesis from multiple files that each contribute one element. If either citation is missing, the finding is labeled `best-guess-given-constraints` and the gap is flagged in the output. Rationale: a common research-agent failure mode is **synthesis**, not fabrication — the agent's individual identifiers are real, but the combination it recommends has no cited example using all of them together.
+- **Cite-or-flag** (non-negotiable; agent prompts must include this clause verbatim): every specific identifier in a recommendation (payload field name, configuration input, env var, flag, API endpoint, schema field, etc.) must include a source-of-truth file path + line/SHA citation. Every **combination** in a recommendation (filter conjunctions, multi-step procedures, configuration tuples, parameter+value pairings) must include at least one cited working example using the **exact** combination — not a synthesis from multiple files that each contribute one element. If either citation is missing, the finding is labeled `best-guess-given-constraints` and the gap is flagged in the output. Rationale: a common research-agent failure mode is **synthesis**, not fabrication — the agent's individual identifiers are real, but the combination it recommends has no cited example using all of them together.
 - Every finding labeled with its epistemic status:
   - **Proven** — widely deployed with direct cited evidence (production source, RFC, post-mortem showing the choice works / fails).
   - **Convention** — common practice in cited production systems, but without rigorous proof. **Must cite at least 2 independent systems using this convention.** Single-source "convention" is not allowed.
@@ -119,24 +119,18 @@ Research findings are appended to the PR file itself under the `## Research find
 
 After all dispatched agent groups (A/B/C — whatever the round is organized by) complete, run a **Group D MCP-Verification Round** before locking Phase 4 Synthesis. Group D is the driver's (Claude-the-driver, with MCP tools in-conversation) ground-truth pass on the load-bearing claims from agent research. It is bounded (≤30 min), structured (per the probes below), and recorded explicitly in the PR file.
 
-**Scope filter** — only run probes against claims that are (a) vendor-specific or identifier-specific, (b) option-driving (i.e., the recommendation would change if the claim is false), and (c) not pure methodology. Pure-methodology claims ("long-lived release branches are a known pattern") are out of scope.
+**Scope filter** — only run probes against claims that are (a) implementation-specific or identifier-specific, (b) option-driving (i.e., the recommendation would change if the claim is false), and (c) not pure methodology. Pure-methodology claims ("long-lived release branches are a known pattern") are out of scope.
 
-**Probe 1 — Schema-Integrity Probe.** For every recommendation that names a specific identifier (payload field name, env var, API endpoint, action input, flag, CLI argument), verify the identifier exists by reading the **canonical schema documenter** for the surface in question:
-
-- Webhook / dispatch payloads → the vendor's payload-printing/debug source (e.g., a debug action that prints every field, or the vendor's published webhook samples).
-- TypeScript / typed APIs → the published `.d.ts` / TypeScript interface in the SDK source.
-- OpenAPI / OAS surfaces → the published OAS file in the vendor's docs repo or the live `/openapi.json`.
-- Action inputs → the action's `action.yaml` `inputs:` block PLUS tracing each input to its `core.getInput(...)` usage site in the action's source.
-- CLI flags → the help-text source / `--help` output of the version pinned by the recommendation.
+**Probe 1 — Schema-Integrity Probe.** For every recommendation that names a specific identifier (payload field name, env var, API endpoint, configuration input, flag, CLI argument, schema field, etc.), verify the identifier exists by reading the **canonical schema documenter** for that surface — the declarative source-of-truth file or interface that the consuming system reads at runtime, pinned at the version the recommendation targets.
 
 If the identifier is NOT present in the canonical documenter, downgrade the recommendation to `best-guess-given-constraints` (or remove the identifier) and re-derive the spec from the documenter. Record the divergence in the PR file's Group D output.
 
-**Probe 2 — Synthesis-Verification Probe.** For every recommendation that **combines** multiple identifiers or steps (filter conjunctions, multi-step workflows, configuration tuples, action+input pairings, env+secret combinations), find at least one cited working example that uses the EXACT combination. Independent citations of each element are not sufficient — synthesis from disparate sources is the most pernicious agent-research failure mode (the individual identifiers spot-check pass; only the combination fails).
+**Probe 2 — Synthesis-Verification Probe.** For every recommendation that **combines** multiple identifiers or steps (filter conjunctions, multi-step procedures, configuration tuples, parameter+value pairings, env+secret combinations), find at least one cited working example that uses the EXACT combination. Independent citations of each element are not sufficient — synthesis from disparate sources is the most pernicious agent-research failure mode (the individual identifiers spot-check pass; only the combination fails).
 
-- Acceptable evidence: a single working file (workflow YAML, configuration sample, integration test, production source) at a named commit SHA that contains all the combined elements together AND is in a context where the combination is required (not coincidental).
+- Acceptable evidence: a single working file (configuration sample, integration test, production source, runtime declaration) at a named commit SHA that contains all the combined elements together AND is in a context where the combination is required (not coincidental).
 - If no such cite is found after a genuine search, the combination is labeled `best-guess-given-constraints` and the gap is flagged. The recommendation may still ship if the user accepts the risk, but the BGGC label is honest about what the research couldn't prove.
 
-**Probe 3 — Binding-at-creation (or equivalent live-state probe).** For PRs that introduce or modify vendor-side bindings (deployment checks, commit-status contexts, webhook subscriptions, dashboard settings), include a probe that confirms binding/registration occurs at the expected lifecycle moment — separately from end-to-end success. Mechanism: vendor MCP introspection or `gh api`-style queries against the live deployment record immediately after dispatch.
+**Probe 3 — Binding-at-creation (or equivalent live-state probe).** For PRs that introduce or modify state that gets registered at one lifecycle moment and read back at another (e.g., factory registrations, hook subscriptions, external-system bindings, indexer entries, persisted configuration), include a probe that confirms the binding occurs at the expected lifecycle moment — separately from end-to-end success. Mechanism: introspect the live registered state immediately after the registration event, via whatever surface reflects that state for the implementation in question (MCP tool, API query, in-process inspector, persistence reader).
 
 **Output** (appended to PR's `## Research findings` section):
 
@@ -147,7 +141,7 @@ If the identifier is NOT present in the canonical documenter, downgrade the reco
 
 | Claim | Identifier | Canonical documenter | Verified? | Notes |
 |---|---|---|---|---|
-| Q3 recommendation | `client_payload.X` | `<vendor/repo/path/to/schema-doc>` @ `<SHA>` | yes / no | [if no: how the recommendation was amended] |
+| Q3 recommendation | `<identifier>` | `<repo/path/to/canonical-documenter>` @ `<SHA>` | yes / no | [if no: how the recommendation was amended] |
 
 **Synthesis-Verification Probe:**
 
