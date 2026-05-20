@@ -23,7 +23,7 @@ The v0.2 research backlog is frozen at [`docs/0.2/RESEARCH-BACKLOG.md`](../0.2/R
 | PR | Title | Design research | Required research topics |
 |----|-------|-----------------|--------------------------|
 | [PR-030](../../prs/PR-030-v0-3-sprint-scaffolding.md) | v0.3 sprint scaffolding | `design-research ✓` — no architecture decisions; pure docs + PR stubs creation; pattern inherited from PR-022/PR-026 sprint-bookkeeping precedent. | — |
-| [PR-035](../../prs/PR-035-tune-retry-trial-test.md) | `tune retry-trial` integration test | `design-research ✓` — test-only PR; pattern inherited from existing `test_tune_subcommands.py` test functions (start/resume/status). | (1) Phase 1 verifies `cli/tune.py:206-228` body is still the production retry path; (2) confirm `study.enqueue_trial` + `study.optimize(n_trials=1)` is still the v0.3 retry mechanism. |
+| [PR-035](../../prs/PR-035-tune-retry-trial-test.md) | `tune retry-trial` integration test | `design-research ✓` + `state-assessed 2026-05-20` + `implementation-cleared 2026-05-20` — test-only PR; pattern inherited from existing `test_tune_subcommands.py` test functions (start/resume/status). Phase 1 confirmed `cli/tune.py:206-231` body intact (line range corrected from stub's 206-228); D4 verdict test-only; retry verb is state-agnostic (no failed-trial simulation needed); 3 tests per distinct code path. | — (all required research complete) |
 
 ## Tier 2 — Research-Pending
 

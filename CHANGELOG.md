@@ -4,6 +4,9 @@ All notable user-facing changes to `rux-ml`. Format: [Keep a Changelog 1.1.0](ht
 
 ## [Unreleased]
 
+### Fixed
+- **Test coverage backfill for `rux-ml tune retry-trial`** (PR-035). Three integration tests added to `tests/cli/test_tune_subcommands.py` covering the three distinct code paths in the verb body at `cli/tune.py:206-231`: `test_tune_retry_trial_enqueues_prior_params` (success — re-enqueues prior params via `study.enqueue_trial` + `study.optimize(n_trials=1)`); `test_tune_retry_trial_missing_trial_raises_bad_parameter` (missing trial → `BadParameter`); `test_tune_retry_trial_missing_study_raises_bad_parameter` (missing study → `BadParameter`). Closes the test-coverage gap surfaced by the 2026-05-20 phantom audit. The verb body is state-agnostic — it retries any trial regardless of state — so no failed-trial simulation is needed. Default test suite count moves from 367 → 370. No production code change.
+
 ### Added
 - **v0.3 sprint scaffolding** (PR-030). Created `docs/0.3/{DESIGN-log, ROADMAP, RESEARCH-BACKLOG}.md` + 7 PR stubs (`prs/PR-030..PR-036`) sketching the v0.3 "honesty cut" — completes 4 phantom implementations surfaced by the 2026-05-20 audit: (1) holdout test fold never consumed → PR-031 + PR-032; (2) ExtMem out-of-core ingest path wired in design but never executed → PR-033 (covers borderline phantom 2b: `select_ingest` drives telemetry only); (3) Optuna `FileSystemArtifactStore` declared but unused → PR-034; (4) `rux-ml tune retry-trial` verb body real but zero test coverage → PR-035. PR-036 is the v0.3.0 version-cut ritual. Architectural sub-decisions (D1–D4) deferred to a v0.3 design session that runs after PR-030 merges, before PR-031 implementation begins. No source / test / config changes — sprint scaffolding only.
 

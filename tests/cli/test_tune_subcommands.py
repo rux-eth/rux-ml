@@ -181,6 +181,63 @@ def test_tune_status_missing_study_raises_bad_parameter(
     assert result.exit_code != 0
 
 
+def test_tune_retry_trial_enqueues_prior_params(
+    runner: CliRunner, tune_workdir: Path
+) -> None:
+    """Retry verb re-enqueues a prior trial's params; new trial completes with same params.
+
+    The retry verb at ``cli/tune.py:retry_trial`` is state-agnostic — it looks up
+    ``prior.params`` by trial_id and calls ``study.enqueue_trial(prior.params)``
+    + ``study.optimize(n_trials=1)``. Verified end-to-end: 2 initial trials,
+    then retry trial 0, then assert trial 2 has params equal to trial 0.
+    """
+    start_result = runner.invoke(
+        app,
+        _argv(tune_workdir, "tune", "start", "smoke_retry", "--n-trials", "2"),
+        catch_exceptions=False,
+    )
+    assert start_result.exit_code == 0, start_result.stderr or start_result.stdout
+
+    retry_result = runner.invoke(
+        app,
+        _argv(tune_workdir, "tune", "retry-trial", "smoke_retry", "0"),
+        catch_exceptions=False,
+    )
+    assert retry_result.exit_code == 0, retry_result.stderr or retry_result.stdout
+
+    storage = f"sqlite:///{tune_workdir}/studies/studies.db"
+    study = optuna.load_study(study_name="smoke_retry", storage=storage)
+    assert len(study.trials) == 3, [t.number for t in study.trials]
+    trial_0 = next(t for t in study.trials if t.number == 0)
+    trial_2 = next(t for t in study.trials if t.number == 2)
+    assert trial_2.params == trial_0.params
+
+
+def test_tune_retry_trial_missing_trial_raises_bad_parameter(
+    runner: CliRunner, tune_workdir: Path
+) -> None:
+    start_result = runner.invoke(
+        app,
+        _argv(tune_workdir, "tune", "start", "smoke_retry_missing_trial", "--n-trials", "2"),
+        catch_exceptions=False,
+    )
+    assert start_result.exit_code == 0, start_result.stderr or start_result.stdout
+
+    result = runner.invoke(
+        app, _argv(tune_workdir, "tune", "retry-trial", "smoke_retry_missing_trial", "99")
+    )
+    assert result.exit_code != 0
+
+
+def test_tune_retry_trial_missing_study_raises_bad_parameter(
+    runner: CliRunner, tune_workdir: Path
+) -> None:
+    result = runner.invoke(
+        app, _argv(tune_workdir, "tune", "retry-trial", "nonexistent_study", "0")
+    )
+    assert result.exit_code != 0
+
+
 @pytest.mark.gpu
 def test_tune_start_runs_on_gpu(runner: CliRunner, tune_workdir: Path) -> None:
     result = runner.invoke(
