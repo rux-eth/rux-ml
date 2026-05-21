@@ -1,0 +1,4 @@
+# Holdout-score predictions (per PR-032) — large, regeneratable.
+# JSON receipts ARE tracked (single source of truth for the metric).
+*.parquet
+!.gitignore

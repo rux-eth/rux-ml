@@ -1,7 +1,8 @@
-"""``rux-ml registry`` verb group — promoted bundles (PR-010 bodies)."""
+"""``rux-ml registry`` verb group — promoted bundles (PR-010 + PR-032 bodies)."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -12,6 +13,7 @@ from rux_ml.registry.champion import read_champion
 from rux_ml.registry.paths import champion_path
 from rux_ml.registry.promote import promote as do_promote
 from rux_ml.registry.promote import rollback as do_rollback
+from rux_ml.registry.scorer import score_bundle_on_holdout
 
 app = typer.Typer(
     name="registry",
@@ -78,6 +80,60 @@ def list_(ctx: typer.Context) -> None:
             typer.echo("  versions:")
             for v in versions[:10]:  # most recent 10
                 typer.echo(f"    {v}")
+
+
+@app.command(name="score")
+def score(
+    ctx: typer.Context,
+    problem: Annotated[str, typer.Option("--problem", help="Problem name.")],
+    version: Annotated[
+        str | None,
+        typer.Option("--version", help="Bundle version-id; defaults to current champion."),
+    ] = None,
+    output: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            help="Receipts directory (created if missing). Default: ./receipts/",
+        ),
+    ] = Path("receipts"),
+) -> None:
+    """Score a promoted bundle on its held-out test fold (PR-032).
+
+    Loads the bundle (default: champion), reconstructs ``splits["test"]``
+    via ``make_splits`` (deterministic for ``time_ordered``; entropy_hex-
+    derived for ``random`` via the originating trial's provenance), runs
+    the existing metric registry on a Booster shim, and writes a
+    Pydantic-validated JSON receipt + Polars predictions parquet to
+    ``output``.
+
+    Naming note: ``score`` differs from MLflow's CLI verbs — MLflow
+    ``predict`` is predictions-only; MLflow ``evaluate`` is Python-only.
+    rux-ml's ``score`` produces both predictions AND metrics in one CLI
+    invocation. Receipt schema body follows MLflow / Kedro convention
+    (``metrics`` dict + ``artifacts`` dict).
+    """
+    cfg = _load_cfg(ctx)
+    try:
+        receipt = score_bundle_on_holdout(
+            cfg, problem=problem, version=version, output_dir=output
+        )
+    except (FileNotFoundError, KeyError, ValueError) as exc:
+        raise typer.BadParameter(f"score failed: {exc}") from exc
+
+    typer.echo(f"scored:  {problem}@{receipt.bundle_version}")
+    for metric_name, metric_value in receipt.metrics.items():
+        typer.echo(f"  {metric_name} (holdout): {metric_value:.6f}")
+    typer.echo(
+        f"  trial val {receipt.promoted_from.metric_value:.6f} "
+        f"(study={receipt.promoted_from.study} trial={receipt.promoted_from.trial_number})"
+    )
+    holdout = receipt.holdout
+    typer.echo(f"  holdout: n_rows={holdout.n_rows} split_kind={holdout.split_kind}")
+    if holdout.time_range is not None:
+        typer.echo(f"           time_range=[{holdout.time_range[0]}, {holdout.time_range[1]}]")
+    for art_name, art in receipt.artifacts.items():
+        typer.echo(f"  {art_name}: {art.path}")
 
 
 @app.command(name="rollback")

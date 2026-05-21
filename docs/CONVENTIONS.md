@@ -251,6 +251,35 @@ The Optuna objective is **K-fold CV-mean** per the PR-007 Tier-2 research findin
 
 A future single-fit objective regime (no CV; one fit per trial) would re-enable `XGBoostPruningCallback` for iteration-level pruning. That regime is not exposed at v0; the literal preserves `hyperband` / `successive_halving` pruner choices for it.
 
+---
+
+## Holdout score receipts (per PR-032)
+
+The `rux-ml registry score` CLI verb scores a promoted bundle on its truly-held-out `splits["test"]` fold (held out from HPO per PR-031). It writes two artifacts to `receipts/`:
+
+- `receipts/holdout_score_<problem>_<date>.json` — Pydantic-validated `HoldoutScoreReceipt` (tracked in git; single source of truth for the metric).
+- `receipts/holdout_preds_<problem>_<date>.parquet` — Polars predictions parquet, columns `(time_column, y_true, y_pred)` if `data.time_column` is set, else `(y_true, y_pred)`. Gitignored via `receipts/.gitignore` (large, regeneratable).
+
+**Receipt schema body** follows MLflow `EvaluationResult.metrics` + `artifacts_metadata.json` convention:
+
+- `metrics`: flat `{<metric_name>: <float>}` dict (allows >1 metric without schema migration). Cite: MLflow `mlflow.models.evaluate(...).metrics` + Kedro `tracking.MetricsDataSet` at starter tag `0.19.14`.
+- `artifacts`: flat `{<name>: {path, content_type}}` dict (future-extensible — calibration tables / residual plots add as new keys). Cite: MLflow `artifacts_metadata.json` shape.
+
+**Provenance wrapper** is rux-ml-specific (`bundle_version`, `manifest_git_sha`, `promoted_from`, `holdout`, `scored_at`, `scored_at_git_sha`): no production tool surveyed bundles provenance inline (MLflow / Kedro / ZenML push it to a tracking server / MLMD / catalog versions). rux-ml has no tracking server, so bundling inline is the defensible choice — AWS Well-Architected ML Lens BP03 documents the "self-contained evaluation record" pattern for this constraint. Status: `best-guess-given-constraints`; risk acknowledged.
+
+**Verb-naming note**: `rux-ml registry score` differs from MLflow's CLI verbs.
+- MLflow `predict` = predictions only, no metrics
+- MLflow `evaluate` = metrics only (Python API, no CLI)
+- rux-ml `score` = both predictions AND metrics in one CLI invocation
+
+This is a deliberate rux-ml choice for the single-bundle / single-holdout flow. Reviewers coming from MLflow should expect different semantics from the verb name.
+
+**Per-split-kind reconstruction strategy** (`_reconstruct_split_seed` in `src/rux_ml/registry/scorer.py`):
+- `data.split_kind == "time_ordered"`: deterministic per PR-024; any seed value works (the scorer passes 0).
+- `data.split_kind == "random"`: re-open the originating trial via `runs.load_run(storage, study, trial_number)`, read `attrs.entropy_hex`, derive the same `bag.split_seed` via `make_seed_bag_from_hex`. Without this, the scorer's holdout reconstruction would carve a different test fold than the bundle's training-time substrate — silent leakage.
+
+**Booster shim** (`_BoosterTrainerShim`): wraps the raw `xgb.Booster` from the bundle in a Trainer-Protocol-compatible adapter (`predict` + `predict_proba` exposed) so the metric registry's `compute_score` works on bundle-loaded boosters identically to sklearn-wrapped trainers. Uses `xgb.DMatrix(x, enable_categorical=True)` per the in-repo precedent at `tests/golden/test_xgb_baseline.py:381`. The same shape PR-033's native-`xgb.train` adapter will need.
+
 ## Trial config derivation (per PR-007)
 
 `build_objective(base_cfg)` derives a fresh `trial_cfg` per trial by:

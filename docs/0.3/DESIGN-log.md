@@ -125,3 +125,49 @@ Per the option-1 plan (2026-05-20), each v0.3 implementation PR resolves its own
 - Phase 1 + Phase 2 + Phase 5 done locally; Phase 3 dispatched a `general-purpose` agent with WebSearch/WebFetch for the Q1+Q7 question pair.
 - Per-Phase Approval Gate held at every phase boundary (5 user approvals).
 - Group D MCP-Verification Round per the post-PR-028/29 procedure: Probe 1 verified at Phase 1 (identifiers exist in repo); Probe 2 verified at Phase 3 (AutoGluon citation locks the exact 3-element combination); Probe 3 N/A (no state-registration surface).
+
+---
+
+## Session: 2026-05-21 — PR-032 holdout-score CLI verb (Phase 3 web research + schema amendments)
+
+### Context
+
+Per the option-1 plan (2026-05-20), each v0.3 implementation PR resolves its own architectural sub-decisions via its Phase 1 state assessment. PR-032 owned the receipt-schema + CLI-verb-shape sub-decisions for the holdout-scoring CLI verb that consumes the test fold PR-031 made truly held out.
+
+### Decisions
+
+#### D2 — `rux-ml registry score` CLI verb shape + receipt schema
+
+- **Decision**: new CLI verb `rux-ml registry score --problem <name> [--version <v>] [--output <dir>]` orchestrating load_bundle → reconstruct splits → `_BoosterTrainerShim` (Trainer Protocol adapter over raw `xgb.Booster`) → `compute_score` → write Pydantic-validated `HoldoutScoreReceipt` JSON + Polars predictions parquet to `receipts/`.
+- **Carve mechanics**: For `time_ordered` split, deterministic — no entropy_hex needed (any seed value works; the scorer passes 0). For `random` split, re-open the originating trial via `runs.load_run(storage, study, trial_number)` to read `attrs.entropy_hex`, then derive the trial's `bag.split_seed` via `make_seed_bag_from_hex`. Same row identities as the bundle's training-time substrate — no silent leakage.
+- **Receipt schema body**: `metrics: dict[str, float]` + `artifacts: dict[str, _Artifact]` (where `_Artifact` has `path` + `content_type`). Follows MLflow `EvaluationResult.metrics` + `artifacts_metadata.json` convention; Kedro `tracking.MetricsDataSet` precedent for the CLI-persisted flow.
+- **Receipt provenance wrapper**: `bundle_version`, `bundle_dir`, `manifest_git_sha`, `promoted_from`, `holdout`, `scored_at`, `scored_at_git_sha`. rux-ml-specific; no production tool surveyed bundles provenance inline (MLflow / Kedro / ZenML push it to tracking server / MLMD / catalog versions). Defensible per AWS Well-Architected ML Lens BP03 for the no-tracker-server constraint.
+- **Verb-naming note**: `score` differs from MLflow `predict` (predictions only) and MLflow `evaluate` (Python API only). rux-ml's `score` produces both in one CLI invocation. Documented in `docs/CONVENTIONS.md` to prevent confusion.
+- **Rejected alternatives**:
+  - **Python API only** (the majority pattern per Phase 3 — MLflow / AutoGluon / HF evaluate / ZenML / W&B all do this). Rejected because rux-ml is CLI-first; users would have to write a script per evaluation. Kedro's CLI+receipt pattern is the closer fit for the constraints.
+  - **Booster-aware paths in `compute_score`** (extending metric registry with type-branched logic). Rejected — higher complexity; the Booster shim is reusable for PR-033's ExtMem adapter and keeps the metric registry homogeneous.
+  - **Inline scoring in scorer module** (bypassing `compute_score`). Rejected — duplicates metric logic; risks divergence from HPO's scoring.
+- **Status**: **convention** for the 4-element flow (CLI → versioned-bundle-load → score-on-holdout → JSON receipt) — cited at Kedro starter tag `0.19.14`; **convention** for the body shape (metrics dict + artifacts dict) — cited at MLflow + Kedro; **best-guess-given-constraints** for the provenance wrapper — defensible per AWS ML Lens BP03 but no inline-bundling precedent.
+- **Disconfirming evidence search**: explicit search for "no standard / ad-hoc model evaluation receipts" and for score-on-holdout CLI verbs in MLflow / AutoGluon / W&B / Optuna. **Result**: outside Kedro's `tracking.MetricsDataSet`, the dominant convention is Python-API-only with persistence delegated to a tracker. No mainstream tool ships a `score-on-holdout` CLI verb that loads a registry bundle AND writes a typed receipt. MLModelScope paper confirms ad-hoc scripting is the dominant reality.
+- **Research citation**: `prs/PR-032-registry-score-cli-verb.md` Phase 3 findings.
+
+### Sub-decisions resolved en route
+
+- **CLI verb signature**: `--problem` required; `--version` defaults to champion via `read_champion`; `--output` defaults to `Path("receipts")`. Matches existing `cli/registry.py` flag convention (`promote`, `list`, `rollback`).
+- **Predictions parquet column layout**: `(time_column, y_true, y_pred)` when `data.time_column` is set; `(y_true, y_pred)` otherwise. Asset column NOT included by default (would inflate parquet for panels); opt-in via future `--include-asset` flag if needed.
+- **Receipts directory**: `receipts/` tracked at repo root; `receipts/.gitignore` excludes `*.parquet` (large, regeneratable); JSON receipts tracked (single source of truth for the metric).
+- **`promote.py:97` stale docstring comment** ("held out for future golden-regression evaluation (PR-014)") replaced with accurate cross-reference to `rux-ml registry score` + the PR-031 substrate-shrink contract.
+
+### Implementation outcomes
+
+- New module `src/rux_ml/registry/scorer.py`: `_BoosterTrainerShim`, `HoldoutScoreReceipt`, `score_bundle_on_holdout`. NOT exported from `rux_ml.registry`'s public `__init__.py` (preserves PR-010 sub-decision B1 — strict inference-deps separation; CLI imports directly).
+- New CLI verb `cli/registry.py:score`.
+- 9 new tests: 7 in `tests/registry/test_scorer.py` (Booster shim correctness + scorer end-to-end + champion default + random-split determinism + missing-champion error); 2 in `tests/cli/test_registry_subcommands.py` (CLI verb + missing-champion `BadParameter`).
+- Docs updated in the same commit: `docs/ARCHITECTURE.md` Storage table gains "Holdout score receipts" row; `docs/CONVENTIONS.md` gains "Holdout score receipts (per PR-032)" subsection (schema + verb-naming note + reconstruction strategy + Booster shim contract); `docs/0.3/ROADMAP.md` PR-032 row flipped `[ ]` → `[x]`; `docs/0.3/RESEARCH-BACKLOG.md` PR-032 row → `state-assessed` + `fully-researched` + `implementation-cleared 2026-05-21`; `CHANGELOG.md [Unreleased]` gains `### Added` (verb + receipt) + `### Fixed` (stale comment cleanup) entries.
+
+### Process notes
+
+- Phase 1 + Phase 2 + Phase 5 done locally; Phase 3 dispatched a `general-purpose` agent with WebSearch/WebFetch for the Q1 + Q2 + Q-Group-D probe.
+- Phase 4 Outcome Branch: **Amend → Apply** (3 schema/doc amendments). User approved all 3 inline; synthesis resumed.
+- Per-Phase Approval Gate held at every phase boundary (6 user approvals: Phase 1 → Phase 2 → Phase 3 → Phase 4 outcome → Phase 4 amend → Phase 5).
+- Group D MCP-Verification Round: Probe 1 verified at Phase 1 (all identifiers exist in repo); Probe 2 verified at Phase 3 (Kedro starter at tag `0.19.14` cites the exact 4-element combination — required-not-coincidental); Probe 3 N/A (receipts are filesystem outputs, no state-registration surface).
