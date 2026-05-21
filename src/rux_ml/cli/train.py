@@ -24,7 +24,7 @@ from rux_ml._internal.env import EnvironmentVersions, get_versions, pin_threads
 from rux_ml._internal.memory import MemoryPressureError, Watchdog
 from rux_ml._internal.seeds import SeedBag, make_seed_bag
 from rux_ml.cli._shared import get_options
-from rux_ml.config import RuxMLConfig
+from rux_ml.config import RuxMLConfig, XGBoostTraining
 from rux_ml.data import load_parquet, make_splits, materialize
 from rux_ml.features import cardinalities_from, make_features
 from rux_ml.runs import (
@@ -33,6 +33,7 @@ from rux_ml.runs import (
     one_off_run,
 )
 from rux_ml.training import (
+    XGBoostNativeAdapter,
     compute_score,
     estimate_x_bytes,
     make_trainer,
@@ -83,13 +84,37 @@ def _fit_and_score(
     x_val_t = cast("pl.DataFrame", pipeline.transform(x_val))  # pyright: ignore[reportUnknownMemberType]
 
     # Decision-rule classification: PR-006 logs the chosen DMatrix class so
-    # operators see which path is in use. Actual construction in the in-memory
-    # branch is delegated to the sklearn wrapper (XGBoost builds the
-    # QuantileDMatrix internally for tree_method="hist"); the native ExtMem
-    # branch executes via xgb.train + ParquetDataIter once a problem actually
-    # exceeds the threshold (see training/ingest.py for the contract).
+    # operators see which path is in use. PR-033 wires the return value
+    # through into actual DMatrix construction when ``cfg.training.use_native``
+    # is True (opt-in only; the sklearn-wrapper path remains the default and
+    # is the only one exercised in HPO per ``_check_extmem_compat``).
     dmatrix_cls = select_ingest(estimate_x_bytes(x_train_t), cfg.data)
-    typer.echo(f"  ingest path: {dmatrix_cls.__name__}", err=True)
+    use_native = isinstance(cfg.training, XGBoostTraining) and cfg.training.use_native
+    path_label = "native API" if use_native else "sklearn wrapper"
+    typer.echo(f"  ingest path: {dmatrix_cls.__name__} ({path_label})", err=True)
+
+    if use_native:
+        # Cast is safe under the isinstance check above; mypy/basedpyright
+        # narrow ``cfg.training`` to ``XGBoostTraining`` here.
+        xgb_cfg = cast("XGBoostTraining", cfg.training)
+        adapter = XGBoostNativeAdapter(
+            xgb_cfg,
+            data_cfg=cfg.data,
+            memory_cfg=cfg.memory,
+            target_column=target_col,
+            seed=bag.xgb_seed,
+        )
+        adapter.fit(
+            x_train_t,
+            y_train,
+            eval_set=[(x_val_t, y_val)],
+            verbose=False,
+        )
+        score = compute_score(
+            cfg.training.metric, adapter, x_val_t.to_pandas(), y_val.to_numpy()
+        )
+        best_iter = adapter.best_iteration
+        return score, int(best_iter) if best_iter is not None else None
 
     trainer = make_trainer(cfg.training, seed=bag.xgb_seed)
     x_train_pd = x_train_t.to_pandas()

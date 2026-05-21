@@ -154,7 +154,7 @@ LightGBM's native categorical splitter is **Fisher (1958) optimal partitioning o
 
 No `_ColumnRouter` changes were needed — the same sentinel (renamed `PASSTHROUGH_TO_XGB_CATEGORICAL` → `PASSTHROUGH_NATIVE_CATEGORICAL` in PR-018) serves both families.
 
-### XGBoost ingest path (per D3)
+### XGBoost ingest path (per D3 + PR-033)
 
 ```
 estimate_X_bytes(data) →
@@ -168,6 +168,8 @@ CPU hist only as fallback for features unsupported on GPU.
 ```
 
 The threshold is configurable in `[data]` TOML (default `gpu_in_memory_x_gb_max = 18`); the host-RAM cache ratio is configurable in `[memory]`.
+
+**Activation (per PR-033):** the dispatch decision is honored in production via `XGBoostNativeAdapter` (`training/xgboost/native_adapter.py`) — a `Trainer`-Protocol-compatible wrapper around `xgb.train` that branches on `select_ingest(...)` and constructs the chosen DMatrix class directly. The adapter is **opt-in via `cfg.training.use_native=True`** (consumed by `cli/train.py`'s baseline path only); the sklearn-wrapper path (`make_xgboost_trainer` → `XGBClassifier`/`XGBRegressor`) remains the default and is the only path exercised in the HPO objective — `tuning/objective.py::_check_extmem_compat` preserves the "HPO + ExtMem = `NotImplementedError`" semantic because per-fold ExtMem rebuild cost is prohibitive. Single-file Polars sources are chunked into N temp Parquets via `single_source_iter` (XGBoost 3.2 `external_memory.py` demo pattern) and wrapped in `ParquetDataIter` before the `ExtMemQuantileDMatrix` build. Honest activation warning per the XGBoost 3.2 [external_memory.html](https://xgboost.readthedocs.io/en/stable/tutorials/external_memory.html) tutorial: `ExtMemQuantileDMatrix` is slower than `QuantileDMatrix` when data fits in host RAM — auto-on-ExtMem-trigger is deferred to a follow-up once a real workload exceeds the threshold.
 
 ### Categorical encoding (per D4)
 
@@ -519,7 +521,7 @@ Container digest pinning is non-negotiable per `docs/CONSTRAINTS.md`.
 | Thread allocation | `OMP_NUM_THREADS=24`, `OPENBLAS_NUM_THREADS=1`, `MKL_NUM_THREADS=1`, `POLARS_MAX_THREADS=24`, XGBoost `nthread=24` | per-library all-or-one |
 | Skipped | `RLIMIT_AS` (unreliable on Linux) | — |
 | On-demand profiling | `memray attach --aggregate` | manual |
-| ExtMem host-RAM cache | `MemoryConfig.cache_host_ratio` (`null` = XGBoost auto-estimate) — consumed by the D3 ingest path when X exceeds `gpu_in_memory_x_gb_max` | `null` |
+| ExtMem host-RAM cache | `MemoryConfig.cache_host_ratio` (`null` = XGBoost auto-estimate) — consumed by `XGBoostNativeAdapter` (per PR-033) when `use_native=True` AND `select_ingest` returns `ExtMemQuantileDMatrix` AND `cfg.training.device=="cuda"` (XGBoost 3.2 only honors the kwarg on GPU; CPU build raises) | `null` |
 
 Sequential trials (D6) plus 24-thread CPU means each library may use the whole CPU when active. BLAS env vars are pinned to 1 to suppress nested oversubscription that `threadpoolctl` cannot reliably reach across distinct OpenMP runtimes (libgomp vs libiomp).
 

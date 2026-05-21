@@ -171,3 +171,52 @@ Per the option-1 plan (2026-05-20), each v0.3 implementation PR resolves its own
 - Phase 4 Outcome Branch: **Amend → Apply** (3 schema/doc amendments). User approved all 3 inline; synthesis resumed.
 - Per-Phase Approval Gate held at every phase boundary (6 user approvals: Phase 1 → Phase 2 → Phase 3 → Phase 4 outcome → Phase 4 amend → Phase 5).
 - Group D MCP-Verification Round: Probe 1 verified at Phase 1 (all identifiers exist in repo); Probe 2 verified at Phase 3 (Kedro starter at tag `0.19.14` cites the exact 4-element combination — required-not-coincidental); Probe 3 N/A (receipts are filesystem outputs, no state-registration surface).
+
+---
+
+## Session: 2026-05-21 — PR-033 ExtMem path activation (D2 resolution + Phase 3 synthesis BGGC)
+
+### Context
+
+Per the option-1 plan (2026-05-20), each v0.3 implementation PR resolves its own architectural sub-decisions via its Phase 1 state assessment. PR-033 owned D2 (ExtMem activation pattern) — the largest scope of the v0.3 sprint. Phase 1 surfaced significant **scope reduction**: every additional consumer site (registry/promote, HPO objective) was reviewed and deferred. Phase 3 surfaced the most consequential BGGC finding of the sprint.
+
+### Decisions
+
+#### D2 — ExtMem activation via opt-in native adapter (scope-reduced)
+
+- **Decision**: new `XGBoostNativeAdapter` class in `src/rux_ml/training/xgboost/native_adapter.py` is the `Trainer`-Protocol-compatible wrapper around `xgb.train`. The dispatch decision from `select_ingest(estimate_x_bytes(X), cfg.data)` is honored *inside the adapter* — `QuantileDMatrix` for in-VRAM frames; `ExtMemQuantileDMatrix` (host-RAM cached via `cache_host_ratio` when on GPU) for over-threshold frames, with chunks materialized by the new `single_source_iter` helper in `src/rux_ml/data/data_iter.py` (Polars `iter_slices` → N temp Parquets → `ParquetDataIter`).
+- **Activation surface**: `cli/train.py::_fit_and_score` branches on `cfg.training.use_native` (read for the first time in production) — `True` routes through `XGBoostNativeAdapter`; `False` (default) stays on the existing sklearn-wrapper path via `make_trainer`. Honest stderr log: `ingest path: <DMatrixCls> (native API|sklearn wrapper)`.
+- **Scope reduction** (locked at Phase 1):
+  - `registry/promote.py` UNCHANGED — promote-time re-fit operates on the train+val substrate (~85% of source data), which fits in VRAM at workbench scale. Native-path promotion deferred to a follow-up once a real workload demands it.
+  - `tuning/objective.py` UNCHANGED — per-fold ExtMem rebuild cost is prohibitive (multi-minute per fold × `cv.n_splits`); the `_check_extmem_compat` guard preserves the existing "HPO + ExtMem = `NotImplementedError`" semantic for free.
+  - Auto-on-ExtMem-trigger DEFERRED — XGBoost 3.2's own tutorial warns ExtMem is slower than `QuantileDMatrix` when data fits in RAM; opt-in only via `use_native=True`.
+- **Rejected alternatives**:
+  - **Inheritance refactor unifying `_BoosterTrainerShim` (PR-032) and `XGBoostNativeAdapter` under a shared base** — rejected at Phase 4. The shim is score-only (bundle-load + inference); the adapter is fit+score. Different lifecycle, different ownership, different test surfaces. Parallel adapter classes (Amend candidate 3) keep each concern clean.
+  - **`use_native` auto-flip when `select_ingest` returns `ExtMemQuantileDMatrix`** — rejected. XGBoost 3.2 tutorial's "ExtMem slower than QuantileDMatrix when data fits in RAM" warning means auto-on can degrade performance on RAM-resident workloads that *technically* exceed the 18 GB heuristic. Explicit opt-in matches the documented behavior.
+  - **Test-mode `RUXML_FORCE_EXTMEM=1` env var** — rejected. The PR-005 cross-field validator pattern is cleaner: tests force the path by setting `gpu_in_memory_x_gb_max=1e-9` in a `DataConfig`. No new env-var surface; same code path.
+- **Status**: **best-guess-given-constraints** for the 4-element synthesis combination (`xgb.train` + `ExtMemQuantileDMatrix` + `cache_host_ratio` + sklearn-Trainer-Protocol wrapper). Phase 3 Q-Group-D Probe 2 (Synthesis-Verification) returned **NO single cited working example** of all four ingredients together. Each ingredient is independently sourced (XGBoost 3.2 [`external_memory.html`](https://xgboost.readthedocs.io/en/stable/tutorials/external_memory.html) chunking pattern; [`external_memory.py` demo](https://github.com/dmlc/xgboost/blob/master/demo/guide-python/external_memory.py) verbatim `ParquetDataIter` shape; XGBoost 3.2 [`python_api.html`](https://xgboost.readthedocs.io/en/release_3.2.0/python/python_api.html) parameter mapping table; PR-032's `_BoosterTrainerShim` sklearn-adapter-over-booster precedent in-repo) but the synthesis is the workbench's own composition. **Mitigation**: `tests/training/test_native_adapter.py::test_native_adapter_predict_proba_matches_sklearn_wrapper_within_tol` asserts bit-exact (within `atol=1e-5`) numeric agreement between adapter and sklearn-wrapper on shared params + seed + data. Without this test the BGGC label would be unbounded.
+- **Research citation**: `prs/PR-033-extmem-path-activation.md` Phase 3 findings.
+
+### Sub-decisions resolved en route
+
+- **`cache_host_ratio` GPU-gating**: XGBoost 3.2's CPU `ExtMemQuantileDMatrix` rejects the kwarg with `Check failed: detail::HostRatioIsAuto(config.cache_host_ratio)`. Adapter gates on `cfg.device == "cuda"`. Documented in `CONVENTIONS.md` parameter-mapping table; tested by `test_native_adapter_threads_cache_host_ratio_when_device_cuda` (monkey-patched DMatrix constructor — real GPU not reachable on CI / macOS).
+- **`predict`/`predict_proba` input types**: pass-through to `xgb.DMatrix(x, enable_categorical=True)` mirrors PR-032's `_BoosterTrainerShim._dmatrix` — accepts pandas/polars/ndarray uniformly. The metric registry calls `predict_proba` with pandas (via `x_val_t.to_pandas()` in the CLI); promotion-time consumers may pass polars; both round-trip cleanly.
+- **Native objective string**: `xgb.train` does not auto-detect task from data (unlike sklearn wrapper). Adapter maps `task_for_metric(cfg.metric)` → `binary:logistic` / `reg:squarederror`. Multi-class out of scope at v0.
+- **Parameter renames (sklearn → native)**: `random_state` → `seed` (in `params` dict); `n_estimators` → `num_boost_round` (kwarg, not param); `early_stopping_rounds` stays as kwarg but only honored when `evals` non-empty. Codified in `CONVENTIONS.md` table.
+- **TemporaryDirectory ownership**: `fit()` creates a per-call `tempfile.TemporaryDirectory(prefix="rux_ml_extmem_")` for chunked Parquets + XGBoost's ExtMem cache files. Cleaned on context exit (some cache-file warnings from XGBoost trying to re-remove already-cleaned files are non-fatal noise).
+
+### Implementation outcomes
+
+- New module `src/rux_ml/training/xgboost/native_adapter.py` (`XGBoostNativeAdapter` class) — exported from `rux_ml.training.xgboost` + `rux_ml.training`.
+- New helper `single_source_iter` in `src/rux_ml/data/data_iter.py` — exported from `rux_ml.data`.
+- `src/rux_ml/cli/train.py::_fit_and_score` branches on `cfg.training.use_native` for the first time; honest stderr log emits `(native API)` vs `(sklearn wrapper)`.
+- 8 new tests in `tests/training/test_native_adapter.py` covering: fit/predict smoke; **mandatory BGGC mitigation** (`predict_proba_matches_sklearn_wrapper_within_tol` at `atol=1e-5`); `predict_proba` 2D shape; `select_ingest`-monkey-patch verification for both `QuantileDMatrix` and `ExtMemQuantileDMatrix` branches; `cache_host_ratio` GPU-gated threading; real ExtMem path on CPU smoke; `single_source_iter` chunk-count + iterator-yield contract + invalid-input guards.
+- 1 new CLI integration test in `tests/cli/test_train_subcommand.py::test_train_use_native_smoke` — verifies the `--set training.use_native=true` end-to-end through `cli/train` produces a valid AUC + emits the "native API" log line.
+- Docs updated in the same commit: `docs/ARCHITECTURE.md` (D3 ingest rule body + Memory & Parallelism `cache_host_ratio` row); `docs/CONVENTIONS.md` (new "XGBoost native API + ExtMem path (per PR-033)" subsection with honest activation warning + parameter-mapping table + BGGC label disclosure); `docs/0.3/ROADMAP.md` PR-033 row flipped `[ ]` → `[x]`; `docs/0.3/RESEARCH-BACKLOG.md` PR-033 row → `state-assessed` + `fully-researched` + `implementation-cleared 2026-05-21`; `CHANGELOG.md [Unreleased] ### Added` (loud entry).
+
+### Process notes
+
+- Phase 1 + Phase 2 + Phase 5 done locally; Phase 3 dispatched a `general-purpose` agent with WebSearch/WebFetch for the Q-Group-D Probe 2 (Synthesis-Verification) — surfaced the BGGC finding.
+- Phase 4 Outcome Branch: **Amend → Apply** (4 amendments). User approved all 4 inline at session pause; implementation resumed on 2026-05-21.
+- Per-Phase Approval Gate held at every phase boundary (6 user approvals: Phase 1 → Phase 2 → Phase 3 → Phase 4 outcome → Phase 4 amend → Phase 5). Streak preserved.
+- Group D MCP-Verification Round: Probe 1 verified at Phase 1 (every identifier — `xgb.train`, `ExtMemQuantileDMatrix`, `cache_host_ratio`, `ParquetDataIter`, `select_ingest`, `cfg.training.use_native`, `cfg.memory.cache_host_ratio` — exists in pinned `xgboost` and in `dev` HEAD). Probe 2 returned **NO cite** for the 4-element synthesis → BGGC + mitigation test (the most consequential probe-2 finding of the sprint). Probe 3 N/A (no state-registration surface; `XGBoostNativeAdapter` is constructor-instantiated, not registered).

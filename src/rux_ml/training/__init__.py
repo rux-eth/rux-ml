@@ -46,6 +46,7 @@ from rux_ml.training.metrics import (
 from rux_ml.training.protocol import Trainer
 from rux_ml.training.xgboost import (
     DEFAULT_BYTES_PER_GB,
+    XGBoostNativeAdapter,
     XGBoostTraining,
     estimate_x_bytes,
     make_xgboost_trainer,
@@ -74,6 +75,7 @@ __all__ = [
     "LightGBMTraining",
     "Trainer",
     "TrainingBase",
+    "XGBoostNativeAdapter",
     "XGBoostTraining",
     "compute_score",
     "estimate_x_bytes",

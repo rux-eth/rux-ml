@@ -231,6 +231,26 @@ def test_train_temporal_cv_rejects_random_split(
     assert "split_kind" in str(result.exception)
 
 
+def test_train_use_native_smoke(runner: CliRunner, train_workdir: Path) -> None:
+    """``--set training.use_native=true`` routes through ``XGBoostNativeAdapter`` (PR-033).
+
+    Exit-code-0 + provenance recording verify the native path is wired
+    end-to-end through ``cli/train._fit_and_score``; the "native API" log
+    line in stderr confirms the branch was taken (vs. silently falling
+    back to the sklearn-wrapper path).
+    """
+    result = runner.invoke(
+        app,
+        _argv(train_workdir, "--set", "training.use_native=true", "train"),
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr or result.stdout
+    assert "score (auc):" in result.stdout
+    assert "native API" in result.stderr, (
+        f"expected 'native API' ingest path log in stderr; got: {result.stderr!r}"
+    )
+
+
 @pytest.mark.gpu
 def test_train_runs_end_to_end_gpu(runner: CliRunner, train_workdir: Path) -> None:
     """Same flow as the CPU test, just with ``--set training.device=cuda``."""
