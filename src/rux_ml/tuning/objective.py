@@ -32,6 +32,7 @@ import statistics
 from typing import TYPE_CHECKING, Any, cast
 
 import optuna
+import polars as pl
 from xgboost import ExtMemQuantileDMatrix
 
 from rux_ml._internal.env import EnvironmentVersions, get_versions
@@ -46,6 +47,7 @@ from rux_ml.config import (
 )
 from rux_ml.data import (
     load_parquet,
+    make_splits,
     make_splitter,
     materialize,
 )
@@ -60,8 +62,6 @@ from rux_ml.training import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    import polars as pl
 
     from rux_ml.config import SearchSpec
 
@@ -148,6 +148,30 @@ def _require(cfg: RuxMLConfig) -> tuple[Any, str]:
 
 def _strip_target(df: pl.DataFrame, target_col: str) -> tuple[pl.DataFrame, pl.Series]:
     return df.drop(target_col), df[target_col]
+
+
+def _carve_substrate(
+    base_cfg: RuxMLConfig, df_full: pl.DataFrame, target_col: str
+) -> tuple[pl.DataFrame, pl.Series]:
+    """Carve the HPO CV substrate (``splits["train"] + splits["val"]``) per PR-031.
+
+    The held-out test fold (``splits["test"]``, ~15% of source data by default
+    ``data.split_ratios``) is excluded from HPO. Carve is done once with the
+    study-level bag's ``split_seed`` (``trial_number=0`` sentinel — same
+    precedent as the sampler seed at ``cli/tune.py:73``) so all trials in a
+    study share the identical substrate; deterministic per study identity for
+    both ``random`` and ``time_ordered`` ``data.split_kind``.
+
+    Convention citation (Phase 3 research): AutoGluon ``tabular-essentials``
+    tutorial at SHA ``f8c428cbbef3bc319ff3f7710f5900e65637f4c4`` (``fit(train_data)
+    → evaluate(test_data)``); sklearn user guide §3.1; Optuna issue #2184
+    (in-objective splitting acknowledged as anti-pattern — move the carve
+    outside the closure).
+    """
+    study_bag = make_seed_bag(master_entropy=base_cfg.tuning.entropy, trial_number=0)
+    splits = make_splits(base_cfg, df_full, seed=study_bag.split_seed)
+    df_substrate = pl.concat([splits["train"], splits["val"]])
+    return _strip_target(df_substrate, target_col)
 
 
 def _check_extmem_compat(
@@ -257,7 +281,10 @@ def build_objective(base_cfg: RuxMLConfig) -> Callable[[optuna.Trial], float]:
     # Data is loaded once outside the closure so every trial shares the same in-memory copy.
     # (Per D6 sequential trials, the closure is only ever called serially.)
     df_full = materialize(load_parquet(source_path))
-    x_full, y_full = _strip_target(df_full, target_col)
+    # PR-031: HPO CV substrate is splits["train"] + splits["val"]; the test fold
+    # is truly held out from HP search. See _carve_substrate for the convention
+    # cite + study-level seed contract.
+    x_substrate, y_substrate = _carve_substrate(base_cfg, df_full, target_col)
     hashes = data_hashes(source_path)
 
     # PR-013: capture environment versions once per subprocess. Each subprocess
@@ -284,16 +311,16 @@ def build_objective(base_cfg: RuxMLConfig) -> Callable[[optuna.Trial], float]:
         groups = None
         if isinstance(trial_cfg.cv, GroupKFoldCV):
             groups_column = trial_cfg.cv.groups_column
-            if groups_column not in x_full.columns:
+            if groups_column not in x_substrate.columns:
                 msg = (
                     f"GroupKFoldCV.groups_column={groups_column!r} not found in input "
-                    f"DataFrame columns: {x_full.columns}"
+                    f"DataFrame columns: {x_substrate.columns}"
                 )
                 raise ValueError(msg)
-            groups = x_full[groups_column].to_numpy()
+            groups = x_substrate[groups_column].to_numpy()
 
         # ExtMem-incompatible Splitter gate (PR-015 sub-decision C1).
-        _check_extmem_compat(x_full, splitter, trial_cfg)
+        _check_extmem_compat(x_substrate, splitter, trial_cfg)
 
         # Watchdog wraps the per-trial fit work (PR-011). Observational +
         # post-fit-check: a tripped watchdog converts to optuna.TrialPruned.
@@ -304,7 +331,9 @@ def build_objective(base_cfg: RuxMLConfig) -> Callable[[optuna.Trial], float]:
             sample_hz=trial_cfg.memory.watchdog_sample_hz,
         ) as wd:
             try:
-                scores = _fold_scores(trial_cfg, x_full, y_full, splitter, groups, trial, bag)
+                scores = _fold_scores(
+                    trial_cfg, x_substrate, y_substrate, splitter, groups, trial, bag
+                )
             except MemoryPressureError:
                 raise optuna.TrialPruned from None
             finally:

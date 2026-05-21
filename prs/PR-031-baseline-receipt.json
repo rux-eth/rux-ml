@@ -1,0 +1,91 @@
+{
+  "pr": 31,
+  "title": "HPO objective honors holdout fold \u2014 baseline receipt under PR-031 semantics",
+  "purpose": "Document the post-PR-031 RMSE on the crypto_breakout_h3 baseline using the same TOML config + master entropy + n_trials as PR-025 calibration. Quantifies the metric shift introduced by carving the HPO CV substrate down to splits[train]+splits[val] (PR-031, v0.3.0) from the pre-PR-031 full dataframe (PR-025 era).",
+  "workbench": {
+    "git_sha": "d2831aac104eacedfc20fb85db62b14e636ed541",
+    "branch": "pr-031/hpo-honors-holdout-fold",
+    "study_name": "crypto_breakout_h3_pr031_baseline",
+    "storage": "sqlite:///studies/studies.db",
+    "n_trials_dispatched": 10,
+    "n_completed": 7,
+    "n_pruned": 3,
+    "gpu_model": "NVIDIA GeForce RTX 4090",
+    "driver_version": "580.159.03"
+  },
+  "config": {
+    "problem": "crypto_breakout_h3",
+    "study_layer_toml": "configs/studies/crypto_breakout_h3_baseline.toml",
+    "tuning_entropy": 42,
+    "sampler": "tpe",
+    "pruner": "wilcoxon",
+    "n_startup_trials": 10,
+    "search_space": {
+      "training.learning_rate": {
+        "low": 0.03,
+        "high": 0.1,
+        "log": true
+      },
+      "training.max_depth": {
+        "low": 5,
+        "high": 8
+      }
+    },
+    "cv": {
+      "kind": "panel_cpcv",
+      "n_folds": 5,
+      "n_test_folds": 2,
+      "target_horizon_bars": 3,
+      "embargo_pct": 0.0
+    },
+    "data": {
+      "split_kind": "time_ordered",
+      "split_ratios": {
+        "train": 0.7,
+        "val": 0.15,
+        "test": 0.15
+      },
+      "time_column": "timestamp",
+      "hpo_substrate": "splits[train] + splits[val] (PR-031 \u2014 first 85% of source rows by timestamp)",
+      "holdout": "splits[test] (last 15% by timestamp; unseen by HPO)"
+    }
+  },
+  "metrics": {
+    "median_rmse": 0.026848550892582396,
+    "best_rmse": 0.026847208350892098,
+    "best_trial_number": 9,
+    "worst_completed_rmse": 0.02684985860770005,
+    "spread_within_completed": 2.6502568079532496e-06,
+    "per_trial_rmse": {
+      "0": 0.026848550892582396,
+      "3": 0.02684985860770005,
+      "4": 0.0268492040569887,
+      "5": 0.02684859903905078,
+      "6": 0.026847854706694967,
+      "8": 0.026847621976646485,
+      "9": 0.026847208350892098
+    },
+    "pruned_trial_numbers": [
+      1,
+      2,
+      7
+    ]
+  },
+  "comparison_to_pr025": {
+    "receipt_path": "prs/PR-025-calibration-results.json",
+    "pr025_calibration_position_a_median_rmse": 0.027101,
+    "pr025_calibration_position_a_best_rmse": 0.023533,
+    "pr031_median_rmse": 0.026848550892582396,
+    "pr031_best_rmse": 0.026847208350892098,
+    "delta_median_vs_pr025": {
+      "absolute": -0.0002524491074176044,
+      "percent": -0.9315121486941604
+    },
+    "delta_best_vs_pr025": {
+      "absolute": 0.003314208350892099,
+      "percent": 14.083237797527298
+    },
+    "interpretation": "Substrate shrunk from 100% of source data (PR-025 era; pre-PR-031) to 85% under PR-031 (splits[train]+splits[val] only; splits[test] genuinely held out). PR-031 median RMSE is SLIGHTLY LOWER than PR-025 Position A median (~-0.93%); PR-031 best is HIGHER than PR-025 best (~+14%), consistent with the Phase 3 convention finding that HPO may be slightly suboptimal in a small-data regime. Spread within completed trials is tighter under PR-031 (3e-06 vs PR-025 Position A 6e-06). The 0.027101 median from PR-025 is NOT a regression target \u2014 it was measured against the OLD 100%-substrate semantics. PR-031 makes the holdout truly held out from HP search at the cost of HPO seeing 15% less data; this is the intended behavior change per Phase 3 research (AutoGluon tabular-essentials.html @ SHA f8c428cbbef3bc319ff3f7710f5900e65637f4c4; sklearn user guide \u00a73.1; Optuna issue #2184)."
+  },
+  "scored_at": "2026-05-21T07:05:52+00:00"
+}
