@@ -504,6 +504,30 @@ metric = "auc"
 
 **Native escape hatches** (per D5): each family may expose a `use_native: bool` flag on its variant to bypass the sklearn-wrapper API for the ~5 % of cases where the wrapper is insufficient (XGBoost: `xgb.train()`; LightGBM: `lgb.train()`; CatBoost: `cb.train()`). Not used by default; flagged on the per-family variant when it lands.
 
+### XGBoost native API + ExtMem path (per PR-033)
+
+`XGBoostNativeAdapter` (`src/rux_ml/training/xgboost/native_adapter.py`) is the concrete implementation of the `use_native` escape hatch for XGBoost. It wraps `xgb.train(...) → xgb.Booster` in a `Trainer`-Protocol-compatible surface (`fit` + `predict` + `predict_proba` + `best_iteration`) so the metric registry (`compute_score`) and CLI consumers see the same shape as the sklearn-wrapper path. The adapter is the *training* sibling of PR-032's score-only `_BoosterTrainerShim` (which wraps bundle-loaded `Booster`s for inference); both expose identical `predict`/`predict_proba` surfaces so the metric registry stays homogeneous.
+
+**When to opt in.** The XGBoost 3.2 [external memory tutorial](https://xgboost.readthedocs.io/en/stable/tutorials/external_memory.html) is explicit that `ExtMemQuantileDMatrix` is **slower than `QuantileDMatrix` when data fits in host RAM**. Use `use_native=True` only when (a) the X feature matrix exceeds `data.gpu_in_memory_x_gb_max` (18 GB default), AND (b) you have NVMe-on-PCIe-4 (or faster) for the on-disk cache, AND (c) you're on GPU (`training.device=="cuda"` — the `cache_host_ratio` knob is GPU-only). The XGBoost ExtMem path is experimental and version-sensitive; pin `xgboost` deliberately in `uv.lock`.
+
+**Activation scope.** PR-033 wires the adapter into `cli/train.py`'s baseline path only. The HPO objective (`tuning/objective.py`) stays on the sklearn-wrapper path — `_check_extmem_compat` preserves the "HPO + ExtMem = `NotImplementedError`" semantic because per-fold ExtMem rebuild cost is prohibitive (multi-minute per fold; multiplies sequentially with `cv.n_splits`). `registry/promote.py` also stays on the sklearn-wrapper path — promote-time re-fit operates on the train+val substrate which fits in VRAM at workbench scale. Future PRs may extend the native path to promote or to HPO once a real workload demands it.
+
+**Parameter mapping** (`xgb.train` vs `XGBClassifier.__init__`):
+
+| Sklearn-wrapper field | Native location | Notes |
+|---|---|---|
+| `random_state` | `params["seed"]` | rename |
+| `n_estimators` | `xgb.train(num_boost_round=...)` | kwarg, not param |
+| `early_stopping_rounds` | `xgb.train(early_stopping_rounds=...)` | kwarg; only honored when `evals` is non-empty |
+| `enable_categorical` | DMatrix constructor kwarg | not a booster param |
+| `cache_host_ratio` | `ExtMemQuantileDMatrix(cache_host_ratio=...)` | GPU-only; CPU build rejects with `Check failed` |
+| `tree_method`, `device`, `learning_rate`, `max_depth`, `subsample`, `colsample_bytree`, `eval_metric` | `params[...]` | same key on both sides |
+| `objective` | `params["objective"]` | native does not auto-detect from data; the adapter maps task → `binary:logistic` / `reg:squarederror` via the metric registry |
+
+`model_kwargs` (TOML escape hatch) is applied last-wins on `params` — matches PR-006's convention.
+
+**BGGC label.** The 4-element combination — `xgb.train` + `ExtMemQuantileDMatrix` + `cache_host_ratio` + sklearn-`Trainer`-Protocol wrapper — has no single cited working example. Phase 3 web research located each ingredient independently (`xgb.train` in `python_api.html`; `ExtMemQuantileDMatrix` in `external_memory.html`; `cache_host_ratio` documented as GPU-only; sklearn-adapter-over-booster precedent in PR-032's `_BoosterTrainerShim`) but the synthesis is **best-guess-given-constraints**. Mitigation: `tests/training/test_native_adapter.py::test_native_adapter_predict_proba_matches_sklearn_wrapper_within_tol` asserts `np.allclose(adapter.predict_proba, XGBClassifier.predict_proba, atol=1e-5)` on shared params + seed + data. Without this test the BGGC label would be unbounded.
+
 ## Where new conventions go
 
 When a convention emerges that isn't documented here, add it during the same PR that establishes it. Conventions added retroactively go stale fast.

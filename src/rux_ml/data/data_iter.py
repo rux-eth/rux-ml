@@ -17,6 +17,45 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+def single_source_iter(
+    df: pl.DataFrame,
+    target_column: str,
+    *,
+    batch_count: int,
+    tmp_dir: Path,
+    cache_prefix: str,
+) -> ParquetDataIter:
+    """Chunk a single in-memory frame into N temp Parquets for ExtMem ingest.
+
+    Mirrors the split-on-write pattern in XGBoost 3.2's
+    ``demo/guide-python/external_memory.py`` for sources that arrive as a
+    single DataFrame (the workbench's common shape after
+    ``materialize(load_parquet(...))`` + feature transform). The caller owns
+    ``tmp_dir`` lifecycle.
+    """
+    if batch_count <= 0:
+        msg = f"batch_count must be >= 1, got {batch_count}"
+        raise ValueError(msg)
+    if df.height == 0:
+        msg = "single_source_iter requires a non-empty DataFrame"
+        raise ValueError(msg)
+    if target_column not in df.columns:
+        msg = f"target_column={target_column!r} not in DataFrame columns: {df.columns}"
+        raise ValueError(msg)
+
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+
+    # Ceiling division so the final batch absorbs the remainder rather than
+    # producing an extra short batch (matches polars iter_slices behavior).
+    batch_size = max(1, (df.height + batch_count - 1) // batch_count)
+    files: list[Path] = []
+    for i, slice_df in enumerate(df.iter_slices(n_rows=batch_size)):
+        path = tmp_dir / f"batch_{i}.parquet"
+        slice_df.write_parquet(path)
+        files.append(path)
+    return ParquetDataIter(files=files, target_column=target_column, cache_prefix=cache_prefix)
+
+
 class ParquetDataIter(xgb.DataIter):
     """Per-file Parquet batch iterator for ``xgb.ExtMemQuantileDMatrix``.
 
