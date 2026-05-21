@@ -94,7 +94,10 @@ def _refit(cfg: RuxMLConfig, *, bag: SeedBag) -> tuple[Pipeline, xgb.Booster]:
 
     Uses the train fold for fitting and the val fold for XGBoost-internal
     early stopping (matches ``cli/train.py``'s 1-trial fit shape). The test
-    fold is unused — held out for future golden-regression evaluation (PR-014).
+    fold is unused here — consumed by ``rux-ml registry score`` (PR-032) for
+    held-out-window evaluation. The fold is truly held out from HPO too,
+    per PR-031's substrate-shrink (``tuning/objective.py`` CV substrate is
+    ``splits["train"] + splits["val"]`` only).
 
     ``bag`` (PR-013) carries the originating trial's ``split_seed`` +
     ``xgb_seed`` reconstructed from its ``entropy_hex``. Without this, the

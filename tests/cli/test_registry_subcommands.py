@@ -171,3 +171,64 @@ def test_registry_rollback_errors_on_missing_version(
         _argv(workdir, "registry", "rollback", "--problem", "churn_v1", "--to", "v_no_exist"),
     )
     assert result.exit_code != 0
+
+
+def test_registry_score_writes_receipt_and_parquet(
+    runner: CliRunner, registry_workdir: tuple[Path, str, int]
+) -> None:
+    """``rux-ml registry score`` end-to-end: promote then score writes receipt + preds parquet."""
+    workdir, study_name, trial_number = registry_workdir
+    # Promote first so a champion exists.
+    promote_result = runner.invoke(
+        app,
+        _argv(
+            workdir,
+            "registry",
+            "promote",
+            "--problem",
+            "churn_v1",
+            "--study",
+            study_name,
+            "--trial",
+            str(trial_number),
+        ),
+        catch_exceptions=False,
+    )
+    assert promote_result.exit_code == 0, promote_result.stderr or promote_result.stdout
+
+    output_dir = workdir / "receipts"
+    score_result = runner.invoke(
+        app,
+        _argv(
+            workdir,
+            "registry",
+            "score",
+            "--problem",
+            "churn_v1",
+            "--output",
+            str(output_dir),
+        ),
+        catch_exceptions=False,
+    )
+    assert score_result.exit_code == 0, score_result.stderr or score_result.stdout
+    assert "scored:  churn_v1@v_" in score_result.stdout
+    assert "auc (holdout):" in score_result.stdout
+    assert "trial val 0.910000" in score_result.stdout
+
+    receipt_files = list(output_dir.glob("holdout_score_churn_v1_*.json"))
+    assert len(receipt_files) == 1
+    preds_files = list(output_dir.glob("holdout_preds_churn_v1_*.parquet"))
+    assert len(preds_files) == 1
+
+
+def test_registry_score_missing_champion_raises_bad_parameter(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """No champion.json → exit_code != 0 (BadParameter)."""
+    config = tmp_path / "base.toml"
+    config.write_text(f'[registry]\nroot = "{tmp_path}/registry"\n')
+    result = runner.invoke(
+        app,
+        ["--config", str(config), "registry", "score", "--problem", "nonexistent"],
+    )
+    assert result.exit_code != 0
