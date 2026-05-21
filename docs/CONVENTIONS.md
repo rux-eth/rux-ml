@@ -231,6 +231,7 @@ These are starting-point defaults; final choice is per-problem and lives in `con
 
 The Optuna objective is **K-fold CV-mean** per the PR-007 Tier-2 research findings:
 
+- **CV substrate is `splits["train"] + splits["val"]`, not `df_full`** (per PR-031, v0.3.0). The Splitter operates on this substrate — the held-out test fold (~15% of source data per `data.split_ratios`) is never seen by HPO. The substrate carve is done once outside the per-trial closure via `_carve_substrate(base_cfg, df_full, target_col)` → `make_splits(cfg, df, seed=study_bag.split_seed)` with `study_bag = make_seed_bag(master_entropy=base_cfg.tuning.entropy, trial_number=0)`, so all trials in a study share the identical substrate (deterministic per study identity for both `random` and `time_ordered` split kinds). Cite: AutoGluon `tabular-essentials.html` at SHA `f8c428cbbef3bc319ff3f7710f5900e65637f4c4`; sklearn user guide §3.1; Optuna issue #2184.
 - Each trial calls `make_splitter(cfg.cv, seed=cfg.tuning.entropy)` (PR-015's Splitter Protocol) and runs `cfg.cv.n_splits` fits.
 - Per-fold scores are reported via `trial.report(fold_score, step=fold_idx)` so `WilcoxonPruner` (the default — purpose-built for K-fold CV per Optuna 3.6+) can paired-test against running trials.
 - The trial returns `statistics.fmean(fold_scores)` as the aggregate objective value (arithmetic mean; switch to median only after measured outlier evidence per Q1.b research).

@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import numpy as np
 import optuna
+import polars as pl
 import pytest
 from optuna.pruners import NopPruner
 from optuna.samplers import RandomSampler
@@ -16,8 +20,14 @@ from rux_ml.config import (
     RuxMLConfig,
     SearchSpec,
     StratifiedKFoldCV,
+    TimeSeriesSplitCV,
+    TuningConfig,
+    XGBoostTraining,
 )
+from rux_ml.config.features import FeaturesConfig, FeaturesSpec
+from rux_ml.data import load_parquet, materialize
 from rux_ml.tuning import build_objective, walk_search_space
+from rux_ml.tuning.objective import _carve_substrate
 
 # ---------- walk_search_space ----------
 
@@ -145,3 +155,102 @@ def test_build_objective_stratified_kfold_requires_y_and_works(tune_cfg: RuxMLCo
     study.optimize(objective, n_trials=1)
     completed = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
     assert len(completed) == 1
+
+
+# ---------- PR-031: substrate carve ----------
+
+
+def _make_substrate_cfg(
+    src: Path,
+    *,
+    split_kind: str,
+    time_column: str | None,
+    cv_kind: str,
+) -> RuxMLConfig:
+    """Tiny RuxMLConfig with the requested split_kind + cv. PR-031 substrate carve test scaffold."""
+    data_kwargs: dict[str, object] = {"source_path": src, "target_column": "y"}
+    if split_kind == "time_ordered":
+        data_kwargs["split_kind"] = "time_ordered"
+        assert time_column is not None
+        data_kwargs["time_column"] = time_column
+    cv: KFoldCV | TimeSeriesSplitCV = (
+        TimeSeriesSplitCV(n_splits=3, time_column=time_column)
+        if cv_kind == "time_series"
+        else KFoldCV(n_splits=3, shuffle=True)
+    )
+    return RuxMLConfig(
+        data=DataConfig(**data_kwargs),  # pyright: ignore[reportArgumentType]
+        features=FeaturesConfig(
+            spec=FeaturesSpec(numeric_columns=["x1"], categorical_columns=[]),
+        ),
+        training=XGBoostTraining(
+            device="cpu",
+            metric="auc",
+            n_estimators=4,
+            max_depth=2,
+            learning_rate=0.3,
+            early_stopping_rounds=None,
+        ),
+        tuning=TuningConfig(entropy=42),
+        cv=cv,
+    )
+
+
+def test_carve_substrate_excludes_test_fold_for_time_ordered(tmp_path: Path) -> None:
+    """PR-031: substrate = train+val; test fold (last 15% for time_ordered) excluded.
+
+    Default ``data.split_ratios = {train: 0.7, val: 0.15, test: 0.15}`` →
+    substrate is first 85 of 100 rows; ``splits["test"]`` (last 15 rows) is
+    truly held out from HP search.
+    """
+    n = 100
+    rng = np.random.default_rng(0)
+    df = pl.DataFrame(
+        {
+            "ts": list(range(n)),
+            "x1": rng.normal(size=n).tolist(),
+            "y": rng.integers(0, 2, size=n).tolist(),
+        }
+    )
+    src = tmp_path / "synth.parquet"
+    df.write_parquet(src)
+
+    cfg = _make_substrate_cfg(
+        src, split_kind="time_ordered", time_column="ts", cv_kind="time_series"
+    )
+    df_full = materialize(load_parquet(src))
+    x_sub, y_sub = _carve_substrate(cfg, df_full, "y")
+
+    assert x_sub.height == 85, "default 0.7+0.15 = 85% substrate"
+    assert y_sub.len() == 85
+    # ts column preserved (not the target); max ts in substrate is row 84
+    # (rows 85..99 form the held-out test fold).
+    assert x_sub["ts"].max() == 84
+
+
+def test_carve_substrate_random_is_deterministic_across_invocations(tmp_path: Path) -> None:
+    """PR-031: random-split substrate is reproducible per study identity.
+
+    Study-level seed (``make_seed_bag(trial_number=0).split_seed``) makes the
+    substrate identical across repeated invocations — the contract that lets
+    every trial in a study CV over the same rows.
+    """
+    n = 100
+    rng = np.random.default_rng(0)
+    df = pl.DataFrame(
+        {
+            "x1": rng.normal(size=n).tolist(),
+            "y": rng.integers(0, 2, size=n).tolist(),
+        }
+    )
+    src = tmp_path / "synth.parquet"
+    df.write_parquet(src)
+
+    cfg = _make_substrate_cfg(src, split_kind="random", time_column=None, cv_kind="kfold")
+    df_full = materialize(load_parquet(src))
+    x_sub_a, y_sub_a = _carve_substrate(cfg, df_full, "y")
+    x_sub_b, y_sub_b = _carve_substrate(cfg, df_full, "y")
+
+    assert x_sub_a.equals(x_sub_b)
+    assert y_sub_a.equals(y_sub_b)
+    assert x_sub_a.height == 85

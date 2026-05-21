@@ -78,6 +78,50 @@ See [`ROADMAP.md`](ROADMAP.md) for the full PR list. The design session output (
 
 ### Process notes
 
-- This session is **PR-030 scaffolding only** — pure docs + PR stubs creation. The design session that resolves D1–D4 runs as a separate activity AFTER PR-030 merges, before PR-031 implementation begins.
-- Per-Phase Approval Gate (NON-NEGOTIABLE per `docs/CONSTRAINTS.md`) will be honored at every phase of the upcoming design session and every PR's research procedure.
+- This session is **PR-030 scaffolding only** — pure docs + PR stubs creation. The user later opted (2026-05-20) to skip the standalone v0.3 design session and resolve D1–D4 per-PR via each PR's Phase 1 (option-1 plan). The "Pending" section above is therefore informational; each implementation PR's `## Research findings` records the actual resolution.
+- Per-Phase Approval Gate (NON-NEGOTIABLE per `docs/CONSTRAINTS.md`) honored at every phase of every PR's research procedure.
 - Phantom audit transcript (the 2026-05-20 conversation) is captured in chat history; PR-030's `## Research findings` section references it for traceability.
+
+---
+
+## Session: 2026-05-20 → 2026-05-21 — PR-031 holdout-substrate (D1 resolution + Phase 3 web research)
+
+### Context
+
+Per the option-1 plan (2026-05-20), each v0.3 implementation PR resolves its own architectural sub-decision via its Phase 1 state assessment. PR-031 owned D1 (holdout semantics — truly held out vs post-HPO sanity check).
+
+### Decision
+
+#### D1 — HPO substrate excludes the held-out test fold (truly held out)
+
+- **Decision**: `tuning/objective.py:build_objective` builds its CV substrate from `splits["train"] + splits["val"]` (≈85% of source data by default `data.split_ratios`). The `splits["test"]` partition is never seen by HP search.
+- **Carve mechanics**: one `_carve_substrate(base_cfg, df_full, target_col)` call outside the per-trial closure. Internally `make_splits(cfg, df, seed=study_bag.split_seed)` where `study_bag = make_seed_bag(master_entropy=base_cfg.tuning.entropy, trial_number=0)` — same `trial_number=0` sentinel as the sampler seed at `cli/tune.py:73`. The substrate is reproducible per study identity, so all trials in a study share identical substrate rows.
+- **Applies to both split kinds**: `random` (deterministic via the study-level seed) and `time_ordered` (deterministic by definition per PR-024).
+- **Rejected alternatives**:
+  - **Option B — HPO CV on full df** (workbench's pre-PR-031 behavior). Cited only in Optuna's `*_simple.py` demos at `optuna-examples/xgboost/xgboost_simple.py` (file SHA `592117186ae62c8252f961c8e9a38fb181d8b80b`); Optuna issue #2184 explicitly flags this as anti-pattern.
+  - **Option C — Nested CV** (outer loop estimates generalization, inner loop tunes HPs). Cited at sklearn `examples/model_selection/plot_nested_cross_validation_iris.py` SHA `15082123761afffc97bdc992316705b388ac0850`. Rejected: K × J fits multiply sequential single-GPU wall-time by 5×; conflicts with workbench compute budget and the existing `make_splits(train/val/test)` API contract.
+- **Status**: **convention** (≥3 cited production systems use the substrate-shrink pattern: scikit-learn user guide §3.1; AutoGluon `tabular-essentials.html` at SHA `f8c428cbbef3bc319ff3f7710f5900e65637f4c4`; mlfinlab purged-CV workflow). Group D Synthesis-Verification Probe verified the exact 3-element combination (carve test fold → HPO on remainder → score on test) in the AutoGluon tutorial.
+- **Disconfirming evidence search**: explicit search for `"why HPO should see the full dataset"`, `"holding out from hyperparameter tuning is wrong"`, `"nested CV vs train/val/test debate"` returned zero reputable defenders of Option B. Only legitimate critique of Option A is that Option C is even better when compute allows.
+- **Risks accepted**: HPO sees ~15% less data than the full df; HPs may be slightly suboptimal in a small-data regime. Acceptable for workbench scope. Nested CV (Option C) deferred to a future Tier-2 study if HPO compounding bias becomes empirically measurable.
+- **Research citation**: `prs/PR-031-hpo-honors-holdout-fold.md` Phase 3 findings.
+
+### Sub-decisions resolved en route
+
+- **D1.b — random-split consistency**: yes, exclude the test fold for `random` too. Same study-level seed makes the substrate deterministic per study identity.
+- **Variable renames**: `x_full`/`y_full` → `x_substrate`/`y_substrate` throughout `tuning/objective.py` (the variable no longer holds the full df after the carve — naming honest).
+- **Backward compatibility on `studies/studies.db`**: no schema migration needed. Substrate change is in-objective behavior, not persisted state. Old + new trials coexist; new trials are measured against a different substrate visible via the trial's `git_sha`.
+- **Existing tests at `tests/tuning/test_objective.py`**: all 7 pass without modification (they assert on completion + intermediate-value count + hash differentiation, not exact row counts or metric values).
+
+### Implementation outcomes
+
+- New module-level helper `_carve_substrate(base_cfg, df_full, target_col)` in `tuning/objective.py`.
+- `build_objective` calls `_carve_substrate` once outside the closure; per-trial path is unchanged.
+- 2 new unit tests on `_carve_substrate`: `test_carve_substrate_excludes_test_fold_for_time_ordered` (time-ordered substrate is first 85 rows of 100) + `test_carve_substrate_random_is_deterministic_across_invocations` (study-level seed reproducibility).
+- Docs updated in the same commit: `docs/ARCHITECTURE.md` + `docs/CONVENTIONS.md` HPO objective sections; `docs/0.3/ROADMAP.md` PR-031 row flipped `[ ]` → `[x]`; `docs/0.3/RESEARCH-BACKLOG.md` PR-031 row → `state-assessed` + `fully-researched` + `implementation-cleared 2026-05-21`; `CHANGELOG.md [Unreleased] ### Changed` loud entry.
+- Empirical receipt at `prs/PR-031-baseline-receipt.json` pending workbench run.
+
+### Process notes
+
+- Phase 1 + Phase 2 + Phase 5 done locally; Phase 3 dispatched a `general-purpose` agent with WebSearch/WebFetch for the Q1+Q7 question pair.
+- Per-Phase Approval Gate held at every phase boundary (5 user approvals).
+- Group D MCP-Verification Round per the post-PR-028/29 procedure: Probe 1 verified at Phase 1 (identifiers exist in repo); Probe 2 verified at Phase 3 (AutoGluon citation locks the exact 3-element combination); Probe 3 N/A (no state-registration surface).
