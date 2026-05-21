@@ -234,7 +234,7 @@ Bundle into PR: re-run 10-trial baseline study under PR-031 semantics on workben
 - [x] `docs/ARCHITECTURE.md` + `docs/CONVENTIONS.md` + `docs/0.3/{ROADMAP, RESEARCH-BACKLOG, DESIGN-log}.md` + `CHANGELOG.md` updated in same commit
 - [x] `docs/0.3/ROADMAP.md` PR-031 row at `[x]`
 - [x] PR-031 stub `## Research findings` populated with Phase 1-5 output
-- [ ] `prs/PR-031-baseline-receipt.json` committed with workbench-measured RMSE (pending workbench run)
+- [x] `prs/PR-031-baseline-receipt.json` committed (2026-05-21 workbench run; median **0.026849**, best **0.026847**, spread 2.65e-06; median −0.93% vs PR-025 Position A 0.027101; best +14.07% vs PR-025 best 0.023533)
 - [x] `cli/train.py` + `registry/promote.py` unchanged
 
 ## Research backing
