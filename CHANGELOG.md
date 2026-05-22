@@ -4,6 +4,9 @@ All notable user-facing changes to `rux-ml`. Format: [Keep a Changelog 1.1.0](ht
 
 ## [Unreleased]
 
+### Changed
+- **README sync to v0.3** (PR-037). Documents `rux-ml registry score` verb (PR-032) — adds step 7 to the Quick Start (between `registry promote` and `load_model`), inserts new "§7b. Scoring a promoted bundle on its held-out test fold" lifecycle subsection (command examples + receipt schema + on-disk layout + per-split-kind reconstruction strategy), and adds the `registry score` row to the CLI reference table. Closes a v0.3.0 README staleness gap: the v0.3 sprint added the verb but never updated the navigational doc that new users walk through first. No source / test / config changes — README + CHANGELOG only.
+
 ## [0.3.0] - 2026-05-22
 
 ### Added
