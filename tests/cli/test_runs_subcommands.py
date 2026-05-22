@@ -125,6 +125,48 @@ def test_runs_show_displays_provenance_triple(runner: CliRunner, runs_workdir: P
         assert layer in result.stdout
 
 
+def test_runs_show_lists_diagnostic_artifacts(
+    runner: CliRunner, runs_workdir: Path
+) -> None:
+    """PR-034: ``runs show`` emits a ``diagnostic artifacts:`` section.
+
+    Optuna rejects uploads onto finished trials, so we create a fresh
+    study + trial in this test and upload an artifact inside the
+    objective (the production call site).
+    """
+    import optuna  # noqa: PLC0415
+    from optuna.artifacts import FileSystemArtifactStore, upload_artifact  # noqa: PLC0415
+
+    storage_url = f"sqlite:///{runs_workdir}/studies/studies.db"
+    study_name = "artifact_show_test"
+    store_root = runs_workdir / "studies" / "artifacts" / study_name
+    store_root.mkdir(parents=True, exist_ok=True)
+    store = FileSystemArtifactStore(str(store_root))
+    metrics_path = runs_workdir / "metrics.json"
+    metrics_path.write_text('{"fold_0_auc": 0.91}')
+
+    storage = optuna.storages.get_storage(storage_url)
+    study = optuna.create_study(study_name=study_name, storage=storage)
+
+    def objective(trial: optuna.Trial) -> float:
+        upload_artifact(
+            artifact_store=store,
+            file_path=str(metrics_path),
+            study_or_trial=trial,
+        )
+        return 0.91
+
+    study.optimize(objective, n_trials=1)
+
+    result = runner.invoke(
+        app, _argv(runs_workdir, "runs", "show", "0", "--study", study_name)
+    )
+    assert result.exit_code == 0, result.stderr or result.stdout
+    assert "diagnostic artifacts:" in result.stdout
+    assert "metrics.json" in result.stdout
+    assert "artifact_id:" in result.stdout
+
+
 def test_runs_show_errors_on_missing_study(runner: CliRunner, runs_workdir: Path) -> None:
     result = runner.invoke(
         app, _argv(runs_workdir, "runs", "show", "0", "--study", "no_such_study")

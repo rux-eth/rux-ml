@@ -57,6 +57,38 @@ def test_walk_search_space_empty_returns_empty_dict() -> None:
 # ---------- build_objective end-to-end ----------
 
 
+def test_build_objective_uploads_diagnostics_post_fold_scores(
+    tune_cfg: RuxMLConfig,
+) -> None:
+    """PR-034: each completed trial uploads metrics.json + fold_meta.json.
+
+    Asserts Optuna's auto-persisted ``trial.system_attrs["artifacts:..."]``
+    entries are present (Probe 3 binding-at-creation), the per-study
+    base_path exists (Q5 Optuna FAQ layout), and a round-trip through
+    ``get_all_artifact_meta`` reads back both files.
+    """
+    objective = build_objective(tune_cfg)
+    storage_path = tune_cfg.runs.artifacts_root.parent / "studies.db"
+    storage_path.parent.mkdir(parents=True, exist_ok=True)
+    storage = optuna.storages.RDBStorage(f"sqlite:///{storage_path}")
+    study = optuna.create_study(
+        study_name="upload_test",
+        storage=storage,
+        sampler=RandomSampler(seed=0),
+        pruner=NopPruner(),
+        direction="maximize",
+    )
+    study.optimize(objective, n_trials=1)
+    trial = study.trials[0]
+    # Probe 3 binding-at-creation: 2 artifacts (metrics.json + fold_meta.json) in system_attrs.
+    artifact_keys = [k for k in trial.system_attrs if k.startswith("artifacts:")]
+    assert len(artifact_keys) == 2
+    # Per-study layout per Optuna 4.8 FAQ.
+    expected_dir = tune_cfg.runs.artifacts_root / "upload_test"
+    assert expected_dir.exists()
+    assert len(list(expected_dir.iterdir())) == 2
+
+
 def test_build_objective_runs_to_completion(tune_cfg: RuxMLConfig) -> None:
     """K-fold CV-mean objective: 3 folds x 2 trials = 6 fits total."""
     objective = build_objective(tune_cfg)

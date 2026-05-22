@@ -9,7 +9,7 @@ import typer
 
 from rux_ml.cli._shared import get_options
 from rux_ml.config import RuxMLConfig
-from rux_ml.runs import compare_runs, list_runs, load_run
+from rux_ml.runs import compare_runs, list_runs, list_trial_artifacts, load_run
 
 app = typer.Typer(
     name="runs",
@@ -85,10 +85,20 @@ def show(
         typer.echo(f"  {key}: {value}")
     if run.attrs is None:
         typer.echo("attrs:        <missing or invalid — schema validation failed>")
-        return
-    typer.echo("attrs:")
-    for key, value in run.attrs.model_dump(exclude_none=True).items():
-        typer.echo(f"  {key}: {value}")
+    else:
+        typer.echo("attrs:")
+        for key, value in run.attrs.model_dump(exclude_none=True).items():
+            typer.echo(f"  {key}: {value}")
+
+    # PR-034: per-trial diagnostic artifacts uploaded by ``tuning/objective.py``
+    # and ``cli/train.py``. Read via Optuna's ``get_all_artifact_meta`` — Optuna
+    # auto-persists the metadata in ``trial.system_attrs`` so no field on
+    # :class:`TrialAttrs` is needed.
+    artifacts = list_trial_artifacts(cfg.runs.storage_url, study, trial_number)
+    if artifacts:
+        typer.echo("diagnostic artifacts:")
+        for meta in artifacts:
+            typer.echo(f"  - {meta.filename}     (artifact_id: {meta.artifact_id})")
 
 
 @app.command(name="compare")
