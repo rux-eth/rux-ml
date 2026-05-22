@@ -20,7 +20,7 @@ Research findings are appended to the PR file itself under the `## Research find
 2. Read the current codebase around the PR's area — what exists vs. what was assumed
 3. Read the last N PRs that landed in related areas — what surfaced, what changed
 4. Re-read relevant `docs/ARCHITECTURE.md` + `docs/CONSTRAINTS.md` sections — current locked decisions
-5. Check `docs/0.2/DESIGN-log.md` for any decisions that might have drifted
+5. Check `docs/0.3/DESIGN-log.md` for any decisions that might have drifted
 6. **Prior-art audit** — for every file the PR will touch (or every file in the area of code the PR will introduce), run `git log -p <file>` and skim the per-commit diffs. Identify prior empirically-validated patterns in the same area (e.g., a filter expression that was fixed once already — carry that fix forward, don't re-derive). Also survey the last 3–5 PRs that touched related infrastructure (CI workflows, deployment glue, payload shapes, etc.) for known-bad patterns + known-good patterns. The output of this step is a list of "things prior PRs already learned the hard way" that constrains Phase 3 (so research doesn't re-discover them) and Phase 4 (so synthesis doesn't drop them on the floor).
 
 **Output** (appended to PR's `## Research findings` section):
@@ -170,7 +170,7 @@ Synthesis steps below execute only on a **Confirm** outcome, or on an **Amend** 
 
 1. What changed vs. the PR's original spec? Update the PR file's scope/verification sections
 2. Does anything propagate back to `docs/ARCHITECTURE.md` or `docs/CONSTRAINTS.md`? Update them in the same commit
-3. Are there new PRs that must come first? Update `docs/0.2/ROADMAP.md` and create new PR files with this procedure marked pending
+3. Are there new PRs that must come first? Update `docs/0.3/ROADMAP.md` and create new PR files with this procedure marked pending
 4. Remove any invented specifics from the PR file — replace with research-backed details
 
 **Output** (appended to PR's `## Research findings` section):
@@ -203,7 +203,7 @@ Synthesis steps below execute only on a **Confirm** outcome, or on an **Amend** 
 **Goal**: Confirm the PR is actually ready to implement.
 
 1. Does research invalidate the PR's premise? → loop to `PROCEDURE-design-planning.md`
-2. Did research surface prerequisite PRs? → update `docs/0.2/ROADMAP.md`, implement those first
+2. Did research surface prerequisite PRs? → update `docs/0.3/ROADMAP.md`, implement those first
 3. Does the user approve the updated PR spec?
 4. If all clear → PR is ready to implement
 
@@ -236,7 +236,7 @@ Synthesis steps below execute only on a **Confirm** outcome, or on an **Amend** 
 
 If a PR's research was completed more than the project-defined staleness threshold before implementation begins, re-run **Phase 1 (State Assessment)**. If state assessment surfaces stale assumptions, re-run the relevant parts of Phases 2-4 to update.
 
-The threshold is project-defined. Typical range: weeks to months. Faster-moving ecosystems warrant shorter thresholds. Record the chosen threshold in `docs/CONSTRAINTS.md` or `docs/0.2/RESEARCH-BACKLOG.md`.
+The threshold is project-defined. Typical range: weeks to months. Faster-moving ecosystems warrant shorter thresholds. Record the chosen threshold in `docs/CONSTRAINTS.md` or `docs/0.3/RESEARCH-BACKLOG.md`.
 
 ## Relationship to other procedures
 

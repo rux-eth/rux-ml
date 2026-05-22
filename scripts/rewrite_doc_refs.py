@@ -6,8 +6,8 @@ One-shot path-reference rewriter for the hybrid docs-versioning layout
 codified by docs/VERSIONING.md (introduced in PR-016).
 
 Migrates references to docs that snapshot into a per-version directory at
-each minor/major cut. The mapping table below reflects the v0.1 -> v0.2
-cut (PR-026); update it (and run the script) at every subsequent version
+each minor/major cut. The mapping table below reflects the v0.2 -> v0.3
+cut (PR-036); update it (and run the script) at every subsequent version
 cut.
 
 Usage:
@@ -37,6 +37,7 @@ should stay pinned to the prior version even after the cut:
   - docs/0.0/**           : frozen v0.0 content (intentional self-refs)
   - docs/0.1/**           : frozen v0.1 content (intentional self-refs + history)
   - docs/0.2/**           : frozen v0.2 content (intentional self-refs + history) — added in PR-026
+  - docs/0.3/**           : frozen v0.3 content (intentional self-refs + history) — added in PR-036
   - src/**, tests/**      : code citations to specific frozen decisions (D5, D7, ...)
 
 The remaining file set (PROCEDURE-*.md, CLAUDE.md, README.md, docs/SSOT/*)
@@ -72,9 +73,9 @@ DRY_RUN = "--dry-run" in sys.argv[1:]
 # References to snapshotted files. Applies to every walked file that is
 # NOT matched by OPT_OUT_GLOBS below.
 PATH_REWRITES: tuple[tuple[str, str], ...] = (
-    ("docs/0.1/DESIGN-log.md", "docs/0.2/DESIGN-log.md"),
-    ("docs/0.1/RESEARCH-BACKLOG.md", "docs/0.2/RESEARCH-BACKLOG.md"),
-    ("docs/0.1/ROADMAP.md", "docs/0.2/ROADMAP.md"),
+    ("docs/0.2/DESIGN-log.md", "docs/0.3/DESIGN-log.md"),
+    ("docs/0.2/RESEARCH-BACKLOG.md", "docs/0.3/RESEARCH-BACKLOG.md"),
+    ("docs/0.2/ROADMAP.md", "docs/0.3/ROADMAP.md"),
 )
 
 # Files whose references should stay pinned to the prior version. Matched
@@ -85,6 +86,7 @@ OPT_OUT_GLOBS: tuple[str, ...] = (
     "docs/0.0/**",
     "docs/0.1/**",
     "docs/0.2/**",
+    "docs/0.3/**",
     "src/**",
     "tests/**",
 )
