@@ -20,6 +20,7 @@ from rux_ml.config import (
     XGBoostTraining,
 )
 from rux_ml.config.features import FeaturesConfig, FeaturesSpec
+from rux_ml.config.runs import RunsConfig
 
 
 @pytest.fixture
@@ -66,4 +67,7 @@ def tune_cfg(synth_parquet: Path) -> RuxMLConfig:
         ),
         cv=KFoldCV(n_splits=3, shuffle=True),
         search_space=search_space,
+        # PR-034: re-root artifacts_root under tmp_path so build_objective's
+        # per-trial diagnostic upload does not pollute the repo cwd.
+        runs=RunsConfig(artifacts_root=synth_parquet.parent / "artifacts"),
     )

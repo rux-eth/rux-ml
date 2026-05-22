@@ -231,6 +231,36 @@ def test_train_temporal_cv_rejects_random_split(
     assert "split_kind" in str(result.exception)
 
 
+def test_train_uploads_diagnostics_to_artifact_store(
+    runner: CliRunner, train_workdir: Path
+) -> None:
+    """PR-034: ``rux-ml train`` uploads ``metrics.json`` + ``fold_meta.json``.
+
+    Asserts the per-study sub-directory exists under ``runs.artifacts_root``
+    after a successful baseline run, and that the trial's
+    ``system_attrs["artifacts:..."]`` entries (Optuna's auto-persistence)
+    match the expected 2-file payload.
+    """
+    import optuna  # noqa: PLC0415
+
+    result = runner.invoke(app, _argv(train_workdir, "train"), catch_exceptions=False)
+    assert result.exit_code == 0, result.stderr or result.stdout
+
+    storage_url = f"sqlite:///{train_workdir}/studies/studies.db"
+    artifacts_root = train_workdir / "studies" / "artifacts"
+    # Exactly one study should exist; it gets its own subdir per Optuna 4.8 FAQ.
+    study_dirs = [p for p in artifacts_root.iterdir() if p.is_dir()]
+    assert len(study_dirs) == 1, f"expected 1 study dir, got {study_dirs}"
+    # Two artifact files per trial (metrics.json + fold_meta.json), flat uuid4 layout.
+    artifact_files = list(study_dirs[0].iterdir())
+    assert len(artifact_files) == 2, f"expected 2 artifacts, got {artifact_files}"
+    # Auto-persisted in system_attrs (Probe 3 binding-at-creation).
+    summaries = optuna.get_all_study_summaries(storage=storage_url)
+    study = optuna.load_study(study_name=summaries[0].study_name, storage=storage_url)
+    artifact_keys = [k for k in study.trials[0].system_attrs if k.startswith("artifacts:")]
+    assert len(artifact_keys) == 2
+
+
 def test_train_use_native_smoke(runner: CliRunner, train_workdir: Path) -> None:
     """``--set training.use_native=true`` routes through ``XGBoostNativeAdapter`` (PR-033).
 

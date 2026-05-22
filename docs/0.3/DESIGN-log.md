@@ -220,3 +220,57 @@ Per the option-1 plan (2026-05-20), each v0.3 implementation PR resolves its own
 - Phase 4 Outcome Branch: **Amend → Apply** (4 amendments). User approved all 4 inline at session pause; implementation resumed on 2026-05-21.
 - Per-Phase Approval Gate held at every phase boundary (6 user approvals: Phase 1 → Phase 2 → Phase 3 → Phase 4 outcome → Phase 4 amend → Phase 5). Streak preserved.
 - Group D MCP-Verification Round: Probe 1 verified at Phase 1 (every identifier — `xgb.train`, `ExtMemQuantileDMatrix`, `cache_host_ratio`, `ParquetDataIter`, `select_ingest`, `cfg.training.use_native`, `cfg.memory.cache_host_ratio` — exists in pinned `xgboost` and in `dev` HEAD). Probe 2 returned **NO cite** for the 4-element synthesis → BGGC + mitigation test (the most consequential probe-2 finding of the sprint). Probe 3 N/A (no state-registration surface; `XGBoostNativeAdapter` is constructor-instantiated, not registered).
+
+---
+
+## Session: 2026-05-21 → 2026-05-22 — PR-034 Artifacts Store integration (D3 resolution + 4-parallel-agent Phase 3 + Group-D BGGC)
+
+### Context
+
+Per the option-1 plan (2026-05-20), each v0.3 implementation PR resolves its own architectural sub-decisions via its Phase 1 state assessment. PR-034 owned D3 (artifacts: what to upload). Phase 1 surfaced a quantitative disk-space ceiling that ruled out the original PR-034 sketch ("per-fold predictions CSV"); D3 resolved to **diagnostic summary-stats only**.
+
+### Decisions
+
+#### D3 — Diagnostic summary-stats only (Phase 1 disk-space ceiling + Phase 3 schema convention)
+
+- **Decision**: `cfg.runs.artifacts_root` is no longer documented-aspiration. New module `src/rux_ml/runs/artifacts.py` exposes `make_artifact_store(cfg, *, study_name)` + `build_metrics_dict(...)` + `upload_diagnostics(...)` + `list_trial_artifacts(...)`. `tuning/objective.py::build_objective` and `cli/train.py::run_command` upload two files per successful trial via Optuna 4.8's keyword-only `upload_artifact` API:
+  - `metrics.json` — flat `Dict[str, float]` per MLflow + Kedro convention (per-fold values + `metric_mean` + `metric_std` + `n_folds` + `peak_rss_mb`).
+  - `fold_meta.json` — `list[dict[str, Any]]` per-fold sidecar (`fold_idx` / `row_count` / `fit_seconds` / `timestamp`).
+- **Layout**: per-study sub-directory (`cfg.runs.artifacts_root / <study_name>`) per Optuna 4.8 FAQ. On-disk layout under the per-study root is **flat** (one file per artifact at `<base_path>/<uuid4>`); original filename preserved only in `ArtifactMeta.filename`.
+- **Upload site**: in-objective, post-fit, **no try/except guard** — Optuna tutorial + `optuna-examples/pytorch/pytorch_checkpoint.py` + `optuna-examples/dashboard/hitl/main.py` all use this site.
+- **Retrieval**: `optuna.artifacts.get_all_artifact_meta(trial, storage=storage)` — Optuna auto-persists `ArtifactMeta` into `trial.system_attrs["artifacts:<uuid4>"]`; **no `TrialAttrs.artifact_ids` field needed** (strict provenance schema stays clean). `cli/runs.py::show` emits a `diagnostic artifacts:` section listing `(filename, artifact_id)` pairs via the new `list_trial_artifacts(...)` wrapper.
+- **Cleanup**: manual `rm -rf studies/artifacts/<study_name>/` per Optuna FAQ (*"hard to officially support the delete feature and they are not planning to support this feature in the future"*). ≥2 cross-tool convention (MLflow `mlflow gc` + ZenML `artifact prune` both manual-only).
+- **Rejected alternatives**:
+  - **Per-row predictions CSV** (the original PR-034 stub's Notes-section concern). Ruled out at Phase 1 — crypto-h3 baseline ≈ 3.31 GB/trial × 100 trials = 331 GB, exceeds workbench disk budget. Sub-sampled preds (e.g., 1% stratified sample) deferred to a future Tier-2 PR with explicit sampling policy.
+  - **Per-trial bundle uploads** (Maximum tier in the original sketch). Reverses D8/PR-010 sub-decision A1 (re-fit at promote time); explicitly out of scope per the D3 lean.
+  - **Plot / PNG generation** (Medium tier). Out of v0.3 scope.
+  - **`TrialAttrs.artifact_ids` field for retrieval** (PR-034 stub Q4). Q1+Q2 surfaced that Optuna auto-persists in `system_attrs` — the field would duplicate state and pollute the strict provenance schema.
+  - **Post-`study.optimize` upload site** (PR-034 stub Q2 alternative). Zero cited examples in Optuna's own repo + `optuna-examples` + `optuna-integration` use this site for `upload_artifact`; the in-objective convention is uncontested.
+  - **Auto-cleanup TTL** (Q5 alternative). Optuna upstream refuses to officially support delete; no in-tool convention. W&B's TTL is the only counter-example and it's a managed-server feature, not a filesystem-store contract.
+- **Status**: **convention** for the top-level schema shape (`Dict[str, float]` per MLflow `EvaluationResult` @ v2.22.4 + Kedro `MetricsDataset` @ kedro-datasets-5.1.0); **convention** for the upload site (3 Optuna-maintained examples — one-org caveat acknowledged); **proven** for the retrieval pattern and cleanup policy (Optuna 4.8 FAQ explicit). **`best-guess-given-constraints` for the 4-element synthesis combination** — Group D Probe 2 returned NO single cited working example combining all 4 elements (`FileSystemArtifactStore(per-study path)` + `upload_artifact in-objective` + `flat metrics.json` + `get_all_artifact_meta retrieval`). **Mitigation**: `tests/runs/test_artifacts.py::test_artifact_upload_roundtrip_via_get_all_artifact_meta` uploads a known JSON payload, retrieves via `get_all_artifact_meta` + `download_artifact`, asserts `json.loads(downloaded) == json.loads(original)`. Without this test the BGGC label would be unbounded.
+- **Research citation**: `prs/PR-034-artifacts-store-integration.md` Phase 3 findings (4 parallel agent dispatches: Q1+Q2 sequential within one agent; Q3, Q4, Q5 independent).
+
+### Sub-decisions resolved en route
+
+- **Keyword-only `upload_artifact`**: positional API deprecated at 4.0 (`convert_positional_args` decorator at `optuna/artifacts/_upload.py` L53-58), removed at 6.0. All `rux-ml` call sites use kwargs.
+- **`peak_rss_mb` placement**: process-wide per-trial (Watchdog samples globally across folds), so it lives in `metrics.json` at trial scope, not per-fold in `fold_meta.json`.
+- **`fold_meta.json` keys**: `{"fold_idx", "row_count", "fit_seconds", "timestamp"}` locked via `FOLD_META_REQUIRED_KEYS` constant; structural test asserts the set.
+- **`_fit_and_score` return-signature extension**: was `(score, best_iter)`; now `(score, best_iter, fit_seconds, train_row_count)` so `run_command` can populate the single-fold `fold_meta` without re-measuring.
+- **Native objective + sklearn-wrapper symmetry**: both paths in `_fit_and_score` time the fit + return `train_row_count` from the post-feature-pipeline `x_train_t.height`.
+- **Drift flag (informational only)**: `kedro-datasets` removed the `tracking/` module in 9.x (commit `b211f04`, tag `kedro-datasets-9.3.0`). PR-032's "Kedro `tracking.MetricsDataSet` @ starter tag `0.19.14`" anchor remains valid for PR-032 per `feedback_pr_spec_historicity` (historical); PR-034 anchors on MLflow `EvaluationResult` @ v2.22.4 + Kedro 5.1.0 (last release shipping `MetricsDataset`).
+
+### Implementation outcomes
+
+- New module `src/rux_ml/runs/artifacts.py` — `make_artifact_store`, `build_metrics_dict`, `upload_diagnostics`, `list_trial_artifacts`, `FOLD_META_REQUIRED_KEYS`. Exported from `rux_ml.runs`.
+- `tuning/objective.py::_fold_scores` extended to return `(scores, fold_meta)`; `build_objective` post-fit hook calls `upload_diagnostics(trial, store, metrics=..., fold_meta=..., tmp_dir=...)` inside a `tempfile.TemporaryDirectory` for the JSON files.
+- `cli/train.py::_fit_and_score` signature extended to return `(score, best_iter, fit_seconds, train_row_count)`; `run_command` symmetric upload site with `n_folds=1` semantics.
+- `cli/runs.py::show` augmented with a `diagnostic artifacts:` section.
+- 13 new tests: 10 in `tests/runs/test_artifacts.py` (per-study layout; isolation; flat dict schema; single-fold convention; both-files-persisted; required-keys guard; `FOLD_META_REQUIRED_KEYS` locked; **mandatory BGGC mitigation round-trip**; empty-trial returns []; missing-trial KeyError); 1 in `tests/tuning/test_objective.py` (upload happens post-`_fold_scores` with 2 artifacts in `system_attrs` + per-study layout); 1 in `tests/cli/test_train_subcommand.py` (CLI end-to-end + 2 artifacts in flat layout); 1 in `tests/cli/test_runs_subcommands.py` (`show` emits `diagnostic artifacts:` section).
+- Docs updated in the same commit: `docs/ARCHITECTURE.md` Storage table (Optuna artifacts row from aspiration → active with full schema description) + cross-reference clarification; `docs/CONVENTIONS.md` new "Per-trial diagnostic artifacts (per PR-034)" subsection (store layout + schema split + upload site + retrieval + keyword-only API + cleanup + solver exception + disk-space ceiling + BGGC label); `docs/0.3/ROADMAP.md` PR-034 row flipped `[ ]` → `[x]`; `docs/0.3/RESEARCH-BACKLOG.md` PR-034 row → `state-assessed 2026-05-21` + `fully-researched 2026-05-22` + `implementation-cleared 2026-05-22`; `CHANGELOG.md [Unreleased] ### Added` loud entry.
+
+### Process notes
+
+- Phase 1 + Phase 2 + Phase 5 done locally; Phase 3 dispatched **4 parallel** `general-purpose` agents (Q1+Q2 combined as sequential within one agent; Q3, Q4, Q5 independent) with WebSearch/WebFetch + cite-or-flag clause verbatim.
+- Phase 4 Outcome Branch: **Amend → Apply** (5 amendments). User approved all 5 inline.
+- Per-Phase Approval Gate held at every phase boundary (Phase 1 → Phase 2 → Phase 3 → Phase 4 outcome → Phase 4 amend → Phase 5). Streak preserved across the v0.3 sprint.
+- Group D MCP-Verification Round: Probe 1 verified at Phase 4 (every Optuna 4.8 identifier introspected from `installed optuna==4.8.0` matches the v4.8.0 source-of-truth cites). Probe 2 returned **NO cite** for the 4-element synthesis → BGGC + mitigation test (the second Probe-2 BGGC of the v0.3 sprint, after PR-033). Probe 3 (Binding-at-creation) verified live by uploading an artifact in a tempdir SQLite study + reading back `trial.system_attrs["artifacts:<uuid4>"]` + `get_all_artifact_meta(...)`.

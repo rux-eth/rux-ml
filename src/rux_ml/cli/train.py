@@ -13,8 +13,11 @@ sweep and one-off paths funnel through the same provenance recorder.
 
 from __future__ import annotations
 
+import tempfile
+import time
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import optuna
 import polars as pl
@@ -29,8 +32,11 @@ from rux_ml.data import load_parquet, make_splits, materialize
 from rux_ml.features import cardinalities_from, make_features
 from rux_ml.runs import (
     TrialAttrs,
+    build_metrics_dict,
     data_hashes,
+    make_artifact_store,
     one_off_run,
+    upload_diagnostics,
 )
 from rux_ml.training import (
     XGBoostNativeAdapter,
@@ -59,8 +65,13 @@ def _strip_target(df: pl.DataFrame, target_col: str) -> tuple[pl.DataFrame, pl.S
 
 def _fit_and_score(
     cfg: RuxMLConfig, source_path: Path, target_col: str, bag: SeedBag
-) -> tuple[float, int | None]:
+) -> tuple[float, int | None, float, int]:
     """Fit + score one baseline using PR-013-derived seeds for split + trainer.
+
+    Returns ``(score, best_iter, fit_seconds, train_row_count)`` — the latter
+    two added by PR-034 so the diagnostic-artifact upload in ``run_command``
+    can populate ``fold_meta.json``'s single-fold entry without re-doing the
+    measurement.
 
     The one-off baseline shares the data-fold layout with the registry-side
     re-fit at promote time (both consume :func:`make_splits` with the same
@@ -93,6 +104,9 @@ def _fit_and_score(
     path_label = "native API" if use_native else "sklearn wrapper"
     typer.echo(f"  ingest path: {dmatrix_cls.__name__} ({path_label})", err=True)
 
+    train_row_count = int(x_train_t.height)
+    fit_start = time.perf_counter()
+
     if use_native:
         # Cast is safe under the isinstance check above; mypy/basedpyright
         # narrow ``cfg.training`` to ``XGBoostTraining`` here.
@@ -113,8 +127,14 @@ def _fit_and_score(
         score = compute_score(
             cfg.training.metric, adapter, x_val_t.to_pandas(), y_val.to_numpy()
         )
+        fit_seconds = time.perf_counter() - fit_start
         best_iter = adapter.best_iteration
-        return score, int(best_iter) if best_iter is not None else None
+        return (
+            score,
+            int(best_iter) if best_iter is not None else None,
+            float(fit_seconds),
+            train_row_count,
+        )
 
     trainer = make_trainer(cfg.training, seed=bag.xgb_seed)
     x_train_pd = x_train_t.to_pandas()
@@ -126,8 +146,14 @@ def _fit_and_score(
         verbose=False,
     )
     score = compute_score(cfg.training.metric, trainer, x_val_pd, y_val.to_numpy())
+    fit_seconds = time.perf_counter() - fit_start
     best_iter = getattr(trainer, "best_iteration", None)
-    return score, int(best_iter) if best_iter is not None else None
+    return (
+        score,
+        int(best_iter) if best_iter is not None else None,
+        float(fit_seconds),
+        train_row_count,
+    )
 
 
 def _record_attrs(
@@ -186,7 +212,9 @@ def run_command(ctx: typer.Context) -> None:
             sample_hz=cfg.memory.watchdog_sample_hz,
         ) as wd:
             try:
-                score, best_iter = _fit_and_score(cfg, source_path, target_col, bag)
+                score, best_iter, fit_seconds, train_row_count = _fit_and_score(
+                    cfg, source_path, target_col, bag
+                )
             except MemoryPressureError:
                 _record_attrs(
                     cfg,
@@ -212,6 +240,30 @@ def run_command(ctx: typer.Context) -> None:
             # Threshold crossed during the fit even though the fit completed —
             # mark the trial pruned so it doesn't pollute the best-trial pool.
             raise optuna.TrialPruned
+
+        # PR-034: per-trial diagnostic artifact upload — in-objective, post-fit,
+        # no try/except guard (mirrors tuning/objective.py site). Single-fold
+        # semantics (n_folds=1) for the one-off baseline.
+        artifact_store = make_artifact_store(cfg, study_name=run.study.study_name)
+        metrics_dict = build_metrics_dict(
+            cfg.training.metric, [score], peak_rss_mb=wd.peak_mb
+        )
+        fold_meta: list[dict[str, Any]] = [
+            {
+                "fold_idx": 0,
+                "row_count": train_row_count,
+                "fit_seconds": fit_seconds,
+                "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
+            }
+        ]
+        with tempfile.TemporaryDirectory(prefix="rux_ml_artifacts_") as tmp:
+            upload_diagnostics(
+                run.trial,
+                artifact_store,
+                metrics=metrics_dict,
+                fold_meta=fold_meta,
+                tmp_dir=Path(tmp),
+            )
         run.tell(score)
 
         typer.echo(f"score ({cfg.training.metric}): {score:.6f}")

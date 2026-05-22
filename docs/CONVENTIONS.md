@@ -528,6 +528,33 @@ metric = "auc"
 
 **BGGC label.** The 4-element combination — `xgb.train` + `ExtMemQuantileDMatrix` + `cache_host_ratio` + sklearn-`Trainer`-Protocol wrapper — has no single cited working example. Phase 3 web research located each ingredient independently (`xgb.train` in `python_api.html`; `ExtMemQuantileDMatrix` in `external_memory.html`; `cache_host_ratio` documented as GPU-only; sklearn-adapter-over-booster precedent in PR-032's `_BoosterTrainerShim`) but the synthesis is **best-guess-given-constraints**. Mitigation: `tests/training/test_native_adapter.py::test_native_adapter_predict_proba_matches_sklearn_wrapper_within_tol` asserts `np.allclose(adapter.predict_proba, XGBClassifier.predict_proba, atol=1e-5)` on shared params + seed + data. Without this test the BGGC label would be unbounded.
 
+## Per-trial diagnostic artifacts (per PR-034)
+
+`tuning/objective.py::build_objective` and `cli/train.py::run_command` upload a fixed two-file payload to `optuna.artifacts.FileSystemArtifactStore` per trial. Closes phantom #3 from the 2026-05-20 audit — `RunsConfig.artifacts_root` is no longer documented-aspiration.
+
+**Store layout.** One `FileSystemArtifactStore` per study, rooted at `cfg.runs.artifacts_root / <study_name>`. The per-study sub-directory is mandatory per the Optuna 4.8 FAQ — *"create a new directory or bucket for each study so that all the artifacts linked to a study can be entirely removed by deleting the directory or the bucket"*. On disk the layout is flat (one file per artifact at `<base_path>/<uuid4>`, original filename preserved only in `ArtifactMeta.filename`).
+
+**What gets uploaded** — two files, schema-split for stronger citation footing:
+
+| File | Shape | Status | Notes |
+|---|---|---|---|
+| `metrics.json` | flat `Dict[str, float]` | **convention** | Per-fold values keyed `fold_<i>_<metric>`; aggregates `metric_mean` / `metric_std` / `n_folds` / `peak_rss_mb`. Cite: MLflow `EvaluationResult.save → metrics.json` @ v2.22.4 (commit `ee89741`) + Kedro `MetricsDataset.save` @ kedro-datasets-5.1.0. The `fold_<i>_` prefix idiom and aggregate naming are BGGC. |
+| `fold_meta.json` | `list[dict[str, Any]]` per-fold | **BGGC** | Required keys: `fold_idx` / `row_count` / `fit_seconds` / `timestamp`. Mixed-type sidecar (int + float + str ISO timestamp) is novel to this workbench; no cited precedent for this exact shape. Structural test in `tests/runs/test_artifacts.py::test_fold_meta_required_keys_is_locked_set` keeps the schema honest. |
+
+**Upload site.** In-objective, post-fit, **no try/except guard**. Cited convention from 3 Optuna-maintained sources: 4.8 tutorial `tutorial/20_recipes/012_artifact_tutorial.py`, `optuna-examples/pytorch/pytorch_checkpoint.py` @ HEAD `7dded62`, `optuna-examples/dashboard/hitl/main.py` @ SHA `e39085e`. Trials that prune or hit `MemoryPressureError` bubble exceptions and bypass the upload site by construction — diagnostic artifacts land only on success.
+
+**Retrieval.** `optuna.artifacts.get_all_artifact_meta(trial, storage=storage) → list[ArtifactMeta]`. Optuna auto-persists each artifact's `ArtifactMeta` JSON into `trial.system_attrs["artifacts:<uuid4>"]` — the caller does **not** need to record `artifact_id`s. `TrialAttrs` (the strict Pydantic provenance schema) carries no `artifact_ids` field; the auto-persistence in `system_attrs` is the canonical store. `cli/runs.py::show` calls `list_trial_artifacts(...)` (a thin wrapper over `get_all_artifact_meta`) and emits a `diagnostic artifacts:` section listing `(filename, artifact_id)` pairs.
+
+**Keyword-only `upload_artifact` calls.** Optuna deprecated the positional API at 4.0 (`convert_positional_args` decorator at `optuna/artifacts/_upload.py` L53-58) and removes it at 6.0. All `rux-ml` call sites use kwargs: `upload_artifact(artifact_store=..., file_path=..., study_or_trial=...)`.
+
+**Cleanup / retention.** No auto-cleanup at v0.3. Per Optuna FAQ: *"it is hard to officially support the delete feature and they are not planning to support this feature in the future."* Manual cleanup is `rm -rf studies/artifacts/<study_name>/`. ≥2 cited cross-tool convention (MLflow `mlflow gc` + ZenML `artifact prune` are both manual-only). Cleanup TTL deferred indefinitely.
+
+**Solver-trial exception.** `cli/solve.py` is skipped — solver trials produce `(x_star, objective_value)`, not per-fold predictions. The existing provenance fields (`solver_status`, `objective_value`, `solver_iter_count`, `solve_time_s`) cover the diagnostic surface. Symmetric `metrics.json` shape doesn't fit cleanly; revisit if a solver hits a meaningful diagnostic gap.
+
+**Disk-space ceiling.** Phase 1 of PR-034 ruled out per-row predictions CSV: crypto-h3 baseline ≈ 3.31 GB/trial × 100 trials = 331 GB. The "preds CSV + plots" Medium tier from the original PR-034 sketch is **infeasible at v0.3 scale**. Sub-sampled predictions CSV (e.g., 1% stratified sample) deferred to a future Tier-2 PR with explicit per-trial sampling policy.
+
+**BGGC label.** The 4-element combination — `FileSystemArtifactStore(per-study path)` + `upload_artifact in-objective` + `flat metrics.json` + `get_all_artifact_meta retrieval` — has no single cited working example using all 4 elements together. Each ingredient is independently cited; the synthesis is the workbench's own composition. **Status: `best-guess-given-constraints`** (Phase 3 Group-D Probe 2 returned NO cite). Mitigation: `tests/runs/test_artifacts.py::test_artifact_upload_roundtrip_via_get_all_artifact_meta` uploads a known JSON payload, retrieves it via `get_all_artifact_meta` + `download_artifact`, and asserts JSON content equality. Without this test the BGGC label would be unbounded.
+
 ## Where new conventions go
 
 When a convention emerges that isn't documented here, add it during the same PR that establishes it. Conventions added retroactively go stale fast.

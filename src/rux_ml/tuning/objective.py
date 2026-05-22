@@ -29,6 +29,10 @@ single-fit objective regime.
 from __future__ import annotations
 
 import statistics
+import tempfile
+import time
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import optuna
@@ -52,7 +56,13 @@ from rux_ml.data import (
     materialize,
 )
 from rux_ml.features import cardinalities_from, make_features
-from rux_ml.runs import TrialAttrs, data_hashes
+from rux_ml.runs import (
+    TrialAttrs,
+    build_metrics_dict,
+    data_hashes,
+    make_artifact_store,
+    upload_diagnostics,
+)
 from rux_ml.training import (
     compute_score,
     estimate_x_bytes,
@@ -203,14 +213,21 @@ def _fold_scores(
     groups: Any,
     trial: optuna.Trial,
     bag: SeedBag,
-) -> list[float]:
+) -> tuple[list[float], list[dict[str, Any]]]:
     """Iterate folds, fit per-fold, score, report, and respect pruning.
+
+    Returns ``(scores, fold_meta)``. ``fold_meta`` is the per-fold diagnostic
+    sidecar (PR-034): one entry per fold with ``fold_idx`` / ``row_count`` /
+    ``fit_seconds`` / ``timestamp``. The trial-level ``peak_rss_mb`` is
+    captured by the surrounding Watchdog, not per-fold (Watchdog samples
+    process-wide).
 
     ``bag.xgb_seed`` (PR-013) plumbs into ``make_trainer`` so every fold's
     XGBoost RNG is pinned. ``bag.cv_seed`` already lives in the ``splitter``
     constructed upstream.
     """
     scores: list[float] = []
+    fold_meta: list[dict[str, Any]] = []
     for fold_idx, (train_idx, test_idx) in enumerate(
         splitter.split(x_full, y_full, groups=groups)
     ):
@@ -230,9 +247,14 @@ def _fold_scores(
 
         # Trainer fit per fold. XGBoost-internal early_stopping_rounds runs against the
         # held-out fold val (= test fold here). No XGBoostPruningCallback (Optuna #3203).
+        # PR-034: time the fit + score + record per-fold meta for the diagnostic
+        # artifact upload. Wall-clock timing only — CUDA streams may complete
+        # asynchronously, but xgb's GPU sync at predict() makes the wall-clock
+        # measurement a faithful upper-bound on fit cost.
         trainer = make_trainer(cfg.training, seed=bag.xgb_seed)
         x_tr_pd = x_tr_t.to_pandas()
         x_te_pd = x_te_t.to_pandas()
+        fold_start = time.perf_counter()
         trainer.fit(
             x_tr_pd,
             y_tr.to_numpy(),
@@ -240,13 +262,22 @@ def _fold_scores(
             verbose=False,
         )
         fold_score = compute_score(cfg.training.metric, trainer, x_te_pd, y_te.to_numpy())
+        fit_seconds = time.perf_counter() - fold_start
         scores.append(fold_score)
+        fold_meta.append(
+            {
+                "fold_idx": fold_idx,
+                "row_count": int(x_tr_t.height),
+                "fit_seconds": float(fit_seconds),
+                "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
+            }
+        )
 
         # Feed WilcoxonPruner: report per-fold scores; check if the trial should prune.
         trial.report(fold_score, step=fold_idx)
         if trial.should_prune():
             raise optuna.TrialPruned
-    return scores
+    return scores, fold_meta
 
 
 def _record_attrs(
@@ -331,7 +362,7 @@ def build_objective(base_cfg: RuxMLConfig) -> Callable[[optuna.Trial], float]:
             sample_hz=trial_cfg.memory.watchdog_sample_hz,
         ) as wd:
             try:
-                scores = _fold_scores(
+                scores, fold_meta = _fold_scores(
                     trial_cfg, x_substrate, y_substrate, splitter, groups, trial, bag
                 )
             except MemoryPressureError:
@@ -341,6 +372,23 @@ def build_objective(base_cfg: RuxMLConfig) -> Callable[[optuna.Trial], float]:
 
         if wd.tripped:
             raise optuna.TrialPruned
+
+        # PR-034: per-trial diagnostic artifact upload — in-objective, post-fit,
+        # no try/except guard (Q3 convention: Optuna tutorial + pytorch_checkpoint
+        # + dashboard/hitl all upload here). Pruned / MemoryPressureError trials
+        # already raised above and bypass this site by construction.
+        artifact_store = make_artifact_store(trial_cfg, study_name=trial.study.study_name)
+        metrics_dict = build_metrics_dict(
+            trial_cfg.training.metric, scores, peak_rss_mb=wd.peak_mb
+        )
+        with tempfile.TemporaryDirectory(prefix="rux_ml_artifacts_") as tmp:
+            upload_diagnostics(
+                trial,
+                artifact_store,
+                metrics=metrics_dict,
+                fold_meta=fold_meta,
+                tmp_dir=Path(tmp),
+            )
         return statistics.fmean(scores)
 
     return objective
