@@ -135,7 +135,11 @@ uv run rux-ml --problem demo runs show <trial_number> --study demo_<study_id>
 uv run rux-ml --problem demo registry promote \
     --problem demo --study demo_<study_id> --trial <best>
 
-# 7. Load the promoted model in Python.
+# 7. Score the champion on its held-out test fold.
+#    Writes a JSON receipt + predictions parquet under receipts/.
+uv run rux-ml --problem demo registry score --problem demo
+
+# 8. Load the promoted model in Python.
 python - <<'PY'
 from rux_ml.registry import load_model
 pipeline, booster = load_model("demo")  # version="champion" by default
@@ -474,6 +478,59 @@ registry/<problem>/
 - `src/rux_ml/registry/champion.py` — atomic champion writes via tmp + `os.replace`
 - `src/rux_ml/registry/manifest.py` — Pydantic `ModelManifest` schema
 
+### 7b. Scoring a promoted bundle on its held-out test fold (per PR-032)
+
+PR-031 made `splits["test"]` truly held out from HPO (`tuning/objective.py` carves the CV substrate from `splits["train"] + splits["val"]` only). PR-032 added the `rux-ml registry score` verb that finally consumes the held-out fold — closing the loop on the train → promote → score lifecycle on real held-out data.
+
+```bash
+# Score the current champion bundle on splits["test"].
+uv run rux-ml registry score --problem demo
+# scored:  demo@v_2026_05_22_5a3138
+#   rmse (holdout): 0.026288
+#   trial val 0.026847 (study=demo_xyz trial=42)
+#   holdout: n_rows=3060150 split_kind=time_ordered
+#            time_range=[1757505600, 1779112800]
+#   predictions: receipts/holdout_preds_demo_2026-05-22.parquet
+
+# Or score an explicit (non-champion) version.
+uv run rux-ml registry score --problem demo --version v_2026_05_17_a8f3c2
+
+# Custom output directory.
+uv run rux-ml registry score --problem demo --output ./eval/
+```
+
+**What lands on disk:**
+
+```
+receipts/                                       (gitignored: *.parquet; JSON receipts tracked)
+├── holdout_score_<problem>_<YYYY-MM-DD>.json   Pydantic-validated HoldoutScoreReceipt
+└── holdout_preds_<problem>_<YYYY-MM-DD>.parquet  (timestamp, y_true, y_pred) when data.time_column is set
+```
+
+**Receipt schema** (body follows MLflow `EvaluationResult` + Kedro `tracking.MetricsDataSet` convention):
+
+```json
+{
+  "bundle_version": "v_2026_05_22_5a3138",
+  "bundle_dir": "registry/demo/v_2026_05_22_5a3138",
+  "manifest_git_sha": "d2831aa...",                  // when the model was trained
+  "promoted_from": { "study": "demo_xyz", "trial_number": 42, "metric_value": 0.026847 },
+  "holdout": { "n_rows": 3060150, "split_kind": "time_ordered", "split_ratios": {...}, "time_range": [...] },
+  "metrics": { "rmse": 0.026288 },                    // flat Dict[str, float] per MLflow convention
+  "artifacts": { "predictions": { "path": "...", "content_type": "application/vnd.apache.parquet" } },
+  "scored_at": "2026-05-22T18:42:32+00:00",
+  "scored_at_git_sha": "66cd42c..."                   // when scoring ran (gap is preserved)
+}
+```
+
+**How splits["test"] is reconstructed without re-training**: for `data.split_kind = "time_ordered"`, `temporal_train_val_test_split` (PR-024) is deterministic — same `time_column` + same `split_ratios` always slice the same chronologically-last rows. For `data.split_kind = "random"`, the scorer re-opens the originating trial via `runs.load_run`, reads `attrs.entropy_hex`, derives the trial's `bag.split_seed` via `make_seed_bag_from_hex`, and replays `make_splits` with that seed — same row identities as the bundle's promote-time substrate, no silent leakage.
+
+**Where it lives**:
+- `src/rux_ml/cli/registry.py` — `score` verb
+- `src/rux_ml/registry/scorer.py` — `score_bundle_on_holdout` orchestration + `_BoosterTrainerShim` (Trainer-Protocol adapter over raw `xgb.Booster`) + `HoldoutScoreReceipt` Pydantic schema
+
+**Note**: `receipts/` is **not** exported from `rux_ml.registry`'s public `__init__.py` — preserves PR-010 sub-decision B1 (strict inference-deps separation). The CLI verb imports it directly.
+
 ### 8. Loading a model for inference
 
 The loader is **inference-only**: importing `rux_ml.registry` does NOT transitively pull in the training stack (Optuna, sklearn pipelines, XGBoost training code paths). This is enforced by a subprocess test in `tests/registry/test_promote.py::test_registry_inference_deps_separation`.
@@ -670,6 +727,7 @@ rux-ml runs show <trial_number> --study <n>      Params + metric + full provenan
 rux-ml runs compare <t1> <t2> [...]  --study <n> Side-by-side diff across trials
 
 rux-ml registry promote --problem <p> --study <s> --trial <n>   Promote a trial
+rux-ml registry score   --problem <p> [--version <v>] [--output <dir>]  Score a bundle on splits["test"]; writes receipt JSON + preds parquet
 rux-ml registry list                              All problems + current champion + recent versions
 rux-ml registry rollback --problem <p> --to <v>   Atomic champion.json rewrite to a prior version
 ```
