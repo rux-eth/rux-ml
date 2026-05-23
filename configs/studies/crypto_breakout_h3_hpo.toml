@@ -1,0 +1,85 @@
+# Real 9-dim HPO sweep for the crypto_breakout_h3 problem (direction 1 from
+# the 2026-05-19 5-direction sketch). First post-v0.3.0 HPO use of the
+# substrate-shrink-enabled objective (PR-031) + WilcoxonPruner + TPE.
+#
+# Run as:
+#   uv run rux-ml --problem crypto_breakout_h3 --study crypto_breakout_h3_hpo \
+#                 tune start <study_name> [--n-trials N]
+#
+# Defaults to 10 trials (calibration mode); bump --n-trials 100 (or edit
+# [tuning] n_trials below) for the full sweep once the calibration confirms
+# per-trial wallclock + pruning rate match expectations.
+#
+# Search space spans the canonical 9 XGBoost regression dims:
+#   - learning_rate, max_depth, n_estimators           (top-level XGBoostTraining fields)
+#   - subsample, colsample_bytree                      (top-level)
+#   - min_child_weight, gamma, reg_alpha, reg_lambda   (via training.model_kwargs.*)
+# Bounds reflect typical tabular-regression ranges; reg_alpha / reg_lambda
+# span 4 decades log-uniform so the sampler can find very-weak vs strong
+# regularization regimes.
+#
+# CV is inherited from configs/problems/crypto_breakout_h3.toml [cv]
+# (PanelCombinatorialPurgedCV with target_horizon_bars=3, embargo_pct=0.0
+# — per-asset purge is timestamp-atomic via the +3-day target horizon).
+
+[tuning]
+sampler = "tpe"
+pruner = "wilcoxon"
+n_trials = 10           # calibration default; bump to 100 for the full sweep
+n_startup_trials = 5    # 5 TPE-startup-random + 5 TPE-sampled (calibration covers both phases)
+entropy = 137           # fresh master seed (PR-031 baseline used 42)
+
+# -------- top-level XGBoostTraining fields --------
+
+[search_space."training.learning_rate"]
+type = "float"
+low  = 0.01
+high = 0.3
+log  = true
+
+[search_space."training.max_depth"]
+type = "int"
+low  = 3
+high = 10
+
+[search_space."training.n_estimators"]
+type = "int"
+low  = 200
+high = 1500
+
+[search_space."training.subsample"]
+type = "float"
+low  = 0.5
+high = 1.0
+
+[search_space."training.colsample_bytree"]
+type = "float"
+low  = 0.5
+high = 1.0
+
+# -------- training.model_kwargs.* (XGBoost params not surfaced as typed fields) --------
+# Last-wins on key collision per PR-006 convention (`model_kwargs` wins over
+# the top-level typed fields). These keys have no top-level analogue, so
+# they live exclusively in model_kwargs.
+
+[search_space."training.model_kwargs.min_child_weight"]
+type = "int"
+low  = 1
+high = 20
+
+[search_space."training.model_kwargs.gamma"]
+type = "float"
+low  = 0.0
+high = 5.0
+
+[search_space."training.model_kwargs.reg_alpha"]
+type = "float"
+low  = 0.0001
+high = 10.0
+log  = true
+
+[search_space."training.model_kwargs.reg_lambda"]
+type = "float"
+low  = 0.0001
+high = 10.0
+log  = true
