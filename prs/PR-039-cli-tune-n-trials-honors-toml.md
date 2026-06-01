@@ -497,7 +497,7 @@ No failed-attempt loop required. Phase 6 design implemented as-designed on first
 - `make test-golden`: **not run** — the touched surface (`cli/tune.py` option-parsing only) does not affect the golden contract (XGBoost regression / tolerance comparison surface); explicit decision per `CLAUDE.md` "Build & Test Commands" guidance that goldens are required only when the touched surface affects them. The fix changes only CLI option binding and a single banner string; XGBoost behavior, training paths, scoring, and bundle layout are all unchanged.
 - **Workbench SSH end-to-end run**: **not run** — PR-039 is CPU / option-parsing only; the local Mac `CliRunner` integration tests exercise the full code path. Per `feedback_local_mac_compute_default`, workbench is reserved for CUDA-only gates. The pending `calibration/crypto-h3-hpo-9dim` work (held until this PR merges) is the canonical real-data validation of the fix and will run on the workbench when it frees up.
 
-**PR link**: _(populated post-`gh pr create`)_
+**PR link**: <https://github.com/rux-eth/rux-ml/pull/45>
 
 **Exit criteria**: all bugs verified green via Phase-5 tests; all project gates pass; PR link delivered.
 
