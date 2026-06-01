@@ -365,18 +365,158 @@ The `resume` banner emitted `n_trials: 50` despite the TOML's `n_trials = 2`; th
 **Discrepancies**: none. Predicted failure mode (banner mismatch first, trial-count mismatch second) matched exactly. No loopback to Phase 4 or Phase 0 required.
 
 **Exit criteria**: every RED test fails in its predicted way; both regression guards pass against unfixed code as predicted. Tests committed to branch `pr-039/cli-tune-n-trials-honors-toml` alongside the PR stub.
-### Phase 6 — Fix Design (pending — ⚠️ USER SIGNOFF REQUIRED)
-### Phase 7 — Implementation + Verification (pending)
+### Phase 6 — Fix Design (2026-05-31) ⚠️ USER SIGNOFF REQUIRED
+
+**Bug 1 (1a + 1b — symmetric fix at two sites) — proposed fix**
+
+*Convention research* (cited from Phase 3, refined here):
+
+Two framework-blessed shapes exist for "Typer/Click CLI flag with config-file default":
+
+- **Shape A — Click `Context.default_map`** (canonical for whole-app config-defaults): an eager `--config` callback parses the TOML and assigns the parsed dict to `ctx.default_map`; Click's documented precedence then applies (CLI > env > `default_map` > Click `default`) automatically across all options. Sources: Click Advanced Patterns (`Context.default_map`) <https://click.palletsprojects.com/en/stable/advanced/>; `typer-config`'s `@use_toml_config` decorator <https://pypi.org/project/typer-config/>; `click-extra`'s Configuration mechanism <https://kdeldycke.github.io/click-extra/config.html>; Knowledge Bits — *Setting Default Option Values from Config Files with Click* <https://jwodder.github.io/kbits/posts/click-config/>.
+
+- **Shape B — `Optional[T] = None` + in-body sentinel fallback** (canonical "did the user pass it?" pattern, applicable to per-option config-fallback): declare `n_trials: Annotated[int | None, typer.Option(...)] = None`, then in the body `effective_n_trials = n_trials if n_trials is not None else cfg.tuning.n_trials`. Sources: Typer — Optional CLI Arguments tutorial <https://typer.tiangolo.com/tutorial/arguments/optional/>; Click — Advanced Patterns (`Context.get_parameter_source`) <https://click.palletsprojects.com/en/stable/advanced/>; pallets/click DeepWiki — Value Resolution and Defaults <https://deepwiki.com/pallets/click/3.4-value-resolution-and-defaults>.
+
+*Project precedent*:
+
+- No architecture-reference repo is identified in `CLAUDE.md` for rux-ml. The named-arch-ref half of Phase 6 is **N/A**.
+- **In-repo precedent strongly favors Shape B.** `src/rux_ml/cli/data.py:67` (`name: Annotated[str | None, typer.Option("--name", ...)] = None`) and `src/rux_ml/cli/runs.py:35` (`study: Annotated[str | None, typer.Option("--study", ...)] = None`) are the only existing Typer flags in the codebase that use the `Optional[T] = None` + sentinel pattern. Both rely on the sentinel for filter/optional behavior, not for TOML fallback specifically — but the pattern (`| None = None` + sentinel-check in the body) is the same shape Shape B requires.
+- **No `default_map` / `get_parameter_source` / `ParameterSource` usage anywhere in `src/rux_ml/` or `tests/`.** Adopting Shape A would be a from-scratch addition: a new eager root callback, a new TOML-parse-into-dict step before Typer dispatch (separate from `RuxMLConfig.from_layers`'s existing layered overlay), and a new layer of coupling between Click's `Context` and rux-ml's Pydantic config object. The infrastructure cost is non-trivial.
+- **All other ~20 Typer options in `src/rux_ml/cli/`** use bare defaults and have no TOML counterpart that should leak into them (`--verbose`, `--dry-run`, `--problem`, `--study`, `--trial`, `--to`, `--version`, etc.). The TWO bug sites at `cli/tune.py:133` + `:157` are the ONLY Typer options in the codebase that need TOML-fallback behavior today. Generalizing to `default_map` would be YAGNI.
+- `cli/tune.py` already reads `cfg.tuning.*` heavily (`sampler` at `:77`, `pruner` at `:78`, `trial_isolation` at `:96, 142, 163`, `entropy` at `:73`). Adding `cfg.tuning.n_trials` to the body fits the existing pattern.
+
+*Disconfirming evidence searched* for Shape B:
+
+- Help-text wart: `--help` currently shows `default: 50`; after Shape B's `= None` change, `--help` would show `default: None` unless the help string is updated to clarify "defaults to `[tuning] n_trials` in active TOML (Pydantic default: 50)". Fix in the same commit by adding explicit `help=...` text on the Typer option. **Mitigated, not a blocker.**
+- "Pattern (a) is described in the Typer docs as a 'workaround' specifically when you need to know whether the user passed the flag" — but the codebase's PR-039 use case is exactly that ("was the flag passed?" → "fall back to TOML if not"). So it's the canonical fit, not a workaround.
+- A `[tuning] n_trials = 50` TOML value (coinciding with the old Pydantic default) becomes indistinguishable from "no TOML override" — true but harmless: the user's intent (`n_trials = 50`) is honored either way; the bug only bites when TOML asks for `≠ 50`.
+
+*Recommended fix* (Shape B):
+
+Two coordinated edits to `src/rux_ml/cli/tune.py`:
+
+1. **Line 133** (`start` signature): change
+   ```python
+   n_trials: Annotated[int, typer.Option("--n-trials", "-n", min=1)] = 50,
+   ```
+   to
+   ```python
+   n_trials: Annotated[
+       int | None,
+       typer.Option(
+           "--n-trials", "-n", min=1,
+           help="Number of trials; defaults to `[tuning] n_trials` in TOML.",
+       ),
+   ] = None,
+   ```
+
+2. **Body of `start`** (between lines 137 and 142): insert sentinel resolution
+   ```python
+   effective_n_trials = n_trials if n_trials is not None else cfg.tuning.n_trials
+   ```
+   then replace every `n_trials` reference in the body (banner at `:142`, `_run_trials(...)` call at `:143`) with `effective_n_trials`.
+
+3. **Lines 157 + body of `resume`**: structurally identical change at the second site.
+
+*Files affected*: `src/rux_ml/cli/tune.py` only.
+
+*Status*: **convention** (Shape B is framework-blessed by Typer's own optional-arguments tutorial AND is already in-repo at `cli/data.py:67` + `cli/runs.py:35`). Not BGGC — both the convention and the project-precedent dimensions have ≥1 cited working example.
+
+*Risks accepted*:
+
+- Two adjacent Typer options now permit `None` as input. Typer's `min=1` constraint still applies to non-`None` integer inputs (verified: Click's `IntRange(min=1)` doesn't apply to `None`); explicit `--n-trials 0` still raises as before.
+- Future PRs that add new TOML-coupled CLI flags (e.g., `--sampler`, `--pruner`) will follow the same shape per the drafted CONVENTION below. Generalizing to `default_map` is deferred until ≥3 such flags exist (YAGNI threshold; if the rule becomes load-bearing, it gets infrastructure-fied).
+
+**Rollback decisions** (`## Code changes since baseline` is N/A — clean branch, only the Phase 5 RED tests commit at `9255208` lives on it; no speculative commits to roll back):
+
+| Commit | Decision | Citation |
+|---|---|---|
+| `9255208` (Phase 5 RED tests + PR stub) | **keep** — turns green in Phase 7 once the fix lands | Phase 5 design + Phase 6 fix shape both reference these tests; they're the load-bearing safety net |
+
+**CONSTRAINTS.md / CONVENTIONS.md amendments needed**:
+
+Drafted text for `docs/CONVENTIONS.md`, appended to the "Configuration" section (currently at `docs/CONVENTIONS.md:48` per Phase 1's read). Lands in the Phase 7 commit alongside the fix.
+
+```markdown
+- **CLI flags with TOML counterparts use `Optional[T] = None` + in-body fallback, NOT bare Typer defaults.** A Typer option declared as `param: Annotated[T, typer.Option(...)] = <default>` always binds `<default>` into the function namespace when the user omits the flag (Typer / Click documented behavior — see Click `Context.get_parameter_source`). If the function body also has a TOML-loaded counterpart in `cfg.X.Y`, the bare Typer default silently overrides the TOML value and breaks the documented override precedence chain (`CLI > env > .env > study > problem > base > Pydantic defaults` per `docs/ARCHITECTURE.md` §Configuration). Canonical shape:
+
+    ```python
+    param: Annotated[T | None, typer.Option("--param", help="…; defaults to [section] param in TOML.")] = None,
+    # in body:
+    effective_param = param if param is not None else cfg.section.param
+    ```
+
+    Precedents: `src/rux_ml/cli/data.py:67`, `src/rux_ml/cli/runs.py:35`, `src/rux_ml/cli/tune.py` start/resume `--n-trials` (PR-039). For users wanting fine-grained per-field CLI overrides without a dedicated flag, the canonical mechanism remains `--set <dot-path>=<value>` (`cli/_shared.py:39-63`). The `default_map` infrastructure pattern (Click Advanced Patterns) is deferred until ≥3 such flags exist; current usage (1 flag, 2 sites) does not justify it (YAGNI per `docs/CONSTRAINTS.md` "Reuse over reinvent").
+```
+
+No `docs/CONSTRAINTS.md` amendment proposed — the rule is a soft pattern (escapable via `--set`), not a hard constraint. Recommendation level: CONVENTION, not CONSTRAINT.
+
+**Exit criteria**: ⚠️ **USER SIGNOFF REQUIRED** on:
+
+1. Fix shape selection (Shape B — `Optional[int] = None` + sentinel fallback) at both sites
+2. Help-text update wording
+3. The drafted `docs/CONVENTIONS.md` amendment
+4. The rollback decisions (trivially: keep `9255208`)
+
+After signoff: implement exactly as designed in Phase 7. No deviations without re-opening Phase 6 and re-acquiring signoff. Failed-attempt protocol applies if the fix doesn't turn the Phase-5 tests green.
+### Phase 7 — Implementation + Verification (2026-05-31)
+
+**Implementation summary**
+
+Files modified:
+
+- `src/rux_ml/cli/tune.py` — two symmetric edits per Phase 6 Shape B:
+  - **`start` (lines 132-148)**: signature `n_trials` changed from `Annotated[int, typer.Option("--n-trials", "-n", min=1)] = 50` to `Annotated[int | None, typer.Option("--n-trials", "-n", min=1, help="Number of trials; defaults to `[tuning] n_trials` in active TOML.")] = None`. Body resolves `effective_n_trials = n_trials if n_trials is not None else cfg.tuning.n_trials` immediately after `_open_study`. Banner at the n_trials echo line now reads `effective_n_trials`; `_run_trials(...)` call passes `effective_n_trials`.
+  - **`resume` (lines 160-178)**: structurally identical change. Help text adjusted to "Number of additional trials" to reflect resume semantics.
+- `docs/CONVENTIONS.md` — new paragraph appended to §Configuration Conventions (after the `Hash elision:` paragraph at line 155, before the `---` separator). Codifies the `Optional[T] = None` + in-body fallback rule for CLI flags with TOML counterparts; lists the three in-repo precedents (`cli/data.py:67`, `cli/runs.py:35`, the two new `cli/tune.py` sites); documents the `--set <dot-path>=<value>` escape hatch; defers Click `Context.default_map` infrastructure to the ≥3-flag YAGNI threshold per `docs/CONSTRAINTS.md` "Reuse over reinvent".
+- `CHANGELOG.md` — `[Unreleased] ### Fixed` entry for PR-039 (inserted ahead of the PR-032 docstring fix entry to preserve reverse-chronological order within the section).
+- `tests/cli/test_tune_subcommands.py` — three docstring summary lines tightened to satisfy ruff E501 (100-char cap); test bodies + assertions unchanged from the Phase 5 commit.
+
+Files reverted (per Phase 6 rollback decisions): none. The only commit on this branch is `9255208` (Phase 5 RED tests + PR stub), kept per Phase 6.
+
+`CONSTRAINTS.md` amendments committed: none (Phase 6 deliberately recommended CONVENTION, not CONSTRAINT).
+
+ROADMAP row flipped: **N/A — no active version-scoped ROADMAP** (post-v0.3.0 cut; no v0.4 ROADMAP exists yet). "No row to flip" semantic preserves the `feedback_roadmap_flip_in_pr` streak per the PR-028 / PR-029 / PR-037 / PR-038 precedent chain.
+
+**Test results**:
+
+- Bug 1a: `test_tune_start_honors_tuning_n_trials_from_toml` — was failing in Phase 5 (banner: `n_trials: 50`, study trials: 50); now **PASSING** (banner: `n_trials: 2`, study trials: 2). ✓
+- Bug 1a regression guard: `test_tune_start_cli_flag_overrides_toml_n_trials` — was passing in Phase 5 (locks `CLI > TOML` precedence); still **PASSING**. ✓
+- Bug 1b: `test_tune_resume_honors_tuning_n_trials_from_toml` — was failing in Phase 5 (banner: `n_trials: 50`, total: 51); now **PASSING** (banner: `n_trials: 2`, total: 3). ✓
+- Bug 1b regression guard: `test_tune_resume_cli_flag_overrides_toml_n_trials` — was passing; still **PASSING**. ✓
+
+Run: `uv run pytest tests/cli/test_tune_subcommands.py -k "n_trials_from_toml or cli_flag_overrides_toml" -v` → **4 passed in 4.26 s** (10× speedup vs Phase 5's 14.4 s because the test loops now run 2-3 trials instead of 50; this is itself evidence the fix landed).
+
+No failed-attempt loop required. Phase 6 design implemented as-designed on first attempt.
+
+**Other gates** (project-mandated per `CLAUDE.md` "Build & Test Commands"):
+
+- `uv run pytest` (default suite — excludes `gpu`/`slow`/`golden` markers): **407 passed, 1 skipped, 15 deselected in 33.23 s**. Net +4 from pre-PR baseline (403 → 407), matching the 4 new tests added in Phase 5. No regressions.
+- `uv run ruff check .`: **All checks passed!** (after tightening 3 docstring summary lines that initially exceeded the 100-char cap — content equivalent, just line-broken differently)
+- `uv run basedpyright src/`: **0 errors, 0 warnings, 0 notes**
+- `make test-golden`: **not run** — the touched surface (`cli/tune.py` option-parsing only) does not affect the golden contract (XGBoost regression / tolerance comparison surface); explicit decision per `CLAUDE.md` "Build & Test Commands" guidance that goldens are required only when the touched surface affects them. The fix changes only CLI option binding and a single banner string; XGBoost behavior, training paths, scoring, and bundle layout are all unchanged.
+- **Workbench SSH end-to-end run**: **not run** — PR-039 is CPU / option-parsing only; the local Mac `CliRunner` integration tests exercise the full code path. Per `feedback_local_mac_compute_default`, workbench is reserved for CUDA-only gates. The pending `calibration/crypto-h3-hpo-9dim` work (held until this PR merges) is the canonical real-data validation of the fix and will run on the workbench when it frees up.
+
+**PR link**: _(populated post-`gh pr create`)_
+
+**Exit criteria**: all bugs verified green via Phase-5 tests; all project gates pass; PR link delivered.
 
 ## Verification criteria
 
 _Populated post-Phase 4. Each criterion maps 1:1 to a bug above and to a Phase 4 test._
 
-- [ ] Bug 1a: `tune start` invoked without `--n-trials` against `[tuning] n_trials = 2` runs exactly 2 trials and banner reports `n_trials: 2`. Test: `tests/cli/test_tune_subcommands.py::<TBD>`.
-- [ ] Bug 1a regression guard: `tune start --n-trials 3` against `[tuning] n_trials = 2` runs 3 trials and banner reports `n_trials: 3`. Test: `tests/cli/test_tune_subcommands.py::<TBD>`.
-- [ ] Bug 1b: `tune resume` invoked without `--n-trials` against `[tuning] n_trials = 2` runs exactly 2 additional trials and banner reports `n_trials: 2`. Test: `tests/cli/test_tune_subcommands.py::<TBD>`.
-- [ ] Bug 1b regression guard: `tune resume --n-trials 3` against `[tuning] n_trials = 2` runs 3 trials and banner reports `n_trials: 3`. Test: `tests/cli/test_tune_subcommands.py::<TBD>`.
+- [x] Bug 1a: `tune start` invoked without `--n-trials` against `[tuning] n_trials = 2` runs exactly 2 trials and banner reports `n_trials: 2`. Test: `tests/cli/test_tune_subcommands.py::test_tune_start_honors_tuning_n_trials_from_toml`.
+- [x] Bug 1a regression guard: `tune start --n-trials 3` against `[tuning] n_trials = 2` runs 3 trials and banner reports `n_trials: 3`. Test: `tests/cli/test_tune_subcommands.py::test_tune_start_cli_flag_overrides_toml_n_trials`.
+- [x] Bug 1b: `tune resume` invoked without `--n-trials` against `[tuning] n_trials = 2` runs exactly 2 additional trials and banner reports `n_trials: 2`. Test: `tests/cli/test_tune_subcommands.py::test_tune_resume_honors_tuning_n_trials_from_toml`.
+- [x] Bug 1b regression guard: `tune resume --n-trials 3` against `[tuning] n_trials = 2` runs 3 trials and banner reports `n_trials: 3`. Test: `tests/cli/test_tune_subcommands.py::test_tune_resume_cli_flag_overrides_toml_n_trials`.
 
 ## Verification run
 
-_Pre-merge results appended in Phase 7._
+Run date: **2026-05-31** (local Mac M4 Max, CPU mode per `feedback_local_mac_compute_default`).
+
+- `uv run pytest` (default suite — excludes `gpu`/`slow`/`golden` markers): **407 passed, 1 skipped, 15 deselected in 33.23 s** (+4 from pre-PR 403; matches the four new tests added in Phase 5; no regressions).
+- `uv run pytest tests/cli/test_tune_subcommands.py -k "n_trials_from_toml or cli_flag_overrides_toml"` (PR-039 targeted): **4 passed in 4.26 s** (all four green — 2 RED tests turned green by the fix; 2 regression guards stayed green).
+- `uv run ruff check .`: **All checks passed!**
+- `uv run basedpyright src/`: **0 errors, 0 warnings, 0 notes**.
+- `make test-golden`: **not run** (touched surface — CLI option binding + a single banner string — does not affect the golden contract; XGBoost behavior, training paths, scoring, bundle layout all unchanged).
+- Workbench SSH end-to-end: **not run** (PR-039 is CPU / option-parsing only; the local-Mac integration tests exercise the full code path. The pending `calibration/crypto-h3-hpo-9dim` work is the canonical real-data validation and runs on the workbench when it frees up per `feedback_local_mac_compute_default`).

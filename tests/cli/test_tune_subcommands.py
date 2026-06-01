@@ -241,7 +241,7 @@ def test_tune_retry_trial_missing_study_raises_bad_parameter(
 def test_tune_start_honors_tuning_n_trials_from_toml(
     runner: CliRunner, tune_workdir: Path
 ) -> None:
-    """PR-039 Bug 1a (RED): ``tune start`` without ``--n-trials`` must honor ``[tuning] n_trials`` from TOML.
+    """PR-039 Bug 1a (RED): ``tune start`` w/o ``--n-trials`` honors TOML ``[tuning] n_trials``.
 
     Fixture sets ``[tuning] n_trials = 2``. Pre-fix: Typer binds the parameter
     default ``50`` (``cli/tune.py:133``); banner reads ``n_trials: 50`` and the
@@ -271,7 +271,7 @@ def test_tune_start_honors_tuning_n_trials_from_toml(
 def test_tune_start_cli_flag_overrides_toml_n_trials(
     runner: CliRunner, tune_workdir: Path
 ) -> None:
-    """PR-039 Bug 1a (regression guard): explicit ``--n-trials`` must beat TOML ``[tuning] n_trials``.
+    """PR-039 Bug 1a (regression guard): explicit ``--n-trials`` beats TOML ``[tuning] n_trials``.
 
     Locks the ``CLI > TOML`` half of the override-precedence contract
     (``docs/ARCHITECTURE.md:476-484``) against a Phase 6 fix that overcorrects
@@ -300,7 +300,7 @@ def test_tune_start_cli_flag_overrides_toml_n_trials(
 def test_tune_resume_honors_tuning_n_trials_from_toml(
     runner: CliRunner, tune_workdir: Path
 ) -> None:
-    """PR-039 Bug 1b (RED): ``tune resume`` without ``--n-trials`` must honor ``[tuning] n_trials`` from TOML.
+    """PR-039 Bug 1b (RED): ``tune resume`` w/o ``--n-trials`` honors TOML ``[tuning] n_trials``.
 
     Same defect class as Bug 1a, at ``cli/tune.py:157``. Seed precursor uses
     explicit ``--n-trials 1`` to isolate the bug under test to the ``resume``

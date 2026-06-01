@@ -130,17 +130,24 @@ def start(
             help="Optional study identifier; defaults to runs.study_name_template substitution.",
         ),
     ] = None,
-    n_trials: Annotated[int, typer.Option("--n-trials", "-n", min=1)] = 50,
+    n_trials: Annotated[
+        int | None,
+        typer.Option(
+            "--n-trials", "-n", min=1,
+            help="Number of trials; defaults to `[tuning] n_trials` in active TOML.",
+        ),
+    ] = None,
 ) -> None:
     """Create or load a study and run N trials."""
     cfg, problem, study_layer, overrides = _load_cfg(ctx)
     name = _resolve_study_name(study_name_arg, cfg, problem, study_layer)
     study_obj = _open_study(cfg, name)
+    effective_n_trials = n_trials if n_trials is not None else cfg.tuning.n_trials
     typer.echo(f"study:    {name}")
     typer.echo(f"storage:  {cfg.runs.storage_url}")
     typer.echo(f"sampler:  {cfg.tuning.sampler}    pruner: {cfg.tuning.pruner}")
-    typer.echo(f"isolation: {cfg.tuning.trial_isolation}    n_trials: {n_trials}")
-    _run_trials(ctx, cfg, problem, study_layer, overrides, study_obj, name, n_trials)
+    typer.echo(f"isolation: {cfg.tuning.trial_isolation}    n_trials: {effective_n_trials}")
+    _run_trials(ctx, cfg, problem, study_layer, overrides, study_obj, name, effective_n_trials)
     # Reload to see the children's writes (subprocess path); harmless on in-process.
     study_obj = optuna.load_study(study_name=name, storage=cfg.runs.storage_url)
     completed = [t for t in study_obj.trials if t.state == optuna.trial.TrialState.COMPLETE]
@@ -154,15 +161,22 @@ def start(
 def resume(
     ctx: typer.Context,
     study_name_arg: Annotated[str, typer.Argument(metavar="STUDY_NAME")],
-    n_trials: Annotated[int, typer.Option("--n-trials", "-n", min=1)] = 50,
+    n_trials: Annotated[
+        int | None,
+        typer.Option(
+            "--n-trials", "-n", min=1,
+            help="Number of additional trials; defaults to `[tuning] n_trials` in active TOML.",
+        ),
+    ] = None,
 ) -> None:
     """Add N more trials to an existing study (idempotent ``load_if_exists=True``)."""
     cfg, problem, study_layer, overrides = _load_cfg(ctx)
     study_obj = _open_study(cfg, study_name_arg)
+    effective_n_trials = n_trials if n_trials is not None else cfg.tuning.n_trials
     typer.echo(f"resuming study {study_name_arg} ({len(study_obj.trials)} existing trials)")
-    typer.echo(f"isolation: {cfg.tuning.trial_isolation}    n_trials: {n_trials}")
+    typer.echo(f"isolation: {cfg.tuning.trial_isolation}    n_trials: {effective_n_trials}")
     _run_trials(
-        ctx, cfg, problem, study_layer, overrides, study_obj, study_name_arg, n_trials
+        ctx, cfg, problem, study_layer, overrides, study_obj, study_name_arg, effective_n_trials
     )
     study_obj = optuna.load_study(study_name=study_name_arg, storage=cfg.runs.storage_url)
     completed = [t for t in study_obj.trials if t.state == optuna.trial.TrialState.COMPLETE]
