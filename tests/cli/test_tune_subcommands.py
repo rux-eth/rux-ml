@@ -238,6 +238,143 @@ def test_tune_retry_trial_missing_study_raises_bad_parameter(
     assert result.exit_code != 0
 
 
+def test_tune_start_honors_tuning_n_trials_from_toml(
+    runner: CliRunner, tune_workdir: Path
+) -> None:
+    """PR-039 Bug 1a (RED): ``tune start`` without ``--n-trials`` must honor ``[tuning] n_trials`` from TOML.
+
+    Fixture sets ``[tuning] n_trials = 2``. Pre-fix: Typer binds the parameter
+    default ``50`` (``cli/tune.py:133``); banner reads ``n_trials: 50`` and the
+    loop runs 50 trials. Post-fix: TOML value wins; banner reads ``n_trials: 2``
+    and the loop runs 2 trials.
+    """
+    result = runner.invoke(
+        app,
+        _argv(
+            tune_workdir,
+            "--set", "tuning.trial_isolation=\"in_process\"",
+            "tune", "start", "smoke_toml_honored",
+        ),
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr or result.stdout
+    assert "n_trials: 2" in result.stdout, (
+        f"banner must report effective n_trials=2 (TOML value); got stdout:\n{result.stdout}"
+    )
+    storage = f"sqlite:///{tune_workdir}/studies/studies.db"
+    study = optuna.load_study(study_name="smoke_toml_honored", storage=storage)
+    assert len(study.trials) == 2, (
+        f"loop must dispatch exactly 2 trials (TOML value); got {len(study.trials)}"
+    )
+
+
+def test_tune_start_cli_flag_overrides_toml_n_trials(
+    runner: CliRunner, tune_workdir: Path
+) -> None:
+    """PR-039 Bug 1a (regression guard): explicit ``--n-trials`` must beat TOML ``[tuning] n_trials``.
+
+    Locks the ``CLI > TOML`` half of the override-precedence contract
+    (``docs/ARCHITECTURE.md:476-484``) against a Phase 6 fix that overcorrects
+    to "TOML always wins". Passes pre-fix AND post-fix.
+    """
+    result = runner.invoke(
+        app,
+        _argv(
+            tune_workdir,
+            "--set", "tuning.trial_isolation=\"in_process\"",
+            "tune", "start", "smoke_cli_override", "--n-trials", "3",
+        ),
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr or result.stdout
+    assert "n_trials: 3" in result.stdout, (
+        f"banner must report effective n_trials=3 (CLI value); got stdout:\n{result.stdout}"
+    )
+    storage = f"sqlite:///{tune_workdir}/studies/studies.db"
+    study = optuna.load_study(study_name="smoke_cli_override", storage=storage)
+    assert len(study.trials) == 3, (
+        f"loop must dispatch exactly 3 trials (CLI value); got {len(study.trials)}"
+    )
+
+
+def test_tune_resume_honors_tuning_n_trials_from_toml(
+    runner: CliRunner, tune_workdir: Path
+) -> None:
+    """PR-039 Bug 1b (RED): ``tune resume`` without ``--n-trials`` must honor ``[tuning] n_trials`` from TOML.
+
+    Same defect class as Bug 1a, at ``cli/tune.py:157``. Seed precursor uses
+    explicit ``--n-trials 1`` to isolate the bug under test to the ``resume``
+    invocation. Pre-fix: banner reads ``n_trials: 50``; resume adds 50 trials
+    (51 total). Post-fix: banner reads ``n_trials: 2``; resume adds 2 (3 total).
+    """
+    seed = runner.invoke(
+        app,
+        _argv(
+            tune_workdir,
+            "--set", "tuning.trial_isolation=\"in_process\"",
+            "tune", "start", "smoke_resume_toml", "--n-trials", "1",
+        ),
+        catch_exceptions=False,
+    )
+    assert seed.exit_code == 0, seed.stderr or seed.stdout
+    result = runner.invoke(
+        app,
+        _argv(
+            tune_workdir,
+            "--set", "tuning.trial_isolation=\"in_process\"",
+            "tune", "resume", "smoke_resume_toml",
+        ),
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr or result.stdout
+    assert "n_trials: 2" in result.stdout, (
+        f"banner must report effective n_trials=2 (TOML value); got stdout:\n{result.stdout}"
+    )
+    storage = f"sqlite:///{tune_workdir}/studies/studies.db"
+    study = optuna.load_study(study_name="smoke_resume_toml", storage=storage)
+    assert len(study.trials) == 3, (
+        f"1 seed + 2 resume = 3 trials total (TOML value); got {len(study.trials)}"
+    )
+
+
+def test_tune_resume_cli_flag_overrides_toml_n_trials(
+    runner: CliRunner, tune_workdir: Path
+) -> None:
+    """PR-039 Bug 1b (regression guard): explicit ``--n-trials`` on ``resume`` must beat TOML.
+
+    Mirror of ``test_tune_start_cli_flag_overrides_toml_n_trials`` for the
+    ``resume`` verb. Passes pre-fix AND post-fix.
+    """
+    seed = runner.invoke(
+        app,
+        _argv(
+            tune_workdir,
+            "--set", "tuning.trial_isolation=\"in_process\"",
+            "tune", "start", "smoke_resume_cli_override", "--n-trials", "1",
+        ),
+        catch_exceptions=False,
+    )
+    assert seed.exit_code == 0, seed.stderr or seed.stdout
+    result = runner.invoke(
+        app,
+        _argv(
+            tune_workdir,
+            "--set", "tuning.trial_isolation=\"in_process\"",
+            "tune", "resume", "smoke_resume_cli_override", "--n-trials", "3",
+        ),
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr or result.stdout
+    assert "n_trials: 3" in result.stdout, (
+        f"banner must report effective n_trials=3 (CLI value); got stdout:\n{result.stdout}"
+    )
+    storage = f"sqlite:///{tune_workdir}/studies/studies.db"
+    study = optuna.load_study(study_name="smoke_resume_cli_override", storage=storage)
+    assert len(study.trials) == 4, (
+        f"1 seed + 3 resume = 4 trials total (CLI value); got {len(study.trials)}"
+    )
+
+
 @pytest.mark.gpu
 def test_tune_start_runs_on_gpu(runner: CliRunner, tune_workdir: Path) -> None:
     result = runner.invoke(
