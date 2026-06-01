@@ -154,6 +154,19 @@ Per D17, the three-tier composition layers in this order (lowest → highest pri
 
 Hash elision: paths, timestamps, and runtime-only fields (`logs.path`, `studies.storage_url`) are excluded from `*_cfg_hash` computation. The elision list lives as a constant `_HASH_ELIDED_FIELDS` in `src/rux_ml/config/root.py`.
 
+**CLI flags with TOML counterparts use `Optional[T] = None` + in-body fallback, NOT bare Typer defaults** (per PR-039). A Typer option declared as `param: Annotated[T, typer.Option(...)] = <default>` always binds `<default>` into the function namespace when the user omits the flag (Typer/Click documented behavior — Click distinguishes "user-passed" from "default-supplied" only via `Context.get_parameter_source()`, not from the bound value). If the function body also has a TOML-loaded counterpart in `cfg.X.Y`, the bare Typer default silently overrides the TOML value and breaks the override-precedence chain documented above. Canonical shape:
+
+```python
+param: Annotated[
+    T | None,
+    typer.Option("--param", help="…; defaults to [section] param in active TOML."),
+] = None,
+# in body:
+effective_param = param if param is not None else cfg.section.param
+```
+
+Precedents: `src/rux_ml/cli/data.py:67` (`--name`); `src/rux_ml/cli/runs.py:35` (`--study`); `src/rux_ml/cli/tune.py` `start` / `resume` `--n-trials` (PR-039). For users wanting fine-grained per-field CLI overrides without a dedicated flag, the canonical mechanism remains `--set <dot-path>=<value>` (`src/rux_ml/cli/_shared.py:39-63`). The Click `Context.default_map` infrastructure pattern is deferred until ≥3 such flags exist; current usage (1 flag, 2 sites) does not justify it per the `docs/CONSTRAINTS.md` "Reuse over reinvent" rule.
+
 ---
 
 ## Rust+PyO3 Conventions (when crates exist)
