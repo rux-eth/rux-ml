@@ -1,6 +1,6 @@
 # rux-ml
 
-A personal ML research workbench for the full lifecycle of tabular gradient-boosted models — primarily **XGBoost**, with a contract that admits LightGBM, CatBoost, and other sklearn-compatible models later.
+A personal ML research workbench for the full lifecycle of tabular gradient-boosted models — **XGBoost**, **LightGBM**, and **CatBoost** behind a shared `Trainer` protocol (XGBoost is the most exercised path).
 
 Operated via a single CLI (`rux-ml`) and a Python package (`rux_ml`). No web UI, no long-running server. Single-user, single-machine.
 
@@ -146,7 +146,7 @@ pipeline, booster = load_model("demo")  # version="champion" by default
 PY
 ```
 
-Every step beyond `data hash` writes to either `studies/`, `registry/`, or `data/cas/` — all gitignored, all under `WORKBENCH_HOME` (defaults to the repo root).
+Every step beyond `data hash` writes to either `studies/`, `registry/`, or `data/cas/` — all gitignored, with locations set by config fields (`runs.storage_url`, `registry.root`, `data.cas_root`) resolved relative to the working directory.
 
 ---
 
@@ -155,10 +155,10 @@ Every step beyond `data hash` writes to either `studies/`, `registry/`, or `data
 ```
 rux-ml/
 ├── src/rux_ml/                  Python package — layered, dependencies flow downward
-│   ├── cli/                     Typer CLI: data / train / tune / runs / registry
+│   ├── cli/                     Typer CLI: data / train / tune / runs / registry / solve
 │   ├── config/                  Pydantic-settings models per layer + RuxMLConfig root
 │   ├── data/                    Parquet loaders, splits, CAS versioning, Splitter Protocol
-│   ├── features/                sklearn Pipeline + ColumnTransformer + target-encoder shim
+│   ├── features/                sklearn Pipeline + custom _ColumnRouter + target-encoder shim
 │   ├── training/                Trainer Protocol + factory (make_trainer) + metric registry
 │   ├── tuning/                  Optuna study, objective, samplers, pruners, subprocess dispatch
 │   ├── runs/                    TrialAttrs schema + ask/tell wrapper + query helpers
@@ -208,7 +208,7 @@ Three-tier layered TOML loaded by pydantic-settings. Precedence (highest → low
 
 `extra="forbid"` is set on every Pydantic model so typos surface as validation errors, not silently ignored fields. `TomlConfigSettingsSource(deep_merge=True)` overlays nested tables correctly; lists replace (don't concatenate).
 
-Every layer carries a `<layer>_cfg_hash` (8 hashes total — data, features, training, tuning, runs, registry, memory, cv) plus a `root_cfg_hash`. All 9 are written to `user_attrs` per trial and used by the registry to reject promotions whose provenance is incomplete.
+Every layer carries a `<layer>_cfg_hash` — data, features, training, tuning, runs, registry, memory, cv, and (for solver runs) solving — plus a `root_cfg_hash`, all written to `user_attrs` per trial and used by the registry to reject promotions whose provenance is incomplete.
 
 Per-layer config schemas live in `src/rux_ml/config/<layer>.py`; the root composition is `RuxMLConfig` in `src/rux_ml/config/root.py`.
 
@@ -221,20 +221,21 @@ How a model moves from raw data to a servable champion — stage numbers match t
 
 ```mermaid
 flowchart TB
-    RAW["raw dataset — lives outside the repo"]
-    CAS["1 · ingest + versioning<br/>content-addressed store, composite hash<br/>(partition bytes ⊕ canonical columns)"]
-    FEAT["2 · features"]
-    CV["3 · CV strategy design<br/>split protocol + leakage guarantees<br/>(purge · embargo · time-aware folds)"]
-    TRAIN["4 · baseline train<br/>recorded as a 1-trial Optuna study"]
-    TUNE["5 · HPO sweep — Optuna study<br/>objective = CV-mean across folds<br/>(the overfit test, applied per trial)"]
+    RAW["raw dataset — lives outside the repo<br/>(data.source_path — the training path reads it directly)"]
+    CAS["1 · optional: CAS snapshot + composite data hash<br/>(versioned cache — never on the training path)"]
+    SPEC["config: 2 · feature spec + 3 · CV strategy design<br/>(leakage guarantees: purge · embargo · time-aware folds)"]
+    TRAIN["4 · baseline train — one-shot train/val/test split<br/>(does not use cfg.cv) · feature pipeline fit on train<br/>recorded as a 1-trial Optuna study"]
+    TUNE["5 · HPO sweep — cfg.cv splitter, features fit per fold<br/>objective = CV-mean across folds<br/>(the overfit test, applied per trial)"]
     LOG["6 · run logging — Optuna SQLite (source of truth)<br/>TrialAttrs provenance per trial: cfg hashes · data hash ·<br/>git SHA · seed entropy · image digest · lib versions · peak RSS"]
     REG["7 · registry promotion<br/>per-problem bundle store<br/>atomic champion.json (rollback = atomic rewrite)"]
     SCORE["7b · held-out test-fold scoring<br/>JSON receipt + predictions parquet"]
     LOAD["8 · load champion for inference"]
 
-    RAW --> CAS --> FEAT --> CV
-    CV -->|"defines eval folds"| TRAIN
-    CV -->|"defines eval folds"| TUNE
+    RAW -.->|"data version (optional)"| CAS
+    RAW --> TRAIN
+    RAW --> TUNE
+    SPEC --> TRAIN
+    SPEC -->|"defines eval folds"| TUNE
     TRAIN --> LOG
     TUNE --> LOG
     LOG -->|"promote best trial"| REG
@@ -249,10 +250,12 @@ Raw datasets live **outside** the repo. The workbench's content-addressed store 
 # Compute a composite hash without snapshotting (cheap, read-only).
 uv run rux-ml --problem demo data hash /abs/path/to/your.parquet
 # {
-#   "data_hash":         "<bytes_hash>|<logical_hash>",   ← composite
-#   "data_bytes_hash":   "11f180...",                     ← SHA-256 over sorted partition bytes
-#   "data_logical_hash": "98f8c6..."                      ← SHA-256 over canonical column projection
+#   "bytes_hash":   "11f180...",   ← xxh3 per file → SHA-256 over the sorted digest list
+#   "logical_hash": "98f8c6...",   ← SHA-256 over the canonical column projection
+#   "row_count":    ...,
+#   "schema":       { ... }
 # }
+# (the composite "<bytes_hash>|<logical_hash>" data_hash is what lands in per-trial user_attrs)
 
 # Snapshot into the CAS (hardlinks where possible, fallback to copy on cross-device).
 uv run rux-ml --problem demo data version demo /abs/path/to/your.parquet
@@ -272,7 +275,7 @@ The composite `data_hash` is **dataset content**; the per-layer `data_cfg_hash` 
 
 ### 2. Features
 
-The features layer is a sklearn `Pipeline` orchestrating Polars-expression stateless transforms (wrapped in `FunctionTransformer`) + a stateful `ColumnTransformer` for categorical encoding.
+The features layer is a sklearn `Pipeline` orchestrating Polars-expression stateless transforms (wrapped in `FunctionTransformer`) + a stateful custom `_ColumnRouter` for categorical encoding (deliberately not `sklearn.compose.ColumnTransformer` — its `set_output` breaks under `NestedCVWrapper`).
 
 **Categorical encoding decision rule** (per D4):
 
@@ -289,11 +292,11 @@ for each categorical column:
 **Where it lives**:
 - `src/rux_ml/features/pipeline.py` — `make_features(cfg, *, cardinalities=...)` factory
 - `src/rux_ml/features/encoders.py` — high-card target encoder via `category_encoders.NestedCVWrapper`
-- `src/rux_ml/features/cardinalities.py` — `cardinalities_from(df, cols)` helper for the decision rule
+- `src/rux_ml/features/pipeline.py` — `cardinalities_from(df, cols)` helper for the decision rule
 
 ### 3. CV strategy (overfit testing)
 
-Repeated CV (used by the Optuna objective) is expressed through a `Splitter` `typing.Protocol` over the **universal subset of the sklearn splitter API**. Five concrete strategies ship at v0, each with its own Pydantic config:
+Repeated CV (used by the Optuna objective) is expressed through a `Splitter` `typing.Protocol` over the **universal subset of the sklearn splitter API**. Six concrete strategies ship, each with its own Pydantic config:
 
 | Strategy | Use case | Leakage guarantees | ExtMem? |
 |---|---|---|---|
@@ -302,18 +305,19 @@ Repeated CV (used by the Optuna objective) is expressed through a `Splitter` `ty
 | `TimeSeriesSplitCV` | Time-indexed (fixed horizon labels) | Train precedes test; `gap` excludes adjacent | **yes** |
 | `GroupKFoldCV` | Grouped data (entity ID, session ID) | Each group in exactly one test fold | no |
 | `CombinatorialPurgedCV` | Time-indexed with variable / overlapping horizons (financial labels per AFML §7.4.2) | Two-sided label-overlap purge + one-sided post-test embargo | no |
+| `PanelCombinatorialPurgedCV` | Multi-entity panel data on a shared time axis (PR-023) | CPCV purge + embargo applied on the panel's time axis | no |
 
 Pick the strategy in your problem config:
 
 ```toml
 # configs/problems/demo.toml
 [cv]
-kind     = "stratified_kfold"   # ∈ kfold / stratified_kfold / time_series / group_kfold / cpcv
+kind     = "stratified_kfold"   # ∈ kfold / stratified_kfold / time_series / group_kfold / cpcv / panel_cpcv
 n_splits = 5
 shuffle  = true
 ```
 
-Time-series + CPCV variants have additional knobs (`gap`, `max_train_size`, `embargo_size`, `purged_size`, `n_test_folds`); see `src/rux_ml/config/cv.py` for the tagged-union schema.
+Time-series + CPCV variants have additional knobs (`gap`, `max_train_size`, `time_column`, `embargo_time`, `time_unit`, `embargo_size`, `purged_size`, `n_test_folds`); see `src/rux_ml/config/cv.py` for the tagged-union schema.
 
 **One-shot vs repeated CV**:
 - **One-shot** — `train_val_test_split(df, *, ratios, seed)` for `rux-ml train`. Returns 3 materialized Polars frames. Does NOT consume `cfg.cv`.
@@ -322,7 +326,7 @@ Time-series + CPCV variants have additional knobs (`gap`, `max_train_size`, `emb
 **ExtMem compatibility**: only `TimeSeriesSplitCV` works with `ExtMemQuantileDMatrix` (the out-of-VRAM ingest path). Pairing any other Splitter with ExtMem raises `NotImplementedError` at training time — materialized fallback is a follow-up PR.
 
 **Where it lives**:
-- `src/rux_ml/data/cv.py` — Splitter Protocol + 5 concrete strategies + `make_splitter` factory
+- `src/rux_ml/data/cv.py` — Splitter Protocol + 6 concrete strategies + `make_splitter` factory
 - `src/rux_ml/config/cv.py` — tagged-union `CVConfig` (one variant per strategy)
 
 ### 4. Baseline training
@@ -354,8 +358,8 @@ The threshold is a TOML knob in `[data]`; the host-RAM cache ratio is `[memory].
 
 **Where it lives**:
 - `src/rux_ml/cli/train.py` — the `run_command` entry point
-- `src/rux_ml/training/factory.py` — `make_trainer(cfg, *, seed=None)` returns `XGBClassifier` / `XGBRegressor` (task derived from `cfg.training.metric`)
-- `src/rux_ml/training/ingest.py` — `select_ingest(x_bytes, cfg.data)` + `estimate_x_bytes(df)` for the decision rule
+- `src/rux_ml/training/factory.py` — `make_trainer(cfg.training, *, seed=None)`: registry dispatch over `kind ∈ {xgboost, lightgbm, catboost}` returning a `Trainer`-protocol object (task derived from the metric); opt-in `use_native` XGBoost native-API adapter in `training/xgboost/native_adapter.py`
+- `src/rux_ml/training/xgboost/ingest.py` — `select_ingest(x_bytes, cfg.data)` + `estimate_x_bytes(df)` for the decision rule
 - `src/rux_ml/training/metrics.py` — metric registry: AUC / logloss → classifier; RMSE / MAE → regressor
 
 ### 5. Hyperparameter tuning
@@ -442,7 +446,7 @@ Query the runs from Python:
 from rux_ml.runs import list_runs, load_run, compare_runs
 
 df = list_runs("sqlite:///studies/studies.db")               # → pl.DataFrame
-run = load_run("sqlite:///studies/studies.db", "demo_xyz", 0) # → Run namedtuple
+run = load_run("sqlite:///studies/studies.db", "demo_xyz", 0) # → Run dataclass
 diff = compare_runs("sqlite:///studies/studies.db", "demo_xyz", [0, 1, 2])
 ```
 
@@ -529,7 +533,7 @@ uv run rux-ml registry score --problem demo --output ./eval/
 ```
 receipts/                                       (gitignored: *.parquet; JSON receipts tracked)
 ├── holdout_score_<problem>_<YYYY-MM-DD>.json   Pydantic-validated HoldoutScoreReceipt
-└── holdout_preds_<problem>_<YYYY-MM-DD>.parquet  (timestamp, y_true, y_pred) when data.time_column is set
+└── holdout_preds_<problem>_<YYYY-MM-DD>.parquet  (y_true, y_pred; + timestamp when data.time_column is set)
 ```
 
 **Receipt schema** (body follows MLflow `EvaluationResult` + Kedro `tracking.MetricsDataSet` convention):
@@ -586,7 +590,7 @@ Every trial — sweep or one-off — has a **per-trial provenance triple** in it
 
 | Field | Source | Notes |
 |---|---|---|
-| `data_hash` (+ `data_bytes_hash` + `data_logical_hash`) | `rux_ml.data.versioning` | Composite SHA-256 over sorted partition bytes + canonical column projection |
+| `data_hash` (+ `data_bytes_hash` + `data_logical_hash`) | `rux_ml.data.versioning` | Composite of the bytes hash (xxh3 per file → SHA-256 over the sorted digest list) + the logical hash (SHA-256 over the canonical column projection) |
 | `data_cfg_hash`, `features_cfg_hash`, `training_cfg_hash`, `tuning_cfg_hash`, `runs_cfg_hash`, `registry_cfg_hash`, `memory_cfg_hash`, `cv_cfg_hash` | per-layer config models (paths/timestamps elided) | 8 hashes |
 | `root_cfg_hash` | full config hash (elided fields excluded) | Run identity |
 | `git_sha` | `git rev-parse HEAD` | Code version; `uv.lock` + future `Cargo.lock` committed |
@@ -719,13 +723,13 @@ runs/      │     registry/
 - Cross-layer calls go through factory functions (`make_features`, `make_trainer`, `make_splitter`).
 - `config/root.py` is the only file that imports ALL per-layer configs (prevents cycles).
 
-**Public API** (`src/rux_ml/__init__.py`):
+**Public API** — everything is imported by qualified path; `rux_ml.__init__` exports only `__version__`:
 
 ```python
-__all__ = ["RuxMLConfig", "Trainer", "load_run", "load_model", "list_runs", "list_registry"]
+from rux_ml.config.root import RuxMLConfig
+from rux_ml.registry import load_model
+from rux_ml.runs.query import load_run, list_runs, compare_runs
 ```
-
-Everything else requires qualified imports (`from rux_ml.tuning import ...`).
 
 **Per-PR procedure** — see `PROCEDURE-pr-research.md`. Every PR runs a state assessment before implementation; non-trivial decisions cite reputable sources. `docs/0.3/ROADMAP.md` is the PR index; `docs/0.3/RESEARCH-BACKLOG.md` tracks per-PR research status.
 
@@ -755,6 +759,7 @@ rux-ml registry promote --problem <p> --study <s> --trial <n>   Promote a trial
 rux-ml registry score   --problem <p> [--version <v>] [--output <dir>]  Score a bundle on splits["test"]; writes receipt JSON + preds parquet
 rux-ml registry list                              All problems + current champion + recent versions
 rux-ml registry rollback --problem <p> --to <v>   Atomic champion.json rewrite to a prior version
+rux-ml solve ...                                  One-off cvxpy solver runs, logged as Optuna trials (solving_cfg_hash + solver fields in TrialAttrs)
 ```
 
 `rux-ml --help` and `rux-ml <verb> --help` list everything Typer exposes; this table is a quick reference, not a substitute.
