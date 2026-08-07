@@ -216,6 +216,31 @@ Per-layer config schemas live in `src/rux_ml/config/<layer>.py`; the root compos
 
 ## The lifecycle
 
+
+How a model moves from raw data to a servable champion — stage numbers match the sections below:
+
+```mermaid
+flowchart TB
+    RAW["raw dataset — lives outside the repo"]
+    CAS["1 · ingest + versioning<br/>content-addressed store, composite hash<br/>(partition bytes ⊕ canonical columns)"]
+    FEAT["2 · features"]
+    CV["3 · CV strategy<br/>time-aware panel splits · overfit testing"]
+    TRAIN["4 · baseline train<br/>recorded as a 1-trial Optuna study"]
+    TUNE["5 · HPO sweep<br/>Optuna study"]
+    LOG["6 · run logging — Optuna SQLite (source of truth)<br/>TrialAttrs provenance per trial: cfg hashes · data hash ·<br/>git SHA · seed entropy · image digest · lib versions · peak RSS"]
+    REG["7 · registry promotion<br/>per-problem bundle store<br/>atomic champion.json (rollback = atomic rewrite)"]
+    SCORE["7b · held-out test-fold scoring<br/>JSON receipt + predictions parquet"]
+    LOAD["8 · load champion for inference"]
+
+    RAW --> CAS --> FEAT --> CV
+    CV --> TRAIN
+    CV --> TUNE
+    TRAIN --> LOG
+    TUNE --> LOG
+    LOG -->|"promote best trial"| REG
+    REG --> SCORE
+    REG --> LOAD
+```
 ### 1. Data ingest + versioning
 
 Raw datasets live **outside** the repo. The workbench's content-addressed store (`data/cas/`) is a versioned cache, not a source-of-truth.
