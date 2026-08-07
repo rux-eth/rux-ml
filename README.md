@@ -224,17 +224,17 @@ flowchart TB
     RAW["raw dataset — lives outside the repo"]
     CAS["1 · ingest + versioning<br/>content-addressed store, composite hash<br/>(partition bytes ⊕ canonical columns)"]
     FEAT["2 · features"]
-    CV["3 · CV strategy<br/>time-aware panel splits · overfit testing"]
+    CV["3 · CV strategy design<br/>split protocol + leakage guarantees<br/>(purge · embargo · time-aware folds)"]
     TRAIN["4 · baseline train<br/>recorded as a 1-trial Optuna study"]
-    TUNE["5 · HPO sweep<br/>Optuna study"]
+    TUNE["5 · HPO sweep — Optuna study<br/>objective = CV-mean across folds<br/>(the overfit test, applied per trial)"]
     LOG["6 · run logging — Optuna SQLite (source of truth)<br/>TrialAttrs provenance per trial: cfg hashes · data hash ·<br/>git SHA · seed entropy · image digest · lib versions · peak RSS"]
     REG["7 · registry promotion<br/>per-problem bundle store<br/>atomic champion.json (rollback = atomic rewrite)"]
     SCORE["7b · held-out test-fold scoring<br/>JSON receipt + predictions parquet"]
     LOAD["8 · load champion for inference"]
 
     RAW --> CAS --> FEAT --> CV
-    CV --> TRAIN
-    CV --> TUNE
+    CV -->|"defines eval folds"| TRAIN
+    CV -->|"defines eval folds"| TUNE
     TRAIN --> LOG
     TUNE --> LOG
     LOG -->|"promote best trial"| REG
