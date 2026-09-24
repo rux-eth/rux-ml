@@ -586,7 +586,19 @@ Branch `pr-040/oracle-quarantine-training-set-refusal` off `dev` @ 679b096. Test
 - **Deviation from the approved spec (disclosed).** The tag check uses `Path.exists(follow_symlinks=False)`, not `os.path.lexists`. `lexists` returns `False` for an existing tag in a directory without search permission (verified at 3.12.14), which fails open. `Path.exists(follow_symlinks=False)` raises `PermissionError`, which the check wraps into a refusal. Test: `test_unsearchable_ancestor_fails_closed`. Docs updated to match.
 - **`registry score` side effect (pre-existing, not changed).** `scorer.py:247` creates `output_dir` before loading data, so a refused score leaves an empty `receipts/` directory. The test asserts that directory is empty.
 - **Formatting.** 25 files were already unformatted at HEAD under ruff 0.15.13. The first `ruff format` pass reformatted 13 unrelated files; those were reverted to HEAD, and the 11 touched-and-unformatted files were rebuilt from HEAD with only PR-040's edits.
-- **Not done here.** The real-store demonstration (bare-metal on the workbench). It needs the branch on the workbench via `git push`/`git pull`, which awaits operator approval.
+- **Real-store demonstration:** done. See "Real-store demonstration" above.
+
+### Real-store demonstration (2026-09-24, C13 evidence)
+
+Run bare-metal on the desktop (`rux-MS-7D89`) against the real oracle store `/home/rux/projects/rux-capital/oracle-store` (156 tagged day directories, 1,404 parquets). Code: a git worktree at `/home/rux/projects/rux-ml-pr040`, detached at **`22b880e5a6ae0625eb00bf8a904c528a65947a31`**; the desktop's own checkout (`dev` @ 01c7816, untracked champion receipt) was not touched. `uv sync` in the worktree gave polars 1.40.1. No `RUXML_*` env vars were set. The heavy lock was not taken, since the run is light.
+
+| # | when | command (cwd = worktree) | exit | refusal |
+|---|---|---|---|---|
+| 1 | 2026-09-24T17:42:01-05:00 | `uv run rux-ml --problem crypto_breakout_h3 --set data.source_path=/home/rux/projects/rux-capital/oracle-store/2025-11-26/m1.parquet train` | **2** | `oracle quarantine: …/2025-11-26/m1.parquet: under the oracle-tagged directory …/oracle-store/2025-11-26 — refused` |
+| 2 | 2026-09-24T17:42:04-05:00 | `uv run rux-ml --problem crypto_breakout_h3 --set data.source_path=/home/rux/projects/rux-capital/oracle-store/2025-11-26 train` | **2** | `oracle quarantine: …/oracle-store/2025-11-26: under the oracle-tagged directory …/oracle-store/2025-11-26 — refused` |
+| 3 (supplementary) | 2026-09-24T17:42:14-05:00 | the same `train` on a copy of `2025-11-26/m1.parquet` in a `mktemp -d` directory outside the store, where the tag does not travel | **2** | `oracle quarantine: oracle-namespace columns ['…/m1.parquet: oracle__regime'] — refused` |
+
+**The store was read-only throughout.** A snapshot of `find <store> -printf "%P %s %T@ %m %y"` (sorted, sha256) was taken before and after runs 1-2. Both were `f9e477d03ee7c0be`, with 1,560 entries each time, and no entry had a ctime or mtime newer than the start of the run. Run 3 only read the store (`cp` out to `/tmp`), and its temp directory was removed afterwards. No `studies/` directory was created in the worktree, so no trial row was written.
 
 ### Gate Check
 
@@ -772,7 +784,7 @@ Tag fixtures are **non-empty** unless the case is specifically about zero-byte t
 *Process:*
 - [x] The namespace prefix and tag filename appear **only** in `configs/base.toml` (plus test fixtures), with no literals in `src/`.
 - [x] Full default suite green (`uv run pytest`), plus `ruff check`, `ruff format --check` and `basedpyright src/`. *(At implementation: 454 passed. The 13 failures are catboost/lightgbm `ModuleNotFoundError`, identical at HEAD 679b096 (394 passed + the same 13), because those are optional extras not installed on the Mac. Golden: 7 passed, fixtures unchanged. `ruff check` is clean. `ruff format --check` passes on every file PR-040 created or that was format-clean at HEAD; 25 files were already unformatted at HEAD under ruff 0.15.13, and PR-040 leaves that drift alone. basedpyright: 0 errors outside the 16 pre-existing catboost/lightgbm unresolved imports.)*
-- [ ] **Real-store demonstration** (evidence for the lead): bare-metal on the workbench, `rux-ml train --set data.source_path=<oracle-store day file>` and `--set data.source_path=<oracle-store day dir>` both exit 2 with the named error. The command, exit code and SHA are recorded in this file.
+- [x] **Real-store demonstration** (evidence for the lead; done 2026-09-24, see "Real-store demonstration" in Research findings): bare-metal on the workbench, `rux-ml train --set data.source_path=<oracle-store day file>` and `--set data.source_path=<oracle-store day dir>` both exit 2 with the named error. The command, exit code and SHA are recorded in this file.
 - [x] `CHANGELOG.md` `[Unreleased]` entry per `docs/VERSIONING.md` §6.
 - ~~The `docs/0.x/ROADMAP.md` row flips in the same commit.~~ Dropped: no open roadmap (operator ruling 2026-09-24).
 
