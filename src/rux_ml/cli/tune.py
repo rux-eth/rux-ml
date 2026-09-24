@@ -25,7 +25,7 @@ import typer
 
 from rux_ml._internal.env import pin_threads
 from rux_ml._internal.seeds import make_seed_bag
-from rux_ml.cli._shared import get_options
+from rux_ml.cli._shared import get_options, refuse_oracle_source
 from rux_ml.config import RuxMLConfig
 from rux_ml.runs import study_name
 from rux_ml.training import optuna_direction
@@ -140,6 +140,7 @@ def start(
 ) -> None:
     """Create or load a study and run N trials."""
     cfg, problem, study_layer, overrides = _load_cfg(ctx)
+    refuse_oracle_source(cfg)
     name = _resolve_study_name(study_name_arg, cfg, problem, study_layer)
     study_obj = _open_study(cfg, name)
     effective_n_trials = n_trials if n_trials is not None else cfg.tuning.n_trials
@@ -171,6 +172,7 @@ def resume(
 ) -> None:
     """Add N more trials to an existing study (idempotent ``load_if_exists=True``)."""
     cfg, problem, study_layer, overrides = _load_cfg(ctx)
+    refuse_oracle_source(cfg)
     study_obj = _open_study(cfg, study_name_arg)
     effective_n_trials = n_trials if n_trials is not None else cfg.tuning.n_trials
     typer.echo(f"resuming study {study_name_arg} ({len(study_obj.trials)} existing trials)")
@@ -225,6 +227,7 @@ def retry_trial(
 ) -> None:
     """Re-enqueue a failed trial with its original params via ``study.add_trial``."""
     cfg, _, _, _ = _load_cfg(ctx)
+    refuse_oracle_source(cfg)
     try:
         study_obj = optuna.load_study(study_name=study_name_arg, storage=cfg.runs.storage_url)
     except KeyError as exc:

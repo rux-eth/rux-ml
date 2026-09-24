@@ -311,12 +311,12 @@ def build_objective(base_cfg: RuxMLConfig) -> Callable[[optuna.Trial], float]:
 
     # Data is loaded once outside the closure so every trial shares the same in-memory copy.
     # (Per D6 sequential trials, the closure is only ever called serially.)
-    df_full = materialize(load_parquet(source_path))
+    df_full = materialize(load_parquet(source_path, oracle=base_cfg.data.oracle))
     # PR-031: HPO CV substrate is splits["train"] + splits["val"]; the test fold
     # is truly held out from HP search. See _carve_substrate for the convention
     # cite + study-level seed contract.
     x_substrate, y_substrate = _carve_substrate(base_cfg, df_full, target_col)
-    hashes = data_hashes(source_path)
+    hashes = data_hashes(source_path, oracle=base_cfg.data.oracle)
 
     # PR-013: capture environment versions once per subprocess. Each subprocess
     # runs n_trials=1 (per PR-008), so this is effectively per-trial — but

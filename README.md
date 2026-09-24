@@ -246,6 +246,8 @@ flowchart TB
 
 Raw datasets live **outside** the repo. The workbench's content-addressed store (`data/cas/`) is a versioned cache, not a source-of-truth.
 
+Every read of a dataset — `data hash`, `data version`, `train`, `tune`, `registry promote` and `registry score` — first runs the **oracle quarantine** (PR-040). A source is refused, with exit code 2, if it has a column or nested field in the `[data.oracle] namespace`, or if the `[data.oracle] tag_file` sits in any ancestor directory or inside it. This keeps the rux-capital harness's perfect-foresight oracle labels out of every training set. Both values come from `configs/base.toml`.
+
 ```bash
 # Compute a composite hash without snapshotting (cheap, read-only).
 uv run rux-ml --problem demo data hash /abs/path/to/your.parquet

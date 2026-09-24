@@ -14,6 +14,7 @@ import pytest
 
 from rux_ml._internal import trial_runner
 from rux_ml.config import MemoryConfig
+from tests.conftest import repo_oracle_toml
 
 
 def test_module_help_works() -> None:
@@ -117,6 +118,7 @@ shuffle = true
 [runs]
 storage_url = "sqlite:///{storage_path}"
 """
+        + repo_oracle_toml()
     )
     return tmp_path
 

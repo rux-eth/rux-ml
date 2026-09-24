@@ -28,6 +28,7 @@ from rux_ml.config.features import FeaturesConfig, FeaturesSpec
 from rux_ml.data import load_parquet, materialize
 from rux_ml.tuning import build_objective, walk_search_space
 from rux_ml.tuning.objective import _carve_substrate
+from tests.conftest import repo_oracle_cfg
 
 # ---------- walk_search_space ----------
 
@@ -158,6 +159,7 @@ def test_build_objective_extmem_gate_raises_for_incompatible_splitter(
         source_path=tune_cfg.data.source_path,
         target_column=tune_cfg.data.target_column,
         gpu_in_memory_x_gb_max=1e-12,  # any X is "too big" → ExtMem path
+        oracle=tune_cfg.data.oracle,
     )
     # KFoldSplitter is not extmem_compatible.
     cfg.cv = KFoldCV(n_splits=3, shuffle=True)
@@ -200,7 +202,11 @@ def _make_substrate_cfg(
     cv_kind: str,
 ) -> RuxMLConfig:
     """Tiny RuxMLConfig with the requested split_kind + cv. PR-031 substrate carve test scaffold."""
-    data_kwargs: dict[str, object] = {"source_path": src, "target_column": "y"}
+    data_kwargs: dict[str, object] = {
+        "source_path": src,
+        "target_column": "y",
+        "oracle": repo_oracle_cfg(),
+    }
     if split_kind == "time_ordered":
         data_kwargs["split_kind"] = "time_ordered"
         assert time_column is not None
@@ -250,7 +256,7 @@ def test_carve_substrate_excludes_test_fold_for_time_ordered(tmp_path: Path) -> 
     cfg = _make_substrate_cfg(
         src, split_kind="time_ordered", time_column="ts", cv_kind="time_series"
     )
-    df_full = materialize(load_parquet(src))
+    df_full = materialize(load_parquet(src, oracle=repo_oracle_cfg()))
     x_sub, y_sub = _carve_substrate(cfg, df_full, "y")
 
     assert x_sub.height == 85, "default 0.7+0.15 = 85% substrate"
@@ -279,7 +285,7 @@ def test_carve_substrate_random_is_deterministic_across_invocations(tmp_path: Pa
     df.write_parquet(src)
 
     cfg = _make_substrate_cfg(src, split_kind="random", time_column=None, cv_kind="kfold")
-    df_full = materialize(load_parquet(src))
+    df_full = materialize(load_parquet(src, oracle=repo_oracle_cfg()))
     x_sub_a, y_sub_a = _carve_substrate(cfg, df_full, "y")
     x_sub_b, y_sub_b = _carve_substrate(cfg, df_full, "y")
 

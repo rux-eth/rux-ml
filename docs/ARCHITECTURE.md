@@ -171,6 +171,27 @@ The threshold is configurable in `[data]` TOML (default `gpu_in_memory_x_gb_max 
 
 **Activation (per PR-033):** the dispatch decision is honored in production via `XGBoostNativeAdapter` (`training/xgboost/native_adapter.py`) — a `Trainer`-Protocol-compatible wrapper around `xgb.train` that branches on `select_ingest(...)` and constructs the chosen DMatrix class directly. The adapter is **opt-in via `cfg.training.use_native=True`** (consumed by `cli/train.py`'s baseline path only); the sklearn-wrapper path (`make_xgboost_trainer` → `XGBClassifier`/`XGBRegressor`) remains the default and is the only path exercised in the HPO objective — `tuning/objective.py::_check_extmem_compat` preserves the "HPO + ExtMem = `NotImplementedError`" semantic because per-fold ExtMem rebuild cost is prohibitive. Single-file Polars sources are chunked into N temp Parquets via `single_source_iter` (XGBoost 3.2 `external_memory.py` demo pattern) and wrapped in `ParquetDataIter` before the `ExtMemQuantileDMatrix` build. Honest activation warning per the XGBoost 3.2 [external_memory.html](https://xgboost.readthedocs.io/en/stable/tutorials/external_memory.html) tutorial: `ExtMemQuantileDMatrix` is slower than `QuantileDMatrix` when data fits in host RAM — auto-on-ExtMem-trigger is deferred to a follow-up once a real workload exceeds the threshold.
 
+### Oracle quarantine at ingest (per PR-040; program ACCEPTANCE C13)
+
+Every training-set read refuses oracle-derived inputs before polars scans anything. The harness builds perfect-foresight `oracle__` labels in a separate tagged store and refuses to *serve* them; rux-ml independently refuses to *ingest* them. Two refusals, because one will eventually be wrong.
+
+`rux_ml.data.check_oracle_quarantine(path, cfg.data.oracle)` runs:
+- inside `load_parquet`, which covers all five training-set builders: `train`, the tune objective (in-process, subprocess child, retry), `registry promote`'s re-fit, `registry score`, and `scripts/calibrate_pr025.py`
+- inside `compute_data_hash`, which covers `train`'s pre-trial hash, `data hash` and `data version`
+- as a parent-side preflight in `tune start`/`resume`/`retry-trial`
+
+It raises `OracleQuarantineError(ValueError)`, and every CLI verb maps that to exit 2. A source is refused when:
+
+1. **Tag.** The `[data.oracle] tag_file` is present anywhere (checked with `Path.exists(follow_symlinks=False)`, so a dangling or looping tag symlink counts and a permission error refuses) in any of these places:
+   - an ancestor of the source, checked on both the path as given (after `expanduser`) and its resolved path
+   - the source directory itself
+   - any directory inside a directory source. The walk follows symlinks, is cycle-guarded by `(st_dev, st_ino)`, and re-raises errors.
+   - an ancestor of the resolved target of any symlink met during the walk
+2. **Namespace.** Any column name, or nested `Struct`/`List`/`Array` field name, starts case-insensitively with `[data.oracle] namespace`. This is checked on every file's footer (`scan_parquet(f, glob=False).collect_schema()`) and on the source's `collect_schema()`, which includes hive partition keys.
+3. **Unsupported source.** The source is a glob, or `[data.oracle]` is absent. A missing table refuses the source instead of switching the check off.
+
+The check only raises. It never changes the scan target, the scan options or any hash input, so a clean dataset's `data_hash`, manifest and splits are unchanged. It is a syntactic layer of defense in depth, not a complete leakage defense: oracle values renamed or derived under clean names pass. The known evasions are recorded in `prs/PR-040-oracle-quarantine-training-set-refusal.md`.
+
 ### Categorical encoding (per D4)
 
 ```
@@ -485,7 +506,7 @@ Override precedence (highest → lowest):
 
 `TomlConfigSettingsSource(deep_merge=True)` ensures nested tables overlay correctly. Lists replace; they do not concatenate. `extra="forbid"` is set on every Pydantic model so typos raise validation errors.
 
-`config_hash` semantics: per-layer hashes (`data_cfg_hash`, `features_cfg_hash`, `training_cfg_hash`, `tuning_cfg_hash`) plus `root_cfg_hash`. All five are stored in Optuna `user_attrs`. Per-layer hashes enable cache invalidation per concern; the root hash is run identity. Elided fields (paths, timestamps, runtime-only fields) live in a constant `_HASH_ELIDED_FIELDS` in `src/rux_ml/config/root.py`.
+`config_hash` semantics: per-layer hashes (`data_cfg_hash`, `features_cfg_hash`, `training_cfg_hash`, `tuning_cfg_hash`) plus `root_cfg_hash`. All five are stored in Optuna `user_attrs`. Per-layer hashes enable cache invalidation per concern; the root hash is run identity. Elided fields (paths, timestamps, runtime-only fields, and output-neutral guard config: `data.oracle` per PR-040, which only decides whether ingest refuses, never what a passing run computes) live in a constant `_HASH_ELIDED_FIELDS` in `src/rux_ml/config/root.py`.
 
 The data hash (`data_hash`, computed in `src/rux_ml/data/versioning.py`) is **content of the dataset**, distinct from `data_cfg_hash` (the config layer).
 

@@ -26,7 +26,7 @@ import typer
 from rux_ml._internal.env import EnvironmentVersions, get_versions, pin_threads
 from rux_ml._internal.memory import MemoryPressureError, Watchdog
 from rux_ml._internal.seeds import SeedBag, make_seed_bag
-from rux_ml.cli._shared import get_options
+from rux_ml.cli._shared import get_options, refuse_oracle_source
 from rux_ml.config import RuxMLConfig, XGBoostTraining
 from rux_ml.data import load_parquet, make_splits, materialize
 from rux_ml.features import cardinalities_from, make_features
@@ -81,7 +81,7 @@ def _fit_and_score(
     the temporal path is deterministic and ignores the seed, so the same
     reproducibility contract holds.
     """
-    df = materialize(load_parquet(source_path))
+    df = materialize(load_parquet(source_path, oracle=cfg.data.oracle))
     splits = make_splits(cfg, df, seed=bag.split_seed)
     x_train, y_train = _strip_target(splits["train"], target_col)
     x_val, y_val = _strip_target(splits["val"], target_col)
@@ -191,7 +191,8 @@ def run_command(ctx: typer.Context) -> None:
     pin_threads(cfg.memory)
 
     source_path, target_col = _require(cfg)
-    hashes = data_hashes(source_path)
+    refuse_oracle_source(cfg)  # PR-040: before hashing or creating the trial row
+    hashes = data_hashes(source_path, oracle=cfg.data.oracle)
     versions = get_versions(cfg.memory)
 
     with one_off_run(

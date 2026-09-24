@@ -274,3 +274,67 @@ Per the option-1 plan (2026-05-20), each v0.3 implementation PR resolves its own
 - Phase 4 Outcome Branch: **Amend → Apply** (5 amendments). User approved all 5 inline.
 - Per-Phase Approval Gate held at every phase boundary (Phase 1 → Phase 2 → Phase 3 → Phase 4 outcome → Phase 4 amend → Phase 5). Streak preserved across the v0.3 sprint.
 - Group D MCP-Verification Round: Probe 1 verified at Phase 4 (every Optuna 4.8 identifier introspected from `installed optuna==4.8.0` matches the v4.8.0 source-of-truth cites). Probe 2 returned **NO cite** for the 4-element synthesis → BGGC + mitigation test (the second Probe-2 BGGC of the v0.3 sprint, after PR-033). Probe 3 (Binding-at-creation) verified live by uploading an artifact in a tempdir SQLite study + reading back `trial.system_attrs["artifacts:<uuid4>"]` + `get_all_artifact_meta(...)`.
+
+---
+
+## Session: 2026-09-24 — PR-040 oracle quarantine at ingest (post-v0.3.0; no version bump)
+
+### Context
+
+PR-040 is the last unbuilt owner of `rux-capital/program` ACCEPTANCE C13 (oracle quarantine): "a test shows the training-set builder and the promotion path refuse any `oracle__` column and any artifact tagged as produced under oracle inputs". The harness halves (PR-018 namespace and store; PR-019 promotable-flag refusal) are evidenced. The operator ruled that PR-040 lands standalone against `dev`, with **no version bump or cut**, so this entry sits in the v0.3 log. Tier-2, by operator ruling after Phase 1. The stub proposed Tier-1, but rux-ml had no design-time research on oracle quarantine, and Phase 1 found 15 stale stub assumptions.
+
+### Decisions
+
+#### Refusal site: `load_parquet` + `compute_data_hash` + tune preflight, not `snapshot()`
+
+- **Decision**:
+  - One raise-only `check_oracle_quarantine(path, cfg.data.oracle)` in the new module `data/quarantine.py`.
+  - It is called from `load_parquet`, which covers all five training-set builders, and from `compute_data_hash`, which covers `train`'s pre-trial hash, `data hash` and `data version`.
+  - `tune start`/`resume`/`retry-trial` also call it as a parent-side preflight, so a refused sweep exits 2 instead of exiting 0 with 0 trials.
+  - The error is `OracleQuarantineError(ValueError)`, mapped to exit 2 on every verb.
+- **Why not `snapshot()`** (the stub's lean): its only caller is `rux-ml data version`, and nothing on the training path reads the CAS.
+- **Status**: proven (call-site census at 679b096).
+
+#### Check semantics: stricter than the harness `production_load`
+
+- **Decision**:
+  - **Tag check.** `expanduser`, then look for the tag with `Path.exists(follow_symlinks=False)` in two ancestor chains (the path as given and its resolved path). For directory sources, also walk every subdirectory with `os.walk(followlinks=True, onerror=raise)` and a `(st_dev, st_ino)` visited set. Every symlink the walk meets also has its resolved target's ancestors checked; this was the Phase 3 amendment, approved by the operator.
+  - **Namespace check.** Match `casefold` prefixes on top-level and nested `Struct`/`List`/`Array` field names. Read each file's footer with `scan_parquet(f, glob=False).collect_schema()`, then the source's own `collect_schema()` for hive keys.
+  - **Other refusals.** Glob sources are refused, and so is a missing `[data.oracle]` (fail closed). `RuntimeError`/`OSError` raised by the check itself are wrapped into the named error.
+  - **Order.** The tag checks run before any polars call.
+- **Why**:
+  - polars 1.40.1 reads every file larger than 0 bytes in a directory, following symlinks, whatever its name. It skips zero-byte files silently and raises on a non-empty tag file.
+  - `pl.read_parquet_schema` forces glob=True.
+  - `Path.exists()` follows symlinks and swallows `ELOOP`; `os.path.lexists` swallows `PermissionError` (fails open, verified at implementation).
+  - `os.walk`'s default `onerror` silently skips unreadable directories.
+  - `expanduser`/`resolve` raise `RuntimeError` on 3.12.
+- **Status**: proven for the mechanics (polars source at `py-1.40.1`; CPython 3.12 `pathlib`; setuptools `_distutils/filelist.py` for the walk combination; driver probe `gd.py`). Tag-driven exclusion enforced at read is **convention** (Lake Formation LF-Tags, Unity Catalog governed tags, Hadoop `hiddenFileFilter`, Kaufman et al. legitimacy tags). Column-prefix refusal, and the prefix-or-tag combination, are **best-guess-given-constraints**: no cited system does exactly this. The acceptance criterion itself is syntactic, and the known evasions (rename, derived columns, joins, single-file copies) are documented for the program lead.
+- **Rejected alternatives**:
+  - a literal mirror of `production_load`, which walks the lexical path only and misses file symlinks, `~`, zero-byte tags and hive keys
+  - a check at `materialize()`, which receives no path
+  - `pyarrow.parquet.read_schema` for footers, which would need a second traversal and a second exception family
+  - refusing directory sources that contain symlinks
+
+#### D17 widened: output-neutral guard config is hash-elided
+
+- **Decision**: `DataConfig.oracle: OracleQuarantineConfig | None = None`, with values **only** in `configs/base.toml` `[data.oracle]`. `"oracle"` is added to `_HASH_ELIDED_FIELDS["data"]`.
+- **Why**:
+  - Unelided, the field moves `data_cfg_hash` and `root_cfg_hash` for **every** config, even when unset, because the dump gains `"oracle": null` (probed twice).
+  - Elided, all hashes equal HEAD: hpo data `3c89c1f5…`, root `06f13e9c…`; golden data `2d7467a5…`, root `c5ba8632…`.
+  - The field only decides whether a run refuses. It never changes what a passing run computes.
+- **Supersedes**: D17's "paths, timestamps, runtime-only" elision rule (`docs/0.0/DESIGN-log.md`) now also admits output-neutral guard config. `ARCHITECTURE.md` and `CONVENTIONS.md` are updated in the same commit.
+- **Status**: proven (probes at pydantic 2.13.4 / pydantic-settings 2.14.1, including the `objective.py`/`promote.py` dump → validate rebuild, `--set` and `RUXML_DATA__ORACLE__*`).
+- **Risk accepted**: no provenance hash records the oracle policy values.
+
+### Deferred
+
+- A promote-time comparison of the re-fit `data_hash` against the trial's recorded one. rux-ml's C13 "promotion path" half is a refusal at re-fit ingest only.
+- Aligning the hash path with the load path: `data_hash` does not cover hive keys, files behind symlinked subdirectories, or `.pq` files that polars loads. This predates PR-040 and is latent today, because the only source is a single file.
+- Harness `production_load` gaps. These are recorded for the program lead and not fixed here.
+
+### Process
+
+- Phase 1 was a 14-agent workflow. Phase 3 was 4 capped agents (259k tokens) plus the driver's Group D pass.
+- Per-Phase Approval Gate held at Phase 1 → 2 → 3 → 4.
+- Group D Probe 1 checked every identifier against the installed pinned versions. Probe 2 is driver-written (`gd.py`) and independent of the agents' scripts.
+- Probe 3 does not apply.

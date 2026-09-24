@@ -131,6 +131,10 @@ Custom code (Python or Rust) must only be written when no mature, battle-tested 
 
 Stub model factories, unused config fields, untested transformers, and "TODO: actually train the model" placeholders are all phantom implementations. Every PR must include a test that exercises actual behavior end-to-end through the layer it touches.
 
+### Oracle Quarantine at Ingest (NON-NEGOTIABLE)
+
+No training set may be built from oracle-derived inputs (program ACCEPTANCE C13; bake-off protocol rule 1). Every training-set read goes through `load_parquet`. It refuses a source that carries the oracle tag file or an oracle-namespace column, with values from `[data.oracle]` in `configs/base.toml`. A missing `[data.oracle]` table makes it refuse rather than switch the check off. Any new ingest path must go through `load_parquet` or call `check_oracle_quarantine` itself. See `docs/ARCHITECTURE.md` "Oracle quarantine at ingest".
+
 ### Two-File Model Bundle (NON-NEGOTIABLE)
 
 Promoted models are stored as **two files plus a manifest**: `pipeline.skops` (sklearn FE Pipeline via skops.io) + `model.ubj` (XGBoost Booster via `save_model`) + `manifest.json` (Pydantic-validated). Combined pickles are forbidden — they tie the XGBoost booster to Python/sklearn versions unnecessarily.

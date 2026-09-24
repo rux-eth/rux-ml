@@ -260,7 +260,7 @@ def score_bundle_on_holdout(
         msg = "registry score requires data.source_path and data.target_column"
         raise ValueError(msg)
 
-    df = materialize(load_parquet(cfg.data.source_path))
+    df = materialize(load_parquet(cfg.data.source_path, oracle=cfg.data.oracle))
     split_seed = _reconstruct_split_seed(
         cfg, manifest.promoted_from.study, manifest.promoted_from.trial_number
     )

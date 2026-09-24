@@ -21,6 +21,7 @@ from rux_ml.config import (
 )
 from rux_ml.config.features import FeaturesConfig, FeaturesSpec
 from rux_ml.config.runs import RunsConfig
+from tests.conftest import repo_oracle_cfg
 
 
 @pytest.fixture
@@ -46,7 +47,7 @@ def tune_cfg(synth_parquet: Path) -> RuxMLConfig:
         "training.colsample_bytree": CatSpec(choices=[0.8, 1.0]),
     }
     return RuxMLConfig(
-        data=DataConfig(source_path=synth_parquet, target_column="y"),
+        data=DataConfig(source_path=synth_parquet, target_column="y", oracle=repo_oracle_cfg()),
         features=FeaturesConfig(
             spec=FeaturesSpec(numeric_columns=["x1", "x2"], categorical_columns=[]),
         ),

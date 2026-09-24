@@ -3,18 +3,28 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import polars as pl
 
+from rux_ml.data.quarantine import check_oracle_quarantine
 
-def load_parquet(path: Path) -> pl.LazyFrame:
+if TYPE_CHECKING:
+    from rux_ml.config.data import OracleQuarantineConfig
+
+
+def load_parquet(path: Path, *, oracle: OracleQuarantineConfig | None) -> pl.LazyFrame:
     """Lazy-scan a Parquet file or hive-partitioned directory.
 
     Returns a ``LazyFrame`` so callers can compose filters/projections before
     materializing. Directory inputs trigger Polars' built-in hive-partition
     discovery.
+
+    Every training-set read goes through here, so the oracle quarantine
+    (PR-040) runs first: ``oracle`` is ``cfg.data.oracle`` and is required
+    (``None`` refuses). Raises :class:`~rux_ml.data.quarantine.OracleQuarantineError`.
     """
+    check_oracle_quarantine(path, oracle)
     return pl.scan_parquet(path)
 
 

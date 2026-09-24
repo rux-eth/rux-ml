@@ -20,6 +20,7 @@ from rux_ml.runs import (
     load_run,
     one_off_run,
 )
+from tests.conftest import repo_oracle_cfg
 
 
 @pytest.fixture
@@ -46,7 +47,7 @@ def _populate_two_trials(
     versions: EnvironmentVersions,
 ) -> str:
     """Create two completed trials in one study; return the study name."""
-    hashes = data_hashes(parquet_file)
+    hashes = data_hashes(parquet_file, oracle=repo_oracle_cfg())
     with one_off_run(cfg, problem="prob_a", study="wide") as a:
         TrialAttrs.from_cfg(
             cfg,

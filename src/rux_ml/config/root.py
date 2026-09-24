@@ -49,11 +49,13 @@ if TYPE_CHECKING:
 # rule lives next to the validator that consumes it.
 _TEMPORAL_CV_KINDS: frozenset[str] = frozenset({"time_series", "cpcv", "panel_cpcv"})
 
-# Fields elided before hashing because they are non-deterministic / runtime-only.
+# Fields elided before hashing because they are non-deterministic / runtime-only,
+# or output-neutral guard config (PR-040: ``data.oracle`` only decides whether
+# ingest refuses, never what a passing run computes).
 # Kept here as the single source of truth so changes surface in code review.
 # Per D17.
 _HASH_ELIDED_FIELDS: dict[str, set[str]] = {
-    "data": {"cas_root", "manifests_root", "source_path"},
+    "data": {"cas_root", "manifests_root", "source_path", "oracle"},
     "features": set(),
     "training": set(),
     "tuning": set(),

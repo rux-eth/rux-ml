@@ -13,6 +13,7 @@ from rux_ml._internal.env import EnvironmentVersions
 from rux_ml._internal.seeds import SeedBag
 from rux_ml.config import KFoldCV, RuxMLConfig, StratifiedKFoldCV
 from rux_ml.runs import HASH_LAYERS, TrialAttrs, data_hashes
+from tests.conftest import repo_oracle_cfg
 
 
 @pytest.fixture
@@ -26,7 +27,7 @@ def test_from_cfg_populates_required_now_fields(
     parquet_file: Path, seed_bag: SeedBag, env_versions: EnvironmentVersions
 ) -> None:
     cfg = RuxMLConfig()
-    hashes = data_hashes(parquet_file)
+    hashes = data_hashes(parquet_file, oracle=repo_oracle_cfg())
     attrs = TrialAttrs.from_cfg(
         cfg, hashes, metric="auc", peak_rss_mb=123.4, bag=seed_bag, versions=env_versions
     )
@@ -56,7 +57,7 @@ def test_from_cfg_populates_required_now_fields(
 def test_from_cfg_changes_when_cv_strategy_changes(
     parquet_file: Path, seed_bag: SeedBag, env_versions: EnvironmentVersions
 ) -> None:
-    hashes = data_hashes(parquet_file)
+    hashes = data_hashes(parquet_file, oracle=repo_oracle_cfg())
     a = TrialAttrs.from_cfg(
         RuxMLConfig(cv=KFoldCV(n_splits=5)),
         hashes,
@@ -81,7 +82,7 @@ def test_record_writes_only_non_none_fields(
     parquet_file: Path, seed_bag: SeedBag, env_versions: EnvironmentVersions
 ) -> None:
     cfg = RuxMLConfig()
-    hashes = data_hashes(parquet_file)
+    hashes = data_hashes(parquet_file, oracle=repo_oracle_cfg())
     attrs = TrialAttrs.from_cfg(
         cfg,
         hashes,
@@ -123,7 +124,7 @@ def test_from_trial_round_trips(
     parquet_file: Path, seed_bag: SeedBag, env_versions: EnvironmentVersions
 ) -> None:
     cfg = RuxMLConfig()
-    hashes = data_hashes(parquet_file)
+    hashes = data_hashes(parquet_file, oracle=repo_oracle_cfg())
     original = TrialAttrs.from_cfg(
         cfg,
         hashes,
@@ -170,7 +171,7 @@ def test_from_trial_ignores_unknown_user_attrs(
 ) -> None:
     """``extra="ignore"`` — unrelated user_attrs don't break validation."""
     cfg = RuxMLConfig()
-    hashes = data_hashes(parquet_file)
+    hashes = data_hashes(parquet_file, oracle=repo_oracle_cfg())
     attrs = TrialAttrs.from_cfg(
         cfg, hashes, metric="auc", peak_rss_mb=123.4, bag=seed_bag, versions=env_versions
     )

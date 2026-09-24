@@ -19,6 +19,7 @@ import pytest
 from typer.testing import CliRunner
 
 from rux_ml.cli import app
+from tests.conftest import repo_oracle_toml
 
 
 @pytest.fixture
@@ -61,6 +62,7 @@ learning_rate = 0.3
 storage_url = "sqlite:///{storage_path}"
 artifacts_root = "{tmp_path}/studies/artifacts"
 """
+        + repo_oracle_toml()
     )
     return tmp_path
 
@@ -173,6 +175,7 @@ learning_rate = 0.3
 storage_url = "sqlite:///{storage_path}"
 artifacts_root = "{tmp_path}/studies/artifacts"
 """
+        + repo_oracle_toml()
     )
     return tmp_path
 

@@ -23,6 +23,7 @@ from rux_ml.config import (
 )
 from rux_ml.config.features import FeaturesSpec
 from rux_ml.runs import TrialAttrs, data_hashes, one_off_run
+from tests.conftest import repo_oracle_cfg, repo_oracle_toml
 
 
 @pytest.fixture
@@ -73,6 +74,7 @@ kind = "kfold"
 n_splits = 3
 shuffle = true
 """
+        + repo_oracle_toml()
     )
 
     cfg = RuxMLConfig(
@@ -85,7 +87,7 @@ shuffle = true
         registry=RegistryConfig(root=registry_root),
         cv=KFoldCV(n_splits=3, shuffle=True),
     )
-    hashes = data_hashes(src)
+    hashes = data_hashes(src, oracle=repo_oracle_cfg())
     with one_off_run(cfg, problem="churn_v1", study="wide") as run:
         TrialAttrs.from_cfg(
             cfg,

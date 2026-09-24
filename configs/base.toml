@@ -11,6 +11,14 @@
 # `source_path` and `target_column` MUST be set per problem (see configs/problems/).
 # `gpu_in_memory_x_gb_max = 18.0` is the D3 ingest decision-rule threshold.
 
+[data.oracle]
+# PR-040 oracle quarantine (program ACCEPTANCE C13): every training-set read
+# refuses a source with a column (or nested field) in this namespace, or with
+# this tag file in any ancestor / inside it. Mirrors rux-capital harness
+# `config/harness.toml` [oracle]. Removing this table refuses all ingest.
+namespace = "oracle__"
+tag_file = "ORACLE.tag"
+
 [features]
 # `categorical_low_card_threshold` deliberately has no default per D4 (BEST-GUESS).
 # Set per problem when categoricals matter.
