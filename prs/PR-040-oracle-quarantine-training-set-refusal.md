@@ -728,6 +728,21 @@ The tag steps (1-4) run before any polars call, because polars raises on a non-e
 - No version bump, no cut, no roadmap row (operator ruling 2026-09-24).
 - No change to `iter_parquet_files`, the `_logical_hash` scan or any hash input.
 
+## Successor PRs (named so they do not evaporate)
+
+Neither is a prerequisite of PR-040, and neither has a number yet. Take the next free `prs/PR-NNN` when either is scheduled. Both were recorded by the program lead at `rux-capital/program` 2330457 / 807f7ee.
+
+1. **Promote compares the re-fit `data_hash` with the trial's recorded one.**
+   - **Gap:** `registry/promote.py` re-reads `cfg.data.source_path` for the re-fit and recomputes `data_hashes(...)` into the bundle manifest (`promote.py:174`). It never compares that value with the trial's `user_attrs["data_hash"]`. Because `source_path` is hash-elided, a trial tuned on one dataset can be promoted by re-fitting on another, and nothing notices.
+   - **Why it matters for C13:** rux-ml's promotion-path half is currently a refusal at re-fit ingest only. It cannot show that a trial was not *tuned* on oracle inputs.
+   - **Why it is not urgent:** all 24 existing workbench trials carry the clean crypto `data_hash` (b2d36926…|29a2c053…), and after PR-040 no new trial can ingest oracle data.
+   - **Likely shape:** refuse the promotion (exit 2, named error) when the hashes differ, with an explicit override flag if one is ever needed. Tier to be decided at its own Phase 1.
+2. **Align what is hashed with what is loaded.**
+   - **Gap:** `compute_data_hash` hashes `iter_parquet_files` (sorted `rglob("*.parquet")`, explicit file list, hive discovery off). `load_parquet` scans the source the polars way: hive keys on for directories, symlinked subdirectories followed, and every file larger than 0 bytes read, including `.pq`. The recorded `data_hash` can therefore describe different data from what was trained on.
+   - **Why it is not urgent:** it is latent today, because the only configured source is a single file.
+   - **Watch out:** it moves `data_hash` for multi-file sources, so it needs its own receipt-impact analysis.
+   - This gap existed before PR-040 (Phase 1 stale-assumption 3, For-the-lead item 13).
+
 ## Dependencies
 
 None inside rux-ml. `docs/0.3/ROADMAP.md` (PR-030…PR-036) is complete and PR-039 has landed; this
