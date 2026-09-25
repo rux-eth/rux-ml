@@ -32,7 +32,11 @@ configs/
 
 ## Hashing & elision
 
-Per D17, `*_cfg_hash` (per-layer) and `root_cfg_hash` (full) are computed at trial time and recorded in Optuna `user_attrs`. Non-deterministic fields — paths, timestamps, and runtime-only values like `logs.path` and `studies.storage_url` — are elided before hashing. The elision list lives in `src/rux_ml/config/root.py`.
+Per D17, `*_cfg_hash` (per-layer) and `root_cfg_hash` (full) are computed at trial time and recorded in Optuna `user_attrs`. Non-deterministic fields — paths, timestamps, and runtime-only values like `logs.path` and `studies.storage_url` — are elided before hashing. So is output-neutral guard config: `[data.oracle]` (PR-040) only decides whether ingest refuses, never what a passing run computes. The elision list lives in `src/rux_ml/config/root.py`.
+
+## Oracle quarantine (`[data.oracle]`, PR-040)
+
+`base.toml` sets `[data.oracle] namespace` and `tag_file`, mirrored from the rux-capital harness's `config/harness.toml` `[oracle]`. Every training-set read (`train`, `tune`, `registry promote` / `score`, `data hash` / `version`) refuses a source that has a column or nested field in that namespace (case-insensitive), or that has the tag file in any ancestor directory or inside it. Refused verbs exit 2. **Removing the table refuses all ingest** rather than switching the check off. See `docs/ARCHITECTURE.md` "Oracle quarantine at ingest".
 
 ## File status
 

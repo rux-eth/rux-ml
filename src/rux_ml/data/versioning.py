@@ -24,9 +24,12 @@ from pydantic import BaseModel, ConfigDict
 
 from rux_ml._internal.hashing import canonical_json, xxh3_64_file
 from rux_ml.data.loaders import iter_parquet_files
+from rux_ml.data.quarantine import check_oracle_quarantine
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+    from rux_ml.config.data import OracleQuarantineConfig
 
 
 class Manifest(BaseModel):
@@ -84,12 +87,16 @@ def _logical_hash(files: list[Path]) -> tuple[str, int, dict[str, str]]:
     return digest, row_count, schema_map
 
 
-def compute_data_hash(path: Path) -> dict[str, Any]:
+def compute_data_hash(path: Path, *, oracle: OracleQuarantineConfig | None) -> dict[str, Any]:
     """Compute the composite data hash + schema metadata for a Parquet path.
 
     Returns a dict with keys: ``bytes_hash``, ``logical_hash``, ``row_count``,
     ``schema``. Both hashes are SHA-256 hex; ``schema`` is name -> dtype-string.
+
+    Runs the oracle quarantine (PR-040) first; it only raises, so hash inputs
+    are unchanged for any source it lets through.
     """
+    check_oracle_quarantine(path, oracle)
     files = iter_parquet_files(path)
     bytes_h = _bytes_hash(files)
     logical_h, row_count, schema_map = _logical_hash(files)
@@ -137,6 +144,7 @@ def snapshot(
     *,
     cas_root: Path,
     manifests_root: Path,
+    oracle: OracleQuarantineConfig | None,
 ) -> Manifest:
     """Snapshot ``source_path`` into the CAS and write a manifest under ``name``.
 
@@ -145,7 +153,7 @@ def snapshot(
     re-snapshots of identical content.
     """
     files = iter_parquet_files(source_path)
-    composite = compute_data_hash(source_path)
+    composite = compute_data_hash(source_path, oracle=oracle)
     version_id = hashlib.sha256(
         f"{composite['bytes_hash']}|{composite['logical_hash']}".encode()
     ).hexdigest()[:16]

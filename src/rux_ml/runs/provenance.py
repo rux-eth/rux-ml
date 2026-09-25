@@ -9,7 +9,8 @@ This module retains the **shared utilities** that don't depend on the
 
 - ``HASH_LAYERS`` — the ordered tuple of per-layer hash names recorded in
   every trial's ``user_attrs`` (consumed by :class:`TrialAttrs.from_cfg`).
-- ``data_hashes(source_path)`` — composite + per-component dataset hashes.
+- ``data_hashes(source_path, *, oracle)`` — composite + per-component dataset hashes
+  (oracle quarantine first, per PR-040).
 - ``ensure_storage_parent(url)`` — SQLite parent-dir bootstrap.
 - ``study_name(cfg, problem, study)`` — template substitution.
 
@@ -27,6 +28,7 @@ from rux_ml.data import compute_data_hash
 
 if TYPE_CHECKING:
     from rux_ml.config import RuxMLConfig
+    from rux_ml.config.data import OracleQuarantineConfig
 
 #: Per-trial config-hash layers recorded in Optuna ``user_attrs``. The order is
 #: stable to keep the recorded set diff-friendly; ``cv`` was added by PR-015
@@ -71,7 +73,7 @@ def ensure_storage_parent(storage_url: str) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
 
-def data_hashes(source_path: Path) -> dict[str, str]:
+def data_hashes(source_path: Path, *, oracle: OracleQuarantineConfig | None) -> dict[str, str]:
     """Compute the composite + per-component data hashes for ``source_path``.
 
     Returns:
@@ -80,7 +82,7 @@ def data_hashes(source_path: Path) -> dict[str, str]:
         derivation) so promoted runs can cross-reference snapshots by the same
         identifier (per ``docs/ARCHITECTURE.md`` "Reproducibility Architecture").
     """
-    composite = compute_data_hash(source_path)
+    composite = compute_data_hash(source_path, oracle=oracle)
     return {
         "data_bytes_hash": composite["bytes_hash"],
         "data_logical_hash": composite["logical_hash"],

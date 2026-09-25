@@ -28,6 +28,7 @@ from rux_ml.registry.scorer import (
     score_bundle_on_holdout,
 )
 from rux_ml.runs import TrialAttrs, data_hashes, one_off_run
+from tests.conftest import repo_oracle_cfg
 
 # ---------- _BoosterTrainerShim ----------
 
@@ -75,7 +76,7 @@ def test_booster_trainer_shim_fit_raises_not_implemented() -> None:
 
 def _make_cfg(tmp_path: Path, source: Path, registry_root: Path) -> RuxMLConfig:
     return RuxMLConfig(
-        data=DataConfig(source_path=source, target_column="y"),
+        data=DataConfig(source_path=source, target_column="y", oracle=repo_oracle_cfg()),
         features=FeaturesConfig(spec=FeaturesSpec(numeric_columns=["x1", "x2"])),
         training=XGBoostTraining(
             device="cpu",
@@ -98,7 +99,7 @@ def _populate_trial(
 ) -> tuple[str, int]:
     """Create a one-off trial with full provenance; return (study_name, trial_number)."""
     assert cfg.data.source_path is not None
-    hashes = data_hashes(cfg.data.source_path)
+    hashes = data_hashes(cfg.data.source_path, oracle=cfg.data.oracle)
     with one_off_run(cfg, problem="churn_v1", study="wide") as run:
         TrialAttrs.from_cfg(
             cfg,

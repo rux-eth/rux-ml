@@ -15,6 +15,7 @@ from rux_ml._internal.seeds import SeedBag
 from rux_ml.cli import app
 from rux_ml.config import DataConfig, RunsConfig, RuxMLConfig
 from rux_ml.runs import TrialAttrs, data_hashes, one_off_run
+from tests.conftest import repo_oracle_cfg, repo_oracle_toml
 
 
 @pytest.fixture
@@ -43,13 +44,14 @@ kind = "kfold"
 n_splits = 3
 shuffle = true
 """
+        + repo_oracle_toml()
     )
     # Populate two trials in one named study.
     cfg = RuxMLConfig(
         runs=RunsConfig(storage_url=storage_url, artifacts_root=tmp_path / "studies/artifacts"),
         data=DataConfig(source_path=src, target_column="y"),
     )
-    hashes = data_hashes(src)
+    hashes = data_hashes(src, oracle=repo_oracle_cfg())
     with one_off_run(cfg, problem="prob_a", study="wide") as a:
         TrialAttrs.from_cfg(
             cfg,

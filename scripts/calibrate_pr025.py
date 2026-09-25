@@ -318,7 +318,9 @@ def _run_position(
     storage_url: str,
 ) -> dict[str, Any]:
     """Run an Optuna study for one position and return per-trial RMSE list."""
-    df_full = materialize(load_parquet(cast("Path", base_cfg.data.source_path)))
+    df_full = materialize(
+        load_parquet(cast("Path", base_cfg.data.source_path), oracle=base_cfg.data.oracle)
+    )
     # PRE-CONVERT TO NUMPY ONCE. The Polars row-select bottleneck identified by
     # the 2026-05-19 probe (14.5s/trial = 23% of wallclock) lives in
     # x_full[train_idx.tolist()]; with numpy slicing on a pre-materialised

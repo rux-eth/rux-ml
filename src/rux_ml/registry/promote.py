@@ -109,7 +109,7 @@ def _refit(cfg: RuxMLConfig, *, bag: SeedBag) -> tuple[Pipeline, xgb.Booster]:
         msg = "promote requires data.source_path and data.target_column"
         raise ValueError(msg)
 
-    df = materialize(load_parquet(cfg.data.source_path))
+    df = materialize(load_parquet(cfg.data.source_path, oracle=cfg.data.oracle))
     splits = make_splits(cfg, df, seed=bag.split_seed)
     x_train = splits["train"].drop(cfg.data.target_column)
     y_train = splits["train"][cfg.data.target_column]
@@ -171,7 +171,7 @@ def _build_manifest(
     if cfg.data.source_path is None:
         msg = "promote requires data.source_path"
         raise ValueError(msg)
-    hashes = data_hashes(cfg.data.source_path)
+    hashes = data_hashes(cfg.data.source_path, oracle=cfg.data.oracle)
     return ModelManifest(
         version=version,
         problem=problem,

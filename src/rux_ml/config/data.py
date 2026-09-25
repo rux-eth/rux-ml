@@ -1,11 +1,36 @@
-"""Data layer config (per D3, D9, D14; PR-024 split_kind + time_column)."""
+"""Data layer config (per D3, D9, D14; PR-024 split_kind + time_column; PR-040 oracle)."""
 
+import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from rux_ml.config._strict_model import StrictModel
+
+
+class OracleQuarantineConfig(StrictModel):
+    """Oracle quarantine at ingest (PR-040; program ACCEPTANCE C13).
+
+    Values live only in ``configs/base.toml`` ``[data.oracle]``, mirrored from the
+    harness's ``config/harness.toml`` ``[oracle]``. Both fields are required: an
+    empty value would silently disable half the check (``Path(d) / ""`` is ``d``).
+    """
+
+    # Column-name prefix of oracle-derived columns (matched case-insensitively,
+    # including nested struct/list field names).
+    namespace: str = Field(min_length=1)
+    # File name that tags a directory as an oracle store (any ancestor, any depth).
+    tag_file: str = Field(min_length=1)
+
+    @field_validator("tag_file")
+    @classmethod
+    def _tag_file_is_a_bare_name(cls, v: str) -> str:
+        separators = [sep for sep in ("/", "\\", os.sep, os.altsep) if sep]
+        if any(sep in v for sep in separators):
+            msg = f"tag_file must be a bare file name, got {v!r}"
+            raise ValueError(msg)
+        return v
 
 
 class DataConfig(StrictModel):
@@ -39,3 +64,9 @@ class DataConfig(StrictModel):
     # ``PanelCombinatorialPurgedCV.time_column``). Set per problem; absent in
     # base.toml. None is valid when ``split_kind == "random"``.
     time_column: str | None = None
+
+    # PR-040: oracle quarantine. None refuses every ingest (fail closed) rather
+    # than disabling the check; configs/base.toml sets it. Hash-elided in
+    # config/root.py — it only decides whether ingest refuses, never what a
+    # passing run computes.
+    oracle: OracleQuarantineConfig | None = None

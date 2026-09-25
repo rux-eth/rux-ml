@@ -20,6 +20,7 @@ from rux_ml.runs.provenance import (
     ensure_storage_parent,
     study_name,
 )
+from tests.conftest import repo_oracle_cfg
 
 
 @pytest.fixture
@@ -44,7 +45,7 @@ def test_hash_layers_is_the_8_layer_set() -> None:
 
 
 def test_data_hashes_returns_all_three_components(parquet_file: Path) -> None:
-    hashes = data_hashes(parquet_file)
+    hashes = data_hashes(parquet_file, oracle=repo_oracle_cfg())
     assert set(hashes) == {"data_hash", "data_bytes_hash", "data_logical_hash"}
     assert hashes["data_hash"] == f"{hashes['data_bytes_hash']}|{hashes['data_logical_hash']}"
 

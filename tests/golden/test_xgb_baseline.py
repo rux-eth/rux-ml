@@ -63,6 +63,7 @@ from rux_ml.registry import load_model
 from rux_ml.registry.promote import promote
 from rux_ml.runs import TrialAttrs, data_hashes, one_off_run
 from rux_ml.training import make_trainer
+from tests.conftest import repo_oracle_cfg
 
 from .conftest import (
     DEFAULT_ATOL,
@@ -135,7 +136,7 @@ def _golden_cfg(synthetic_path: Path, tmp_path: Path) -> RuxMLConfig:
     config schema but unused (this test does single train/val/test, not CV).
     """
     return RuxMLConfig(
-        data=DataConfig(source_path=synthetic_path, target_column="y"),
+        data=DataConfig(source_path=synthetic_path, target_column="y", oracle=repo_oracle_cfg()),
         features=FeaturesConfig(
             # Threshold > 3 so the 3-level `cat` column passes through to
             # XGBoost's native categorical handling (no NestedCVWrapper target
@@ -182,7 +183,7 @@ def _fit_predict_in_process(cfg: RuxMLConfig) -> tuple[NDArray[np.float64], floa
     assert cfg.data.target_column is not None
     bag = make_seed_bag(master_entropy=cfg.tuning.entropy, trial_number=0)
 
-    df = materialize(load_parquet(cfg.data.source_path))
+    df = materialize(load_parquet(cfg.data.source_path, oracle=cfg.data.oracle))
     splits = train_val_test_split(df, ratios=cfg.data.split_ratios, seed=bag.split_seed)
     x_train = splits["train"].drop(cfg.data.target_column)
     y_train = splits["train"][cfg.data.target_column]
@@ -221,7 +222,7 @@ def _fit_predict_in_process(cfg: RuxMLConfig) -> tuple[NDArray[np.float64], floa
 def _build_manifest(cfg: RuxMLConfig, data_path: Path) -> dict[str, object]:
     """Snapshot the env + cfg state that produced the current fixtures."""
     versions = get_versions(cfg.memory)
-    hashes = data_hashes(data_path)
+    hashes = data_hashes(data_path, oracle=cfg.data.oracle)
     # Use the cfg_hash helpers via TrialAttrs to keep the manifest aligned
     # with the per-trial provenance schema (root_cfg_hash specifically).
     from rux_ml.config import cfg_hash  # noqa: PLC0415
@@ -347,7 +348,7 @@ def test_golden_load_model_matches_in_process(
     bag = make_seed_bag(master_entropy=cfg.tuning.entropy, trial_number=0)
     versions = get_versions(cfg.memory)
     assert cfg.data.source_path is not None
-    hashes = data_hashes(cfg.data.source_path)
+    hashes = data_hashes(cfg.data.source_path, oracle=cfg.data.oracle)
 
     with one_off_run(cfg, problem="golden_v1", study="wide") as run:
         TrialAttrs.from_cfg(
@@ -371,7 +372,7 @@ def test_golden_load_model_matches_in_process(
     # Reload the val fold the in-process test used, transform via the
     # registry-loaded pipeline, predict via the registry-loaded booster.
     assert cfg.data.target_column is not None
-    df = materialize(load_parquet(cfg.data.source_path))
+    df = materialize(load_parquet(cfg.data.source_path, oracle=cfg.data.oracle))
     splits = train_val_test_split(df, ratios=cfg.data.split_ratios, seed=bag.split_seed)
     x_val = splits["val"].drop(cfg.data.target_column)
     x_val_t = cast("pl.DataFrame", pipeline.transform(x_val))  # pyright: ignore[reportUnknownMemberType]

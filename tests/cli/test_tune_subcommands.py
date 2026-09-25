@@ -11,6 +11,7 @@ import pytest
 from typer.testing import CliRunner
 
 from rux_ml.cli import app
+from tests.conftest import repo_oracle_toml
 
 
 @pytest.fixture
@@ -72,6 +73,7 @@ type = "int"
 low = 2
 high = 4
 """
+        + repo_oracle_toml()
     )
     return tmp_path
 

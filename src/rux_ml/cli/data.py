@@ -10,7 +10,7 @@ import typer
 
 from rux_ml.cli._shared import get_options
 from rux_ml.config import RuxMLConfig
-from rux_ml.data import compute_data_hash, list_manifests, snapshot
+from rux_ml.data import OracleQuarantineError, compute_data_hash, list_manifests, snapshot
 
 app = typer.Typer(
     name="data",
@@ -35,8 +35,11 @@ def hash_(
     path: Annotated[Path, typer.Argument(help="Parquet file or partitioned directory.")],
 ) -> None:
     """Print the composite ``data_hash`` (bytes_hash + logical_hash) for PATH."""
-    _ = get_options(ctx)
-    result = compute_data_hash(path)
+    cfg = _load_cfg(ctx)  # PR-040: [data.oracle] drives the quarantine check
+    try:
+        result = compute_data_hash(path, oracle=cfg.data.oracle)
+    except OracleQuarantineError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     typer.echo(json.dumps(result, indent=2, sort_keys=True))
 
 
@@ -48,12 +51,16 @@ def version(
 ) -> None:
     """Snapshot a dataset into the CAS and write a manifest under that NAME."""
     cfg = _load_cfg(ctx)
-    manifest = snapshot(
-        name=name,
-        source_path=path,
-        cas_root=cfg.data.cas_root,
-        manifests_root=cfg.data.manifests_root,
-    )
+    try:
+        manifest = snapshot(
+            name=name,
+            source_path=path,
+            cas_root=cfg.data.cas_root,
+            manifests_root=cfg.data.manifests_root,
+            oracle=cfg.data.oracle,
+        )
+    except OracleQuarantineError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"snapshotted {name} → {manifest.version_id}")
     typer.echo(f"  bytes_hash:   {manifest.bytes_hash}")
     typer.echo(f"  logical_hash: {manifest.logical_hash}")
