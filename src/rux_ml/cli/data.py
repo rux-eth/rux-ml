@@ -11,6 +11,7 @@ import typer
 from rux_ml.cli._shared import get_options
 from rux_ml.config import RuxMLConfig
 from rux_ml.data import OracleQuarantineError, compute_data_hash, list_manifests, snapshot
+from rux_ml.data.bridge import BridgeError, check_bridge, training_set_sidecar
 
 app = typer.Typer(
     name="data",
@@ -85,3 +86,43 @@ def list_(
         typer.echo(
             f"{m.name}  {m.version_id}  rows={m.row_count}  bytes_hash={short}…  ({m.created_at})"
         )
+
+
+@app.command(name="bridge")
+def bridge(
+    ctx: typer.Context,
+    output: Annotated[Path, typer.Option("--output", help="Where to write rux-ml's sidecar.")],
+    manifest: Annotated[
+        Path | None,
+        typer.Option("--manifest", help="The harness manifest of this subtree (equality test)."),
+    ] = None,
+) -> None:
+    """PR-047: rux-ml's data-hash sidecar for ``data.source_path`` (one training subtree).
+
+    Writes ``data_hash``, every file with its sha256, the rux-ml commit SHA and the
+    Polars version (program PR-024 A13); refuses a source whose loaded files differ
+    from the hashed ones. With ``--manifest``, also runs the equality test against
+    the harness manifest and records it in the sidecar; any difference exits 2.
+    """
+    cfg = _load_cfg(ctx)
+    if cfg.data.source_path is None:
+        msg = "data.source_path is required (the training subtree)"
+        raise typer.BadParameter(msg)
+    try:
+        record = training_set_sidecar(cfg.data.source_path, oracle=cfg.data.oracle)
+    except (OracleQuarantineError, BridgeError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    error: BridgeError | None = None
+    if manifest is not None:
+        record["manifest_path"] = str(manifest)
+        try:
+            record["manifest_check"] = check_bridge(record, json.loads(manifest.read_text()))
+        except BridgeError as exc:
+            record["manifest_check"] = {"equal": False, "error": str(exc)}
+            error = exc
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+    typer.echo(f"data_hash: {record['data_hash']}  ({len(record['files'])} files)")
+    typer.echo(f"sidecar:   {output}")
+    if error is not None:
+        raise typer.BadParameter(str(error)) from error
