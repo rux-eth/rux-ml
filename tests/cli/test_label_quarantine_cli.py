@@ -59,7 +59,7 @@ def test_a_label_among_the_features_exits_2_before_any_trial(
     signed_m9_gates: dict[str, str],
 ) -> None:
     """Any label-namespace column (case-insensitive), a listed diagnostic included."""
-    for f in c6_set.glob("*.parquet"):  # make the column exist, so only the rule refuses
+    for f in (c6_set / "walk").glob("*.parquet"):  # make the column exist, so only the rule refuses
         df = pl.read_parquet(f)
         if label not in df.columns:
             df.with_columns(pl.col("y__walk_bp").alias(label)).write_parquet(f)
@@ -91,7 +91,7 @@ def test_an_oracle_column_in_the_c6_set_exits_2_through_pr040(
 ) -> None:
     """The oracle refusal on the C6 layout is PR-040's check, reached unchanged."""
     ns = repo_oracle_values()["namespace"]
-    f = sorted(c6_set.glob("*.parquet"))[1]
+    f = sorted((c6_set / "walk").glob("*.parquet"))[1]
     df = pl.read_parquet(f)
     df.with_columns(pl.col("y__walk_bp").alias(f"{ns}walk_bp")).write_parquet(f)
     result = runner.invoke(app, _argv(tmp_path, c6_set, "train", gates=signed_m9_gates))

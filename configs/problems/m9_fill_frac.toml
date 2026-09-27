@@ -39,8 +39,8 @@ group_column = "coin"
 symbol_holdout_seed = 20260926
 
 [features]
-# side / kind are low-cardinality strings (2-3 values): below the threshold they
-# pass through as native categoricals. BEST-GUESS value, flagged — QUESTION Q2
+# kind is a low-cardinality string (one value per subtree): below the threshold it
+# passes through as a native categorical. BEST-GUESS value, flagged — QUESTION Q2
 # for the lead (D4 has no default; rux-ml requires it whenever categoricals matter).
 categorical_low_card_threshold = 8
 
@@ -49,8 +49,10 @@ categorical_low_card_threshold = 8
 # point-in-time feat__ columns are appended from PR-024's schema file once it
 # exists (C10: "the feature list from the schema file") — QUESTION Q3.
 # stamp_ms and coin are keys, never features (C6).
-numeric_columns = ["p_bp", "q_usd", "h_ms"]
-categorical_columns = ["side", "kind"]
+# PR-048: `side` is int8 (+1 buy / -1 sell) in the materialized set (schema
+# key_dtypes); Polars casts only a string to Categorical, so it enters as numeric.
+numeric_columns = ["p_bp", "q_usd", "h_ms", "side"]
+categorical_columns = ["kind"]
 
 [training]
 kind = "xgboost"
@@ -72,10 +74,29 @@ model_kwargs = { objective = "reg:logistic" }  # a fraction in [0, 1] fits as XG
 h_max_ms = 28801000
 # PR-044 (program D45 #3): the fill fraction is scored by Brier alone.
 signed_error_honesty = false
-# The other labels of the table, summarised per fold beside every run and never
-# trained on (D45 #3: "the others diagnostics"). The markout horizon-curve columns
-# and time-to-fill are added when PR-024's schema file names them — QUESTION Q4.
-diagnostic_columns = ["y__markout_bp", "y__walk_bp"]
+# The other labels of THIS problem's subtree (fill/), summarised per fold beside every
+# run and never trained on (D45 #3: "the others diagnostics"). PR-048: the names are the
+# harness schema's (spec/m9_training_schema.json v2, program PR-024 B-4) — a label of the
+# other subtree is not in these files and refused the run. Left out on purpose:
+# y__outcome (constant `ok` on every row the target filter keeps) and, in fill/,
+# y__ttf_first_ms / y__ttf_full_ms ("-1 when none", a sentinel the summary would average).
+diagnostic_columns = [
+    "y__fill_frac_h60000",
+    "y__fill_frac_h600000",
+    "y__fill_frac_h3600000",
+    "y__markout_bp",
+    "y__markout_bp_h60000",
+    "y__markout_bp_h600000",
+    "y__markout_bp_h3600000",
+    "y__capture_bp",
+    "y__queue_ahead_at_ack",
+    "y__through",
+]
+# PR-048: the materializer WRITES the rows of an order never placed (no_book,
+# below_one_lot) or resting nowhere (alo_expired) with a NaN fill fraction ("null unless
+# y__outcome is ok", program PR-024 B-4), so this problem trains and scores on the rows
+# with a fill fraction only: the row predicate drops the others before the split.
+row_filter_non_null = ["y__fill_frac"]
 # PR-046 (program D43 / C9): the nested-prefix learning curve at 1/4, 1/2, 3/4, full
 # (fractions of the train window; each fit: train --set data.train_prefix_frac=<f>),
 # read by `rux-ml runs learning-curve`. The value followed is the held-out score

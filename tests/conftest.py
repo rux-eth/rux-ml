@@ -11,9 +11,10 @@ restates the namespace or tag-file values.
 
 from __future__ import annotations
 
+import json
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -145,3 +146,32 @@ def m9_gates_overrides(gates: dict[str, str]) -> list[str]:
     for k, v in gates.items():
         out += ["--set", f"m9.gates.{k}={v}"]
     return out
+
+
+# ---------- PR-048: the harness's M9 training-table schema (program PR-024 B-4) ----------
+
+# A verbatim copy of rumpy-harness ``spec/m9_training_schema.json`` (schema version 2,
+# harness commit 18bda8b, sha256 fc900836…e5e3): the per-target subtrees the materializer
+# writes and their exact column lists. Refresh it when the harness schema moves;
+# ``RUXML_M9_SCHEMA_PATH`` points the drift test at the live file.
+M9_SCHEMA_PATH = Path(__file__).resolve().parent / "fixtures" / "m9_training_schema.json"
+
+
+def m9_schema(path: Path = M9_SCHEMA_PATH) -> dict[str, Any]:
+    return json.loads(path.read_text())
+
+
+def m9_subtree(name: str, path: Path = M9_SCHEMA_PATH) -> dict[str, Any]:
+    """The schema's target entry written under ``<set>/<name>/`` (``fill`` or ``walk``)."""
+    (entry,) = [t for t in m9_schema(path)["targets"].values() if t["subtree"] == f"{name}/"]
+    return entry
+
+
+def m9_column_dtypes(name: str, path: Path = M9_SCHEMA_PATH) -> dict[str, str]:
+    """Column -> the schema's dtype name, in the subtree's column order."""
+    schema = m9_schema(path)
+    entry = m9_subtree(name, path)
+    dtypes = dict(schema["key_dtypes"])
+    dtypes |= {c["name"]: c["dtype"] for c in entry["y"]}
+    dtypes |= {c["name"]: c["dtype"] for c in entry["feat"]}
+    return {c: dtypes[c] for c in entry["columns"]}

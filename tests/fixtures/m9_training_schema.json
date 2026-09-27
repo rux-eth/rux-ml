@@ -1,0 +1,1287 @@
+{
+ "schema": "rumpy-harness M9 training table (PR-024; ACCEPTANCE C5 / C6 / C12 denominator)",
+ "version": 2,
+ "layout": "<set>/<target>/<day>.parquet \u2014 one file per UTC day and target, flat (no hive `day=` key: every loaded column is in the file and in rux-ml's data_hash); a day with no written row writes no file (listed in the manifest with rows 0)",
+ "rows_written": "every row of the formula except the censored ones (counted, never written); a row whose order could not be placed (no_book, below_one_lot) or rests nowhere (alo_expired) IS written with its y__outcome and null targets, so the per-day count is the formula minus the censored rows exactly \u2014 a consumer filters on its target's non-null (rux-ml `row_filter_non_null`)",
+ "key_dtypes": {
+  "stamp_ms": "int64",
+  "coin": "string",
+  "side": "int8",
+  "kind": "string",
+  "p_bp": "float64",
+  "q_usd": "float64",
+  "h_ms": "int64"
+ },
+ "side_encoding": {
+  "1": "buy (the bid side's order)",
+  "-1": "sell"
+ },
+ "generated_by": "rumpy_harness.features.schema (checked by tests/test_pr024_features.py)",
+ "config": "config/harness-v03-window.toml",
+ "label_config_sha256": "096ecd6b25af6a766352d62e8f2b7c81045ddc8ea7f7838b39dedf7909807582",
+ "feature_config_sha256": "b033b60fe6b280b23534feda891cf30b0a83eeb7b773ee30c13a4797520c55c9",
+ "point_in_time": "every feat__ value at stamp t reads only l2 / tape / ctx rows stamped in (t - 3660000, t]; l2 at the first row per (coin, stamp // 10000); no port-derived column (M1 / M3 are oracle / null in v0.3, A8)",
+ "read_set": [
+  "l2",
+  "trades",
+  "market_ctx"
+ ],
+ "outcomes": {
+  "0": "ok",
+  "1": "alo_expired",
+  "2": "censored",
+  "3": "no_book",
+  "4": "below_one_lot"
+ },
+ "grids": {
+  "label_grid_ms": {
+   "value": 900000,
+   "source": "[m9] label_grid_ms (D37 / D45 #3)"
+  },
+  "label_bucket_ms": {
+   "value": 10000,
+   "source": "[m9] label_bucket_ms (A10)"
+  },
+  "markout_horizons_ms": {
+   "value": [
+    60000,
+    600000,
+    3600000,
+    14400000
+   ],
+   "source": "[m9] markout_horizons_ms (D37 #2 / D45 #3)"
+  },
+  "fill_checkpoints_ms": {
+   "value": [
+    60000,
+    600000,
+    3600000,
+    14400000
+   ],
+   "source": "the markout horizons shorter than the order horizon, then the order horizon (labels.build)"
+  },
+  "p_grid_bps": {
+   "value": [
+    0.0,
+    15.0,
+    30.0
+   ],
+   "source": "[m9] p_grid_bps = [shell.policy] ladder_offsets_bps (D45 #3)"
+  },
+  "q_grid_usd": {
+   "value": [
+    100.0,
+    300.0,
+    1000.0,
+    3000.0
+   ],
+   "source": "[m9] q_grid_usd (D45 #3, best-guess)"
+  },
+  "order_h_ms": {
+   "value": 14400000,
+   "source": "[shell.policy] ladder_ttl_intervals x decision_timeframe_ms"
+  },
+  "entry_ms": {
+   "value": 1000,
+   "source": "[venue.latency] entry_ns"
+  },
+  "reach_ms": {
+   "value": 28801000,
+   "source": "entry + order horizon + the longest markout (A3)"
+  },
+  "walk_p_bp": {
+   "value": -10.0,
+   "source": "-[shell.policy] exit_slippage_bps (A7)"
+  },
+  "lookback_ms": {
+   "value": 3660000,
+   "source": "[m9.features] lookback_ms (B-3; consented by the operator 2026-09-27)"
+  },
+  "depth_bands_bps": {
+   "value": [
+    10.0,
+    30.0
+   ],
+   "source": "[m9.features] (A8 draft list)"
+  },
+  "walk_q_usd": {
+   "value": [
+    1000.0,
+    3000.0
+   ],
+   "source": "[m9.features] (A8 draft list)"
+  },
+  "ofi_windows_ms": {
+   "value": [
+    60000,
+    300000
+   ],
+   "source": "[m9.features] (A8 draft list)"
+  },
+  "rv_windows_ms": {
+   "value": [
+    300000,
+    3600000
+   ],
+   "source": "[m9.features] (A8 draft list)"
+  },
+  "ret_windows_ms": {
+   "value": [
+    60000,
+    300000,
+    3600000
+   ],
+   "source": "[m9.features] (A8 draft list)"
+  },
+  "trade_n_windows_ms": {
+   "value": [
+    60000,
+    300000
+   ],
+   "source": "[m9.features] (A8 draft list)"
+  },
+  "trade_vol_windows_ms": {
+   "value": [
+    300000
+   ],
+   "source": "[m9.features] (A8 draft list)"
+  },
+  "trade_gap_windows_ms": {
+   "value": [
+    300000
+   ],
+   "source": "[m9.features] (A8 draft list)"
+  },
+  "oi_chg_windows_ms": {
+   "value": [
+    3600000
+   ],
+   "source": "[m9.features] (A8 draft list)"
+  },
+  "ctx_age_max_ms": {
+   "value": 120000,
+   "source": "[m9.features] ctx_age_max_ms (K12; consented by the operator 2026-09-27)"
+  }
+ },
+ "targets": {
+  "fill": {
+   "subtree": "fill/",
+   "kind": "post_only",
+   "h_ms": 14400000,
+   "keys": [
+    "stamp_ms",
+    "coin",
+    "side",
+    "kind",
+    "p_bp",
+    "q_usd",
+    "h_ms"
+   ],
+   "rows_per_coin_day": 2304,
+   "rows_per_day": "N coins x label stamps x 2 sides x |p| x |Q| - censored (counted)",
+   "row_order": [
+    "coin",
+    "stamp_ms",
+    "side",
+    "p_bp",
+    "q_usd"
+   ],
+   "columns": [
+    "stamp_ms",
+    "coin",
+    "side",
+    "kind",
+    "p_bp",
+    "q_usd",
+    "h_ms",
+    "y__outcome",
+    "y__fill_frac_h60000",
+    "y__fill_frac_h600000",
+    "y__fill_frac_h3600000",
+    "y__fill_frac",
+    "y__markout_bp_h60000",
+    "y__markout_bp_h600000",
+    "y__markout_bp_h3600000",
+    "y__markout_bp",
+    "y__capture_bp",
+    "y__ttf_first_ms",
+    "y__ttf_full_ms",
+    "y__queue_ahead_at_ack",
+    "y__through",
+    "feat__spread_bp",
+    "feat__book_age_ms",
+    "feat__near_l1_usd",
+    "feat__opp_l1_usd",
+    "feat__near_depth_usd_10bp",
+    "feat__near_depth_usd_30bp",
+    "feat__opp_depth_usd_10bp",
+    "feat__opp_depth_usd_30bp",
+    "feat__qi_l1",
+    "feat__near_walk_bp_q1000",
+    "feat__near_walk_bp_q3000",
+    "feat__top_age_ms",
+    "feat__ofi_60s",
+    "feat__ofi_300s",
+    "feat__rv_bp_300s",
+    "feat__rv_bp_3600s",
+    "feat__ret_bp_60s",
+    "feat__ret_bp_300s",
+    "feat__ret_bp_3600s",
+    "feat__trade_n_60s",
+    "feat__trade_n_300s",
+    "feat__same_vol_usd_300s",
+    "feat__opp_vol_usd_300s",
+    "feat__trade_gap_ms_300s",
+    "feat__funding_rate",
+    "feat__oi_chg_3600s",
+    "feat__ctx_age_ms",
+    "feat__queue_ahead_usd"
+   ],
+   "y": [
+    {
+     "name": "y__outcome",
+     "builder": "outcome",
+     "dtype": "int8",
+     "horizon_ms": 1000,
+     "definition": "the order's outcome code (`outcomes`); a censored row is never written"
+    },
+    {
+     "name": "y__fill_frac_h60000",
+     "builder": "fill_frac_h60000",
+     "dtype": "float64",
+     "horizon_ms": 61000,
+     "grid": "fill_checkpoints_ms",
+     "definition": "filled lots / the order's lots by the arrival + 60000 ms \u2014 the venue's fill rule at the pinned fork (A1); null unless y__outcome is ok"
+    },
+    {
+     "name": "y__fill_frac_h600000",
+     "builder": "fill_frac_h600000",
+     "dtype": "float64",
+     "horizon_ms": 601000,
+     "grid": "fill_checkpoints_ms",
+     "definition": "filled lots / the order's lots by the arrival + 600000 ms \u2014 the venue's fill rule at the pinned fork (A1); null unless y__outcome is ok"
+    },
+    {
+     "name": "y__fill_frac_h3600000",
+     "builder": "fill_frac_h3600000",
+     "dtype": "float64",
+     "horizon_ms": 3601000,
+     "grid": "fill_checkpoints_ms",
+     "definition": "filled lots / the order's lots by the arrival + 3600000 ms \u2014 the venue's fill rule at the pinned fork (A1); null unless y__outcome is ok"
+    },
+    {
+     "name": "y__fill_frac",
+     "builder": "fill_frac_h14400000",
+     "dtype": "float64",
+     "horizon_ms": 14401000,
+     "grid": "fill_checkpoints_ms",
+     "definition": "filled lots / the order's lots by the arrival + 14400000 ms \u2014 the venue's fill rule at the pinned fork (A1); THE fill label (the order's resting horizon; the EV's target, D45 #3); null unless y__outcome is ok"
+    },
+    {
+     "name": "y__markout_bp_h60000",
+     "builder": "markout_bp_h60000",
+     "dtype": "float64",
+     "horizon_ms": 14461000,
+     "grid": "markout_horizons_ms",
+     "definition": "the markout 60000 ms after each fill, share-weighted over the fills: -side * (mid(tau + h) - mid(tau)) / mid(tau) * 1e4 bp, adverse positive, mid from the 10 s bucket <= the time; null when unfilled (A9)"
+    },
+    {
+     "name": "y__markout_bp_h600000",
+     "builder": "markout_bp_h600000",
+     "dtype": "float64",
+     "horizon_ms": 15001000,
+     "grid": "markout_horizons_ms",
+     "definition": "the markout 600000 ms after each fill, share-weighted over the fills: -side * (mid(tau + h) - mid(tau)) / mid(tau) * 1e4 bp, adverse positive, mid from the 10 s bucket <= the time; null when unfilled (A9)"
+    },
+    {
+     "name": "y__markout_bp_h3600000",
+     "builder": "markout_bp_h3600000",
+     "dtype": "float64",
+     "horizon_ms": 18001000,
+     "grid": "markout_horizons_ms",
+     "definition": "the markout 3600000 ms after each fill, share-weighted over the fills: -side * (mid(tau + h) - mid(tau)) / mid(tau) * 1e4 bp, adverse positive, mid from the 10 s bucket <= the time; null when unfilled (A9)"
+    },
+    {
+     "name": "y__markout_bp",
+     "builder": "markout_bp_h14400000",
+     "dtype": "float64",
+     "horizon_ms": 28801000,
+     "grid": "markout_horizons_ms",
+     "definition": "the markout 14400000 ms after each fill, share-weighted over the fills: -side * (mid(tau + h) - mid(tau)) / mid(tau) * 1e4 bp, adverse positive, mid from the 10 s bucket <= the time; null when unfilled (A9); the EV's target at the decision interval (D45 #3)"
+    },
+    {
+     "name": "y__capture_bp",
+     "builder": "capture_bp",
+     "dtype": "float64",
+     "horizon_ms": 14401000,
+     "definition": "the half-spread capture side * (mid(tau) - px) / mid(tau) * 1e4, share-weighted over the fills, reported apart from the markout; null when unfilled"
+    },
+    {
+     "name": "y__ttf_first_ms",
+     "builder": "ttf_first_ms",
+     "dtype": "int64",
+     "horizon_ms": 14401000,
+     "definition": "ms from t to the first fill; -1 when none"
+    },
+    {
+     "name": "y__ttf_full_ms",
+     "builder": "ttf_full_ms",
+     "dtype": "int64",
+     "horizon_ms": 14401000,
+     "definition": "ms from t to the fill completing the order's lots; -1 when none"
+    },
+    {
+     "name": "y__queue_ahead_at_ack",
+     "builder": "queue_ahead",
+     "dtype": "float64",
+     "horizon_ms": 1000,
+     "definition": "the queue ahead (coins) when the exchange acks the order at t + L \u2014 a label-side value (it reads t + L), never a feature"
+    },
+    {
+     "name": "y__through",
+     "builder": "through",
+     "dtype": "bool",
+     "horizon_ms": 14401000,
+     "definition": "a print through the price, or the opposite best reaching it, filled every leaf"
+    }
+   ],
+   "feat": [
+    {
+     "name": "feat__spread_bp",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "(ask - bid) / mid * 1e4 at the latest bucketed l2 row",
+     "unit": "bp",
+     "source": "l2",
+     "side": "symmetric",
+     "window_ms": null,
+     "grid": null,
+     "grid_value": null
+    },
+    {
+     "name": "feat__book_age_ms",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "t - the latest bucketed l2 row's stamp (the book's staleness)",
+     "unit": "ms",
+     "source": "l2",
+     "side": "symmetric",
+     "window_ms": null,
+     "grid": null,
+     "grid_value": null
+    },
+    {
+     "name": "feat__near_l1_usd",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "level-0 USD on the row's own book side (the bid for a buy)",
+     "unit": "USD",
+     "source": "l2",
+     "side": "near",
+     "window_ms": null,
+     "grid": null,
+     "grid_value": null
+    },
+    {
+     "name": "feat__opp_l1_usd",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "level-0 USD on the other book side",
+     "unit": "USD",
+     "source": "l2",
+     "side": "opposite",
+     "window_ms": null,
+     "grid": null,
+     "grid_value": null
+    },
+    {
+     "name": "feat__near_depth_usd_10bp",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "displayed USD on the row's own side within 10 bp of the mid",
+     "unit": "USD",
+     "source": "l2",
+     "side": "near",
+     "window_ms": null,
+     "grid": "depth_bands_bps",
+     "grid_value": 10.0
+    },
+    {
+     "name": "feat__near_depth_usd_30bp",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "displayed USD on the row's own side within 30 bp of the mid",
+     "unit": "USD",
+     "source": "l2",
+     "side": "near",
+     "window_ms": null,
+     "grid": "depth_bands_bps",
+     "grid_value": 30.0
+    },
+    {
+     "name": "feat__opp_depth_usd_10bp",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "displayed USD on the other side within 10 bp of the mid",
+     "unit": "USD",
+     "source": "l2",
+     "side": "opposite",
+     "window_ms": null,
+     "grid": "depth_bands_bps",
+     "grid_value": 10.0
+    },
+    {
+     "name": "feat__opp_depth_usd_30bp",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "displayed USD on the other side within 30 bp of the mid",
+     "unit": "USD",
+     "source": "l2",
+     "side": "opposite",
+     "window_ms": null,
+     "grid": "depth_bands_bps",
+     "grid_value": 30.0
+    },
+    {
+     "name": "feat__qi_l1",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "(near l1 - opp l1) / (near l1 + opp l1), level-0 USD (Gould & Bonart)",
+     "unit": "ratio",
+     "source": "l2",
+     "side": "near-minus-opposite",
+     "window_ms": null,
+     "grid": null,
+     "grid_value": null
+    },
+    {
+     "name": "feat__near_walk_bp_q1000",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "a taker on the row's side consuming $1000 of the FAR side's displayed levels at t: side * (vwap - the far touch) / mid * 1e4 (positive cost); null when the displayed book holds less",
+     "unit": "bp",
+     "source": "l2",
+     "side": "row side's taker",
+     "window_ms": null,
+     "grid": "walk_q_usd",
+     "grid_value": 1000.0
+    },
+    {
+     "name": "feat__near_walk_bp_q3000",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "a taker on the row's side consuming $3000 of the FAR side's displayed levels at t: side * (vwap - the far touch) / mid * 1e4 (positive cost); null when the displayed book holds less",
+     "unit": "bp",
+     "source": "l2",
+     "side": "row side's taker",
+     "window_ms": null,
+     "grid": "walk_q_usd",
+     "grid_value": 3000.0
+    },
+    {
+     "name": "feat__top_age_ms",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "t - the first bucketed row of the current run of an unchanged near best price (censored at the lookback)",
+     "unit": "ms",
+     "source": "l2",
+     "side": "near",
+     "window_ms": null,
+     "grid": null,
+     "grid_value": null
+    },
+    {
+     "name": "feat__ofi_60s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "side * the sum of Cont-Kukanov-Stoikov e_n over bucketed-row transitions in the window (level-0 USD; null when no transition)",
+     "unit": "USD",
+     "source": "l2",
+     "side": "signed by side",
+     "window_ms": 60000,
+     "grid": "ofi_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__ofi_300s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "side * the sum of Cont-Kukanov-Stoikov e_n over bucketed-row transitions in the window (level-0 USD; null when no transition)",
+     "unit": "USD",
+     "source": "l2",
+     "side": "signed by side",
+     "window_ms": 300000,
+     "grid": "ofi_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__rv_bp_300s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "sqrt(sum of squared simple mid returns between consecutive bucketed rows in the window) * 1e4; null when no pair",
+     "unit": "bp",
+     "source": "l2",
+     "side": "symmetric",
+     "window_ms": 300000,
+     "grid": "rv_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__rv_bp_3600s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "sqrt(sum of squared simple mid returns between consecutive bucketed rows in the window) * 1e4; null when no pair",
+     "unit": "bp",
+     "source": "l2",
+     "side": "symmetric",
+     "window_ms": 3600000,
+     "grid": "rv_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__ret_bp_60s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "side * (mid(t) / mid(the last bucketed row <= t - w) - 1) * 1e4",
+     "unit": "bp",
+     "source": "l2",
+     "side": "signed by side",
+     "window_ms": 60000,
+     "grid": "ret_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__ret_bp_300s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "side * (mid(t) / mid(the last bucketed row <= t - w) - 1) * 1e4",
+     "unit": "bp",
+     "source": "l2",
+     "side": "signed by side",
+     "window_ms": 300000,
+     "grid": "ret_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__ret_bp_3600s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "side * (mid(t) / mid(the last bucketed row <= t - w) - 1) * 1e4",
+     "unit": "bp",
+     "source": "l2",
+     "side": "signed by side",
+     "window_ms": 3600000,
+     "grid": "ret_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__trade_n_60s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "prints stamped in (t - w, t]",
+     "unit": "count",
+     "source": "trades",
+     "side": "symmetric",
+     "window_ms": 60000,
+     "grid": "trade_n_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__trade_n_300s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "prints stamped in (t - w, t]",
+     "unit": "count",
+     "source": "trades",
+     "side": "symmetric",
+     "window_ms": 300000,
+     "grid": "trade_n_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__same_vol_usd_300s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "taker notional px * sz of prints in the window initiated on the row's side",
+     "unit": "USD",
+     "source": "trades",
+     "side": "same side",
+     "window_ms": 300000,
+     "grid": "trade_vol_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__opp_vol_usd_300s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "taker notional px * sz of prints in the window initiated on the other side",
+     "unit": "USD",
+     "source": "trades",
+     "side": "opposite side",
+     "window_ms": 300000,
+     "grid": "trade_vol_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__trade_gap_ms_300s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "min(t - the last print's stamp, w); w when none",
+     "unit": "ms",
+     "source": "trades",
+     "side": "symmetric",
+     "window_ms": 300000,
+     "grid": "trade_gap_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__funding_rate",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "side * the latest ctx funding rate: positive = the row's side pays",
+     "unit": "rate per hour",
+     "source": "market_ctx",
+     "side": "signed by side",
+     "window_ms": null,
+     "grid": null,
+     "grid_value": null
+    },
+    {
+     "name": "feat__oi_chg_3600s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "(open interest(t) / open interest(the last ctx row <= t - w) - 1) * 1e4",
+     "unit": "bp",
+     "source": "market_ctx",
+     "side": "symmetric",
+     "window_ms": 3600000,
+     "grid": "oi_chg_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__ctx_age_ms",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "t - the latest ctx row's stamp (K12: a carried ctx value stays visible; rows above ctx_age_max_ms are counted)",
+     "unit": "ms",
+     "source": "market_ctx",
+     "side": "symmetric",
+     "window_ms": null,
+     "grid": null,
+     "grid_value": null
+    },
+    {
+     "name": "feat__queue_ahead_usd",
+     "dtype": "float64",
+     "targets": [
+      "fill"
+     ],
+     "definition": "displayed USD on the row's own side at the order's own price (the policy's hl_price rule from the latest bucketed touch at t, offset p); 0 between displayed levels; null beyond the deepest",
+     "unit": "USD",
+     "source": "l2",
+     "side": "near",
+     "window_ms": null,
+     "grid": "p_grid_bps",
+     "grid_value": null
+    }
+   ]
+  },
+  "walk": {
+   "subtree": "walk/",
+   "kind": "taker",
+   "h_ms": 0,
+   "p_bp": -10.0,
+   "keys": [
+    "stamp_ms",
+    "coin",
+    "side",
+    "kind",
+    "p_bp",
+    "q_usd",
+    "h_ms"
+   ],
+   "rows_per_coin_day": 768,
+   "rows_per_day": "N coins x label stamps x 2 sides x |Q| - censored (counted)",
+   "row_order": [
+    "coin",
+    "stamp_ms",
+    "side",
+    "q_usd"
+   ],
+   "columns": [
+    "stamp_ms",
+    "coin",
+    "side",
+    "kind",
+    "p_bp",
+    "q_usd",
+    "h_ms",
+    "y__outcome",
+    "y__walk_bp",
+    "y__walk_filled_frac",
+    "y__half_spread_bp",
+    "y__censored_beyond_book",
+    "y__levels_walked",
+    "feat__spread_bp",
+    "feat__book_age_ms",
+    "feat__near_l1_usd",
+    "feat__opp_l1_usd",
+    "feat__near_depth_usd_10bp",
+    "feat__near_depth_usd_30bp",
+    "feat__opp_depth_usd_10bp",
+    "feat__opp_depth_usd_30bp",
+    "feat__qi_l1",
+    "feat__near_walk_bp_q1000",
+    "feat__near_walk_bp_q3000",
+    "feat__top_age_ms",
+    "feat__ofi_60s",
+    "feat__ofi_300s",
+    "feat__rv_bp_300s",
+    "feat__rv_bp_3600s",
+    "feat__ret_bp_60s",
+    "feat__ret_bp_300s",
+    "feat__ret_bp_3600s",
+    "feat__trade_n_60s",
+    "feat__trade_n_300s",
+    "feat__same_vol_usd_300s",
+    "feat__opp_vol_usd_300s",
+    "feat__trade_gap_ms_300s",
+    "feat__funding_rate",
+    "feat__oi_chg_3600s",
+    "feat__ctx_age_ms"
+   ],
+   "y": [
+    {
+     "name": "y__outcome",
+     "builder": "outcome",
+     "dtype": "int8",
+     "horizon_ms": 1000,
+     "definition": "the IOC's outcome code (`outcomes`); a censored row is never written"
+    },
+    {
+     "name": "y__walk_bp",
+     "builder": "walk_bp",
+     "dtype": "float64",
+     "horizon_ms": 1000,
+     "definition": "the pure impact of the filled part: side * (vwap - touch) / mid * 1e4 at the arrival t + L, the venue's IOC walk to the policy's limit (A14); the EV's target (D45 #3); null unless y__outcome is ok and a lot filled"
+    },
+    {
+     "name": "y__walk_filled_frac",
+     "builder": "walk_filled_frac",
+     "dtype": "float64",
+     "horizon_ms": 1000,
+     "definition": "the filled part of Q; the IOC expires the rest"
+    },
+    {
+     "name": "y__half_spread_bp",
+     "builder": "half_spread_bp",
+     "dtype": "float64",
+     "horizon_ms": 1000,
+     "definition": "(ask - bid) / 2 / mid * 1e4 at the arrival (the spread term, apart from the impact)"
+    },
+    {
+     "name": "y__censored_beyond_book",
+     "builder": "censored_beyond_book",
+     "dtype": "int8",
+     "horizon_ms": 1000,
+     "definition": "1 when Q outlasts the displayed levels inside the limit"
+    },
+    {
+     "name": "y__levels_walked",
+     "builder": "levels_walked",
+     "dtype": "int64",
+     "horizon_ms": 1000,
+     "definition": "price levels the IOC consumed"
+    }
+   ],
+   "feat": [
+    {
+     "name": "feat__spread_bp",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "(ask - bid) / mid * 1e4 at the latest bucketed l2 row",
+     "unit": "bp",
+     "source": "l2",
+     "side": "symmetric",
+     "window_ms": null,
+     "grid": null,
+     "grid_value": null
+    },
+    {
+     "name": "feat__book_age_ms",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "t - the latest bucketed l2 row's stamp (the book's staleness)",
+     "unit": "ms",
+     "source": "l2",
+     "side": "symmetric",
+     "window_ms": null,
+     "grid": null,
+     "grid_value": null
+    },
+    {
+     "name": "feat__near_l1_usd",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "level-0 USD on the row's own book side (the bid for a buy)",
+     "unit": "USD",
+     "source": "l2",
+     "side": "near",
+     "window_ms": null,
+     "grid": null,
+     "grid_value": null
+    },
+    {
+     "name": "feat__opp_l1_usd",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "level-0 USD on the other book side",
+     "unit": "USD",
+     "source": "l2",
+     "side": "opposite",
+     "window_ms": null,
+     "grid": null,
+     "grid_value": null
+    },
+    {
+     "name": "feat__near_depth_usd_10bp",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "displayed USD on the row's own side within 10 bp of the mid",
+     "unit": "USD",
+     "source": "l2",
+     "side": "near",
+     "window_ms": null,
+     "grid": "depth_bands_bps",
+     "grid_value": 10.0
+    },
+    {
+     "name": "feat__near_depth_usd_30bp",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "displayed USD on the row's own side within 30 bp of the mid",
+     "unit": "USD",
+     "source": "l2",
+     "side": "near",
+     "window_ms": null,
+     "grid": "depth_bands_bps",
+     "grid_value": 30.0
+    },
+    {
+     "name": "feat__opp_depth_usd_10bp",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "displayed USD on the other side within 10 bp of the mid",
+     "unit": "USD",
+     "source": "l2",
+     "side": "opposite",
+     "window_ms": null,
+     "grid": "depth_bands_bps",
+     "grid_value": 10.0
+    },
+    {
+     "name": "feat__opp_depth_usd_30bp",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "displayed USD on the other side within 30 bp of the mid",
+     "unit": "USD",
+     "source": "l2",
+     "side": "opposite",
+     "window_ms": null,
+     "grid": "depth_bands_bps",
+     "grid_value": 30.0
+    },
+    {
+     "name": "feat__qi_l1",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "(near l1 - opp l1) / (near l1 + opp l1), level-0 USD (Gould & Bonart)",
+     "unit": "ratio",
+     "source": "l2",
+     "side": "near-minus-opposite",
+     "window_ms": null,
+     "grid": null,
+     "grid_value": null
+    },
+    {
+     "name": "feat__near_walk_bp_q1000",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "a taker on the row's side consuming $1000 of the FAR side's displayed levels at t: side * (vwap - the far touch) / mid * 1e4 (positive cost); null when the displayed book holds less",
+     "unit": "bp",
+     "source": "l2",
+     "side": "row side's taker",
+     "window_ms": null,
+     "grid": "walk_q_usd",
+     "grid_value": 1000.0
+    },
+    {
+     "name": "feat__near_walk_bp_q3000",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "a taker on the row's side consuming $3000 of the FAR side's displayed levels at t: side * (vwap - the far touch) / mid * 1e4 (positive cost); null when the displayed book holds less",
+     "unit": "bp",
+     "source": "l2",
+     "side": "row side's taker",
+     "window_ms": null,
+     "grid": "walk_q_usd",
+     "grid_value": 3000.0
+    },
+    {
+     "name": "feat__top_age_ms",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "t - the first bucketed row of the current run of an unchanged near best price (censored at the lookback)",
+     "unit": "ms",
+     "source": "l2",
+     "side": "near",
+     "window_ms": null,
+     "grid": null,
+     "grid_value": null
+    },
+    {
+     "name": "feat__ofi_60s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "side * the sum of Cont-Kukanov-Stoikov e_n over bucketed-row transitions in the window (level-0 USD; null when no transition)",
+     "unit": "USD",
+     "source": "l2",
+     "side": "signed by side",
+     "window_ms": 60000,
+     "grid": "ofi_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__ofi_300s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "side * the sum of Cont-Kukanov-Stoikov e_n over bucketed-row transitions in the window (level-0 USD; null when no transition)",
+     "unit": "USD",
+     "source": "l2",
+     "side": "signed by side",
+     "window_ms": 300000,
+     "grid": "ofi_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__rv_bp_300s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "sqrt(sum of squared simple mid returns between consecutive bucketed rows in the window) * 1e4; null when no pair",
+     "unit": "bp",
+     "source": "l2",
+     "side": "symmetric",
+     "window_ms": 300000,
+     "grid": "rv_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__rv_bp_3600s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "sqrt(sum of squared simple mid returns between consecutive bucketed rows in the window) * 1e4; null when no pair",
+     "unit": "bp",
+     "source": "l2",
+     "side": "symmetric",
+     "window_ms": 3600000,
+     "grid": "rv_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__ret_bp_60s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "side * (mid(t) / mid(the last bucketed row <= t - w) - 1) * 1e4",
+     "unit": "bp",
+     "source": "l2",
+     "side": "signed by side",
+     "window_ms": 60000,
+     "grid": "ret_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__ret_bp_300s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "side * (mid(t) / mid(the last bucketed row <= t - w) - 1) * 1e4",
+     "unit": "bp",
+     "source": "l2",
+     "side": "signed by side",
+     "window_ms": 300000,
+     "grid": "ret_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__ret_bp_3600s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "side * (mid(t) / mid(the last bucketed row <= t - w) - 1) * 1e4",
+     "unit": "bp",
+     "source": "l2",
+     "side": "signed by side",
+     "window_ms": 3600000,
+     "grid": "ret_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__trade_n_60s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "prints stamped in (t - w, t]",
+     "unit": "count",
+     "source": "trades",
+     "side": "symmetric",
+     "window_ms": 60000,
+     "grid": "trade_n_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__trade_n_300s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "prints stamped in (t - w, t]",
+     "unit": "count",
+     "source": "trades",
+     "side": "symmetric",
+     "window_ms": 300000,
+     "grid": "trade_n_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__same_vol_usd_300s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "taker notional px * sz of prints in the window initiated on the row's side",
+     "unit": "USD",
+     "source": "trades",
+     "side": "same side",
+     "window_ms": 300000,
+     "grid": "trade_vol_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__opp_vol_usd_300s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "taker notional px * sz of prints in the window initiated on the other side",
+     "unit": "USD",
+     "source": "trades",
+     "side": "opposite side",
+     "window_ms": 300000,
+     "grid": "trade_vol_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__trade_gap_ms_300s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "min(t - the last print's stamp, w); w when none",
+     "unit": "ms",
+     "source": "trades",
+     "side": "symmetric",
+     "window_ms": 300000,
+     "grid": "trade_gap_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__funding_rate",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "side * the latest ctx funding rate: positive = the row's side pays",
+     "unit": "rate per hour",
+     "source": "market_ctx",
+     "side": "signed by side",
+     "window_ms": null,
+     "grid": null,
+     "grid_value": null
+    },
+    {
+     "name": "feat__oi_chg_3600s",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "(open interest(t) / open interest(the last ctx row <= t - w) - 1) * 1e4",
+     "unit": "bp",
+     "source": "market_ctx",
+     "side": "symmetric",
+     "window_ms": 3600000,
+     "grid": "oi_chg_windows_ms",
+     "grid_value": null
+    },
+    {
+     "name": "feat__ctx_age_ms",
+     "dtype": "float64",
+     "targets": [
+      "fill",
+      "walk"
+     ],
+     "definition": "t - the latest ctx row's stamp (K12: a carried ctx value stays visible; rows above ctx_age_max_ms are counted)",
+     "unit": "ms",
+     "source": "market_ctx",
+     "side": "symmetric",
+     "window_ms": null,
+     "grid": null,
+     "grid_value": null
+    }
+   ]
+  }
+ }
+}
