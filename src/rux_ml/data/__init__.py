@@ -16,7 +16,13 @@ from rux_ml.data.cv import (
 )
 from rux_ml.data.data_iter import ParquetDataIter, single_source_iter
 from rux_ml.data.loaders import load_parquet, materialize
-from rux_ml.data.quarantine import OracleQuarantineError, check_oracle_quarantine
+from rux_ml.data.quarantine import (
+    LabelAsFeatureError,
+    OracleQuarantineError,
+    check_feature_labels,
+    check_label_quarantine,
+    check_oracle_quarantine,
+)
 from rux_ml.data.splits import (
     make_splits,
     split_definition,
@@ -37,6 +43,7 @@ __all__ = [
     "CombinatorialPurgedSplitter",
     "GroupKFoldSplitter",
     "KFoldSplitter",
+    "LabelAsFeatureError",
     "Manifest",
     "OracleQuarantineError",
     "PanelCombinatorialPurgedSplitter",
@@ -44,6 +51,8 @@ __all__ = [
     "Splitter",
     "StratifiedKFoldSplitter",
     "TimeSeriesSplitter",
+    "check_feature_labels",
+    "check_label_quarantine",
     "check_oracle_quarantine",
     "compute_data_hash",
     "list_manifests",

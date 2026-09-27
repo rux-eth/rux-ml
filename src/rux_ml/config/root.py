@@ -178,7 +178,8 @@ class RuxMLConfig(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_m9_diagnostics(self) -> RuxMLConfig:
-        """PR-041: a diagnostic label is neither the target nor a feature."""
+        """PR-041: a diagnostic label is not the target (PR-042: and the time-block
+        regime's embargo covers h_max)."""
         if self.m9 is None:
             return self
         diagnostics = set(self.m9.diagnostic_columns)
@@ -201,14 +202,9 @@ class RuxMLConfig(BaseSettings):
                     f"data.split_embargo {embargo} < m9.h_max_ms {h_max}: a label reaches the split"
                 )
                 raise ValueError(msg)
-        spec = self.features.spec
-        leaked = sorted(diagnostics & {*spec.numeric_columns, *spec.categorical_columns})
-        if leaked:
-            msg = (
-                f"m9.diagnostic_columns {leaked} are also feature columns: "
-                "a label is never a feature"
-            )
-            raise ValueError(msg)
+        # A diagnostic among the features is refused at every training-set build by
+        # rux_ml.data.check_feature_labels (PR-043), with exit 2 — not here, where a
+        # config error surfaces as a traceback (exit 1).
         return self
 
     # Single-process workbench: TOML paths threaded through class state because

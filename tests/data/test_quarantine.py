@@ -392,3 +392,36 @@ def test_clean_snapshot_manifest_matches_pinned_hashes(
     )
     assert m.bytes_hash == pinned["data_bytes_hash"]
     assert m.logical_hash == pinned["data_logical_hash"]
+
+
+# ---------- PR-043: a label is never a feature (program D38 #3, ACCEPTANCE C6 / C13) ----------
+
+
+def test_label_quarantine_refuses_a_feature_in_the_label_namespace(
+    oracle_cfg: OracleQuarantineConfig,
+) -> None:
+    from rux_ml.data import LabelAsFeatureError, check_label_quarantine  # noqa: PLC0415
+
+    ns = oracle_cfg.label_namespace
+    check_label_quarantine(["p_bp", "feat__spread_bp"], oracle_cfg)  # clean passes
+    for bad in (f"{ns}walk_bp", f"{ns.upper()}walk_bp"):  # case-insensitive, like PR-040
+        with pytest.raises(LabelAsFeatureError, match="label quarantine") as info:
+            check_label_quarantine(["p_bp", bad], oracle_cfg)
+        assert bad in str(info.value)
+        assert isinstance(info.value, OracleQuarantineError)  # same family, same exit-2 mapping
+
+
+def test_label_quarantine_refuses_a_listed_diagnostic_among_the_features(
+    oracle_cfg: OracleQuarantineConfig,
+) -> None:
+    from rux_ml.data import LabelAsFeatureError, check_label_quarantine  # noqa: PLC0415
+
+    with pytest.raises(LabelAsFeatureError, match="other_label"):
+        check_label_quarantine(["x", "other_label"], oracle_cfg, diagnostics=["other_label"])
+
+
+def test_label_quarantine_fails_closed_without_the_table() -> None:
+    from rux_ml.data import LabelAsFeatureError, check_label_quarantine  # noqa: PLC0415
+
+    with pytest.raises(LabelAsFeatureError, match=r"\[data.oracle\]"):
+        check_label_quarantine(["x"], None)

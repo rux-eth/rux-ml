@@ -38,6 +38,10 @@ Per D17, `*_cfg_hash` (per-layer) and `root_cfg_hash` (full) are computed at tri
 
 `base.toml` sets `[data.oracle] namespace` and `tag_file`, mirrored from the rux-capital harness's `config/harness.toml` `[oracle]`. Every training-set read (`train`, `tune`, `registry promote` / `score`, `data hash` / `version`) refuses a source that has a column or nested field in that namespace (case-insensitive), or that has the tag file in any ancestor directory or inside it. Refused verbs exit 2. **Removing the table refuses all ingest** rather than switching the check off. See `docs/ARCHITECTURE.md` "Oracle quarantine at ingest".
 
+## Label quarantine (`[data.oracle] label_namespace`, PR-043)
+
+`base.toml` sets `label_namespace = "y__"`. A feature column in that namespace (case-insensitive), or listed in `[m9] diagnostic_columns`, is refused at every training-set build with exit 2: a label is consumed only as `data.target_column`.
+
 ## M9 problems (`[m9]`, PR-041)
 
 `problems/m9_fill_frac.toml`, `m9_markout_bp.toml` and `m9_walk_bp.toml` are the three M9 problems of the rux-capital program (v0.3). Each trains one label as `data.target_column` and lists the other labels in `[m9] diagnostic_columns`, which are summarised per fold and never trained on. A diagnostic may not be the target or a feature (refused at load). `[m9]` is optional and hash-neutral while unset. See `docs/ARCHITECTURE.md` "M9 problem layer".

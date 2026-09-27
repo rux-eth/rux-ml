@@ -192,6 +192,10 @@ It raises `OracleQuarantineError(ValueError)`, and every CLI verb maps that to e
 
 The check only raises. It never changes the scan target, the scan options or any hash input, so a clean dataset's `data_hash`, manifest and splits are unchanged. It is a syntactic layer of defense in depth, not a complete leakage defense: oracle values renamed or derived under clean names pass. The known evasions are recorded in `prs/PR-040-oracle-quarantine-training-set-refusal.md`.
 
+### Label quarantine: a label is never a feature (per PR-043; program v0.3 D38 #3, ACCEPTANCE C6 / C13)
+
+Extends PR-040's oracle quarantine. `[data.oracle] label_namespace` (base.toml: `y__`, the program materializer's label namespace) marks supervised labels, which are consumed only as `data.target_column`. `rux_ml.data.check_feature_labels(cfg)` refuses any `features.spec` column that starts case-insensitively with the namespace or is listed in `[m9] diagnostic_columns`, raising `LabelAsFeatureError` — a subclass of `OracleQuarantineError`, so every PR-040 handler maps it to exit 2. The spec is the only route a column takes into a model (the pipeline selects exactly the listed columns), so the check runs on it: in the CLI preflight (`train`, `tune start` / `resume` / `retry-trial`, before any trial row), in the promote re-fit, in the scorer and in the tune objective. A missing `[data.oracle]` table refuses. PR-041's config-time "diagnostic is a feature" rule moved here, because a config error surfaces as a traceback (exit 1).
+
 ### M9 problem layer (`[m9]`, per PR-041; rux-capital program v0.3 D37 / D45 #3, ACCEPTANCE C9)
 
 The program's M9 node (fill fraction, markout, book-walk) trains three **problems** on one harness-materialized table. Each problem config (`configs/problems/m9_{fill_frac,markout_bp,walk_bp}.toml`) trains on exactly **one** label, `data.target_column` = the column the program's EV consumes (`y__fill_frac`, `y__markout_bp` at the decision interval, `y__walk_bp`), and lists the other labels under `[m9] diagnostic_columns`.

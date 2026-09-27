@@ -69,13 +69,18 @@ def test_target_may_not_be_a_diagnostic() -> None:
         RuxMLConfig(data=DataConfig(target_column="y"), m9=M9Config(diagnostic_columns=["y", "z"]))
 
 
-def test_diagnostics_may_not_be_features() -> None:
-    with pytest.raises(ValidationError, match="feature"):
-        RuxMLConfig(
-            data=DataConfig(target_column="y"),
-            features=FeaturesConfig(spec=FeaturesSpec(numeric_columns=["x", "z"])),
-            m9=M9Config(diagnostic_columns=["z"]),
-        )
+def test_diagnostics_among_the_features_are_refused_at_build_not_at_load() -> None:
+    """PR-043 moved this rule into ``check_feature_labels`` so the CLI exits 2 on it."""
+    from rux_ml.data import LabelAsFeatureError, check_feature_labels  # noqa: PLC0415
+    from tests.conftest import repo_oracle_cfg  # noqa: PLC0415
+
+    cfg = RuxMLConfig(
+        data=DataConfig(target_column="y", oracle=repo_oracle_cfg()),
+        features=FeaturesConfig(spec=FeaturesSpec(numeric_columns=["x", "z"])),
+        m9=M9Config(diagnostic_columns=["z"]),
+    )
+    with pytest.raises(LabelAsFeatureError, match="'z'"):
+        check_feature_labels(cfg)
 
 
 def test_diagnostics_must_be_distinct_non_empty_names() -> None:
