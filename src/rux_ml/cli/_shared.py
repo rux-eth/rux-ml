@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 import typer
 
-from rux_ml.data import OracleQuarantineError, check_oracle_quarantine
+from rux_ml.data import OracleQuarantineError, check_feature_labels, check_oracle_quarantine
 
 if TYPE_CHECKING:
     from rux_ml.config import RuxMLConfig
@@ -98,10 +98,14 @@ def refuse_oracle_source(cfg: RuxMLConfig) -> None:
     subprocess sweep that logs each child's failure and exits 0). No-op when
     ``source_path`` is unset — the verb's own "source_path required" check owns
     that error.
+
+    PR-043: also refuses a label among the features (:func:`check_feature_labels`),
+    first and regardless of ``source_path`` — it depends on the config alone.
     """
-    if cfg.data.source_path is None:
-        return
     try:
+        check_feature_labels(cfg)
+        if cfg.data.source_path is None:
+            return
         check_oracle_quarantine(cfg.data.source_path, cfg.data.oracle)
     except OracleQuarantineError as exc:
         raise typer.BadParameter(str(exc)) from exc

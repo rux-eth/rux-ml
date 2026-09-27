@@ -20,6 +20,9 @@ from typing import TYPE_CHECKING
 import polars as pl
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from rux_ml.config import RuxMLConfig
     from rux_ml.config.data import OracleQuarantineConfig
 
 # Polars' own glob test (crates/polars-io/src/path_utils/mod.rs:128-133 @ py-1.40.1).
@@ -35,6 +38,61 @@ class OracleQuarantineError(ValueError):
 
     def __init__(self, detail: str) -> None:
         super().__init__(f"oracle quarantine: {detail} — refused")
+
+
+class LabelAsFeatureError(OracleQuarantineError):
+    """A label was listed among the features (PR-043; program D38 #3, ACCEPTANCE C6).
+
+    A subclass of :class:`OracleQuarantineError` so every handler PR-040 wired
+    (the CLI preflight, the registry verbs' ``ValueError`` mapping) reports it
+    with exit code 2 unchanged.
+    """
+
+    def __init__(self, detail: str) -> None:
+        ValueError.__init__(self, f"label quarantine: {detail} — refused")
+
+
+def check_label_quarantine(
+    features: Iterable[str],
+    oracle: OracleQuarantineConfig | None,
+    *,
+    diagnostics: Iterable[str] = (),
+) -> None:
+    """Raise :class:`LabelAsFeatureError` if a feature is a label.
+
+    A label is a column whose name starts case-insensitively with
+    ``[data.oracle] label_namespace`` (the program's ``y__``), or one listed in
+    ``[m9] diagnostic_columns``. Labels are consumed only as
+    ``data.target_column``. Checked on the feature list the pipeline selects
+    (``features.spec``), which is the only route a column takes into a model.
+    A missing ``[data.oracle]`` table refuses (fail closed), as in PR-040.
+    """
+    if oracle is None:
+        msg = "no [data.oracle] table in the config, so labels cannot be told from features"
+        raise LabelAsFeatureError(msg)
+    prefix = oracle.label_namespace.casefold()
+    listed = set(diagnostics)
+    hits = [c for c in features if c.casefold().startswith(prefix) or c in listed]
+    if hits:
+        msg = (
+            f"feature column(s) {hits} are labels (namespace {oracle.label_namespace!r} "
+            "or [m9] diagnostic_columns); a label is consumed only as data.target_column"
+        )
+        raise LabelAsFeatureError(msg)
+
+
+def check_feature_labels(cfg: RuxMLConfig) -> None:
+    """:func:`check_label_quarantine` on ``cfg``'s feature spec and ``[m9]`` diagnostics.
+
+    Called by every training-set build before it loads: the CLI preflight
+    (``train``, ``tune``), the promote re-fit, the scorer and the tune objective.
+    """
+    spec = cfg.features.spec
+    check_label_quarantine(
+        [*spec.numeric_columns, *spec.categorical_columns],
+        cfg.data.oracle,
+        diagnostics=cfg.m9.diagnostic_columns if cfg.m9 is not None else (),
+    )
 
 
 def check_oracle_quarantine(path: Path, oracle: OracleQuarantineConfig | None) -> None:

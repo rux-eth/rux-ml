@@ -18,6 +18,11 @@
 # `config/harness.toml` [oracle]. Removing this table refuses all ingest.
 namespace = "oracle__"
 tag_file = "ORACLE.tag"
+# PR-043 label quarantine (program D38 #3, ACCEPTANCE C6): a column in this
+# namespace is a supervised label, consumed only as data.target_column — every
+# training-set build refuses one among the features (exit 2). The program's
+# materializer namespaces labels `y__` (D38 #2).
+label_namespace = "y__"
 
 [features]
 # `categorical_low_card_threshold` deliberately has no default per D4 (BEST-GUESS).

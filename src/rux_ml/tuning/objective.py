@@ -50,6 +50,7 @@ from rux_ml.config import (
     RuxMLConfig,
 )
 from rux_ml.data import (
+    check_feature_labels,
     load_parquet,
     make_splits,
     make_splitter,
@@ -303,6 +304,7 @@ def build_objective(base_cfg: RuxMLConfig) -> Callable[[optuna.Trial], float]:
 
     # Data is loaded once outside the closure so every trial shares the same in-memory copy.
     # (Per D6 sequential trials, the closure is only ever called serially.)
+    check_feature_labels(base_cfg)  # PR-043: a label is never a feature
     df_full = materialize(load_parquet(source_path, oracle=base_cfg.data.oracle))
     # PR-031: HPO CV substrate is splits["train"] + splits["val"]; the test fold
     # is truly held out from HP search. See _carve_substrate for the convention

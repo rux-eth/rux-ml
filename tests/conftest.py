@@ -69,9 +69,7 @@ def repo_oracle_cfg() -> OracleQuarantineConfig:
 def repo_oracle_toml() -> str:
     """A ``[data.oracle]`` table (repo values) to append to a test-written TOML."""
     values = repo_oracle_values()
-    return (
-        f'\n[data.oracle]\nnamespace = "{values["namespace"]}"\ntag_file = "{values["tag_file"]}"\n'
-    )
+    return "\n[data.oracle]\n" + "".join(f'{k} = "{v}"\n' for k, v in values.items())
 
 
 @pytest.fixture

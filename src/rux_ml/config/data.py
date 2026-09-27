@@ -22,6 +22,9 @@ class OracleQuarantineConfig(StrictModel):
     namespace: str = Field(min_length=1)
     # File name that tags a directory as an oracle store (any ancestor, any depth).
     tag_file: str = Field(min_length=1)
+    # PR-043: column-name prefix of supervised labels (matched case-insensitively);
+    # a column in it is consumed only as ``data.target_column``, never a feature.
+    label_namespace: str = Field(min_length=1)
 
     @field_validator("tag_file")
     @classmethod
