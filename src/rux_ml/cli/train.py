@@ -31,6 +31,7 @@ from rux_ml.cli._shared import get_options, refuse_oracle_source
 from rux_ml.config import RuxMLConfig, XGBoostTraining
 from rux_ml.config.m9_gates import M9Gates, M9GatesError, load_m9_gates
 from rux_ml.data import load_parquet, make_splits, materialize, split_definition
+from rux_ml.data.leakage import LeakageError, assert_regime_clean, leakage_audit
 from rux_ml.features import cardinalities_from, make_features
 from rux_ml.runs import (
     TrialAttrs,
@@ -102,6 +103,31 @@ def _label_diagnostics(
                 "max": _stat(s.max()),
             }
     return out
+
+
+def _leakage(cfg: RuxMLConfig, splits: dict[str, pl.DataFrame]) -> dict[str, Any]:
+    """PR-045: audit the split (program C9's leakage tests) and, for an ``[m9]`` fit,
+    refuse a regime whose separation the audit does not find (exit 2).
+
+    The stamp window is the label's reach (``[m9] h_max_ms``, program PR-024 A3),
+    else the split embargo; every fit records the audit, only ``[m9]`` fits enforce it (a
+    legacy ``time_ordered`` problem with no embargo promises no stamp separation).
+    """
+    window = cfg.m9.h_max_ms if cfg.m9 is not None else None
+    if window is None:
+        window = cfg.data.split_embargo
+    audit = leakage_audit(
+        splits,
+        time_column=cfg.data.time_column,
+        group_column=cfg.data.group_column,
+        window=window,
+    )
+    if cfg.m9 is not None:
+        try:
+            assert_regime_clean(cfg.data.split_kind, audit)
+        except LeakageError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+    return audit
 
 
 def _m9_gates(cfg: RuxMLConfig) -> M9Gates | None:
@@ -186,6 +212,7 @@ def _fit_and_score(
             _label_diagnostics(splits, cfg.m9.diagnostic_columns) if cfg.m9 is not None else {}
         ),
         "split_definition": split_definition(cfg, df, splits),
+        "leakage": _leakage(cfg, splits),
     }
     x_train, y_train = _strip_target(splits["train"], target_col)
     x_val, y_val = _strip_target(splits["val"], target_col)

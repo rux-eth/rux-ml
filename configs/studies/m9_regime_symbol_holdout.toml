@@ -1,0 +1,10 @@
+# M9 evaluation regime overlay (PR-045; rux-capital program v0.3 D41, ACCEPTANCE C9).
+#
+# Symbol holdout (program D41): whole coins per partition, fixed by the problem's symbol_holdout_seed; the leakage audit must find no coin in two partitions, else the fit is refused.
+#
+# Use with any M9 problem: rux-ml --problem m9_walk_bp --study m9_regime_symbol_holdout train
+# The fit's fold_meta.json records split_definition (the fold definition) and
+# leakage (the audit), the C9 evidence per (target, regime).
+
+[data]
+split_kind = "symbol_holdout"
