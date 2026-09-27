@@ -32,6 +32,9 @@ from rux_ml._internal.hashing import canonical_json
 from rux_ml.config.cv import CVConfig, KFoldCV
 from rux_ml.config.data import DataConfig
 from rux_ml.config.features import FeaturesConfig
+from rux_ml.config.m9 import (
+    M9Config,  # noqa: TC001 — Pydantic needs runtime resolution for the field annotation
+)
 from rux_ml.config.memory import MemoryConfig
 from rux_ml.config.registry import RegistryConfig
 from rux_ml.config.runs import RunsConfig
@@ -64,7 +67,14 @@ _HASH_ELIDED_FIELDS: dict[str, set[str]] = {
     "memory": set(),
     "cv": set(),
     "solving": set(),
+    "m9": set(),
 }
+
+# Optional layers added after configs had recorded hashes (PR-041). While unset they
+# contribute nothing to ``cfg_hash`` — otherwise every existing config's
+# ``root_cfg_hash`` would move by the dump gaining ``"<layer>": null`` (the PR-040
+# Group D finding). Once set, the layer is hashed like any other.
+_HASH_OPTIONAL_LAYERS: frozenset[str] = frozenset({"m9"})
 
 
 def _elide(d: dict[str, Any], excluded: set[str]) -> dict[str, Any]:
@@ -107,6 +117,9 @@ class RuxMLConfig(BaseSettings):
     # mirror), the solving layer reuses the config / registry / Optuna
     # substrate but bypasses ``cfg.data`` and ``cfg.cv``.
     solving: SolvingConfig | None = None
+    # PR-041: the M9 problem layer (program v0.3). Optional — unset for every
+    # non-M9 problem, and hash-neutral while unset (``_HASH_OPTIONAL_LAYERS``).
+    m9: M9Config | None = None
     search_space: dict[str, SearchSpec] = Field(default_factory=dict)
 
     model_config = SettingsConfigDict(
@@ -145,6 +158,28 @@ class RuxMLConfig(BaseSettings):
                 f"path (rux-ml train). Set data.split_kind = 'time_ordered' and "
                 f"data.time_column to a timestamp column to keep the baseline "
                 f"chronologically ordered. See PR-024."
+            )
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _validate_m9_diagnostics(self) -> RuxMLConfig:
+        """PR-041: a diagnostic label is neither the target nor a feature."""
+        if self.m9 is None:
+            return self
+        diagnostics = set(self.m9.diagnostic_columns)
+        if self.data.target_column in diagnostics:
+            msg = (
+                f"m9.diagnostic_columns lists data.target_column "
+                f"{self.data.target_column!r}: a problem trains on one label only"
+            )
+            raise ValueError(msg)
+        spec = self.features.spec
+        leaked = sorted(diagnostics & {*spec.numeric_columns, *spec.categorical_columns})
+        if leaked:
+            msg = (
+                f"m9.diagnostic_columns {leaked} are also feature columns: "
+                "a label is never a feature"
             )
             raise ValueError(msg)
         return self
@@ -231,6 +266,8 @@ def cfg_hash(cfg: RuxMLConfig) -> str:
     dumped = _dump_canonical(cfg)
     elided: dict[str, Any] = {}
     for layer, value in dumped.items():
+        if layer in _HASH_OPTIONAL_LAYERS and value is None:
+            continue
         if isinstance(value, dict) and layer in _HASH_ELIDED_FIELDS:
             elided[layer] = _elide(cast("dict[str, Any]", value), _HASH_ELIDED_FIELDS[layer])
         else:
@@ -241,7 +278,7 @@ def cfg_hash(cfg: RuxMLConfig) -> str:
 def layer_cfg_hash(cfg: RuxMLConfig, layer: str) -> str:
     """SHA-256 over canonical JSON of one config layer, with that layer's elision applied.
 
-    Layers: data | features | training | tuning | runs | registry | memory.
+    Layers: data | features | training | tuning | runs | registry | memory | cv | solving | m9.
     """
     if layer not in _HASH_ELIDED_FIELDS:
         msg = f"unknown layer {layer!r} (known: {sorted(_HASH_ELIDED_FIELDS)})"

@@ -203,3 +203,14 @@ def test_catboost_thread_count_from_omp_num_threads(monkeypatch: pytest.MonkeyPa
     trainer = make_trainer(cfg)
     params = trainer.get_params()  # pyright: ignore[reportAttributeAccessIssue]
     assert params["thread_count"] == 3
+
+
+def test_catboost_brier_metric_translated_to_rmse() -> None:
+    """PR-041: ``brier`` joined the shared metric registry; CatBoost's
+    ``_METRIC_TRANSLATE[cfg.metric]`` would raise KeyError without an entry."""
+    from catboost import CatBoostRegressor  # noqa: PLC0415
+
+    cfg = CatBoostTraining(device="cpu", metric="brier", iterations=4, early_stopping_rounds=None)
+    trainer = make_trainer(cfg)
+    assert isinstance(trainer._base, CatBoostRegressor)  # pyright: ignore[reportAttributeAccessIssue]
+    assert trainer.get_params()["eval_metric"] == "RMSE"  # pyright: ignore[reportAttributeAccessIssue]

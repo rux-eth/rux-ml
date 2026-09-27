@@ -23,6 +23,13 @@ if TYPE_CHECKING:
     from rux_ml.training.xgboost.config import XGBoostTraining
 
 
+# Workbench metric -> XGBoost ``eval_metric`` when the names differ (PR-041; the
+# LightGBM factory's ``_METRIC_TRANSLATE`` is the precedent). XGBoost has no
+# "brier": on a probability forecast Brier = rmse^2, so early stopping on rmse
+# selects the same iteration.
+_EVAL_METRIC_TRANSLATE: dict[str, str] = {"brier": "rmse"}
+
+
 def _xgb_kwargs(cfg: XGBoostTraining, *, seed: int | None) -> dict[str, object]:
     """Assemble the XGBoost kwargs from ``XGBoostTraining`` fields + model_kwargs.
 
@@ -47,7 +54,7 @@ def _xgb_kwargs(cfg: XGBoostTraining, *, seed: int | None) -> dict[str, object]:
         "subsample": cfg.subsample,
         "colsample_bytree": cfg.colsample_bytree,
         "early_stopping_rounds": cfg.early_stopping_rounds,
-        "eval_metric": cfg.metric,
+        "eval_metric": _EVAL_METRIC_TRANSLATE.get(cfg.metric, cfg.metric),
     }
     if seed is not None:
         base["random_state"] = seed

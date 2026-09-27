@@ -54,6 +54,9 @@ _METRIC_TRANSLATE = {
     "logloss": "Logloss",
     "rmse": "RMSE",
     "mae": "MAE",
+    # PR-041: CatBoost has no Brier metric; Brier = RMSE^2 on a probability, so
+    # early stopping on RMSE selects the same iteration.
+    "brier": "RMSE",
 }
 
 

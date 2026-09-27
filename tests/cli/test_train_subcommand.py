@@ -10,15 +10,21 @@ the CLI integration test below exercises it end-to-end through
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
 import optuna
 import polars as pl
 import pytest
+from optuna.artifacts import download_artifact
 from typer.testing import CliRunner
+from xgboost import XGBClassifier
 
 from rux_ml.cli import app
+from rux_ml.cli.train import _label_diagnostics  # pyright: ignore[reportPrivateUsage]
+from rux_ml.config import RuxMLConfig
+from rux_ml.runs import list_trial_artifacts, make_artifact_store
 from tests.conftest import repo_oracle_toml
 
 
@@ -193,16 +199,12 @@ def test_train_time_ordered_path_end_to_end_cpu(
     )
     assert result.exit_code == 0, result.stderr or result.stdout
     assert "score (auc):" in result.stdout
-    score_line = next(
-        line for line in result.stdout.splitlines() if "score (auc):" in line
-    )
+    score_line = next(line for line in result.stdout.splitlines() if "score (auc):" in line)
     score = float(score_line.split(":")[-1].strip())
     assert 0.0 <= score <= 1.0
 
 
-def test_train_time_ordered_rejects_missing_time_column(
-    runner: CliRunner, tmp_path: Path
-) -> None:
+def test_train_time_ordered_rejects_missing_time_column(runner: CliRunner, tmp_path: Path) -> None:
     """PR-024 cross-field validator: ``time_ordered`` without ``time_column`` fails."""
     config = tmp_path / "base.toml"
     config.write_text(
@@ -218,14 +220,11 @@ def test_train_time_ordered_rejects_missing_time_column(
     assert "time_column" in str(result.exception)
 
 
-def test_train_temporal_cv_rejects_random_split(
-    runner: CliRunner, tmp_path: Path
-) -> None:
+def test_train_temporal_cv_rejects_random_split(runner: CliRunner, tmp_path: Path) -> None:
     """PR-024 cross-field validator: temporal CV + random split fails fast."""
     config = tmp_path / "base.toml"
     config.write_text(
-        '[data]\nsource_path = "/nonexistent"\ntarget_column = "y"\n\n'
-        '[cv]\nkind = "time_series"\n'
+        '[data]\nsource_path = "/nonexistent"\ntarget_column = "y"\n\n[cv]\nkind = "time_series"\n'
     )
     result = runner.invoke(app, ["--config", str(config), "train"])
     assert result.exit_code != 0
@@ -294,3 +293,114 @@ def test_train_runs_end_to_end_gpu(runner: CliRunner, train_workdir: Path) -> No
     )
     assert result.exit_code == 0, result.stderr or result.stdout
     assert "score (auc):" in result.stdout
+
+
+# ---------- PR-041: the other labels ride as diagnostics ----------
+
+
+def test_train_records_label_diagnostics_in_fold_meta(
+    runner: CliRunner, train_workdir: Path
+) -> None:
+    """``[m9] diagnostic_columns`` are summarised per one-off fold, never trained on."""
+    src = train_workdir / "synth.parquet"
+    df = pl.read_parquet(src)
+    df = df.with_columns((pl.col("x1") * 2.0).alias("y__other"))
+    df.write_parquet(src)
+    config = train_workdir / "base.toml"
+    config.write_text(config.read_text() + '\n[m9]\ndiagnostic_columns = ["y__other"]\n')
+
+    result = runner.invoke(app, _argv(train_workdir, "train"), catch_exceptions=False)
+    assert result.exit_code == 0, result.stderr or result.stdout
+
+    storage = f"sqlite:///{train_workdir}/studies/studies.db"
+    summary = optuna.get_all_study_summaries(storage=storage)[0]
+    metas = list_trial_artifacts(storage, summary.study_name, 0)
+    fold_meta_id = next(m.artifact_id for m in metas if m.filename == "fold_meta.json")
+    cfg = RuxMLConfig.from_layers(config)
+    store = make_artifact_store(cfg, study_name=summary.study_name)
+    out = train_workdir / "fold_meta.json"
+    download_artifact(artifact_store=store, artifact_id=fold_meta_id, file_path=str(out))
+    entry = json.loads(out.read_text())[0]
+    diag = entry["diagnostics"]
+    assert set(diag) == {"train", "val"}
+    assert set(diag["train"]) == {"y__other"}
+    stats = diag["train"]["y__other"]
+    assert set(stats) == {"n", "null_count", "mean", "std", "min", "max"}
+    assert stats["n"] + diag["val"]["y__other"]["n"] == int(200 * 0.85)
+    assert stats["min"] <= stats["mean"] <= stats["max"]
+
+
+def test_train_refuses_a_diagnostic_column_missing_from_the_set(
+    runner: CliRunner, train_workdir: Path
+) -> None:
+    config = train_workdir / "base.toml"
+    config.write_text(config.read_text() + '\n[m9]\ndiagnostic_columns = ["y__absent"]\n')
+    result = runner.invoke(app, _argv(train_workdir, "train"))
+    assert result.exit_code == 2, result.stdout
+    assert "y__absent" in (result.stderr or result.stdout)
+
+
+def test_label_diagnostics_count_nulls_apart_and_never_report_a_missing_mean_as_zero() -> None:
+    """A diagnostic label may be null on rows where it is undefined (a markout on an
+    unfilled rung, program D37 #2 "conditional on fill"). ``n`` counts values only,
+    ``null_count`` counts the rest (NaN included), and an all-null column reports
+    ``None`` statistics rather than a fabricated 0.0."""
+    train = pl.DataFrame({"y__a": [1.0, None, 3.0, float("nan")], "y__b": [None, None, None, None]})
+    val = pl.DataFrame({"y__a": [2.0, 4.0], "y__b": [0.5, None]})
+    out = _label_diagnostics({"train": train, "val": val}, ["y__a", "y__b"])
+    a = out["train"]["y__a"]
+    # hand-computed over the two values {1, 3}: mean 2, sample std sqrt(2)
+    assert a == {
+        "n": 2.0,
+        "null_count": 2.0,
+        "mean": 2.0,
+        "std": pytest.approx(2.0**0.5),
+        "min": 1.0,
+        "max": 3.0,
+    }
+    assert out["train"]["y__b"] == {
+        "n": 0.0,
+        "null_count": 4.0,
+        "mean": None,
+        "std": None,
+        "min": None,
+        "max": None,
+    }
+    b = out["val"]["y__b"]
+    assert (b["n"], b["null_count"], b["mean"], b["min"], b["max"]) == (1.0, 1.0, 0.5, 0.5, 0.5)
+    assert b["std"] is None  # one value has no sample std
+
+
+# ---------- program PR-024 A9: a null target never reaches XGBoost ----------
+
+
+def test_row_filter_keeps_null_targets_out_of_the_xgboost_fit(
+    runner: CliRunner, train_workdir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A label undefined on a row (the markout of an unfilled order is null, program
+    PR-024 A9) is dropped by ``[m9] row_filter_non_null`` before the split, so neither
+    the fitted nor the early-stopping target XGBoost receives holds a missing value."""
+    src = train_workdir / "synth.parquet"
+    df = pl.read_parquet(src).with_row_index("i")
+    null_rows = df["i"] % 5 == 0  # 40 of the 200 rows lose their target
+    df = df.with_columns(pl.when(null_rows).then(None).otherwise(pl.col("y")).alias("y"))
+    df.drop("i").write_parquet(src)
+    config = train_workdir / "base.toml"
+    config.write_text(config.read_text() + '\n[m9]\nrow_filter_non_null = ["y"]\n')
+
+    seen: list[np.ndarray] = []
+    original_fit = XGBClassifier.fit
+
+    def spy(self: XGBClassifier, x: object, y: object, **kw: object) -> object:
+        seen.append(np.asarray(y, dtype=float))
+        for _, y_eval in kw.get("eval_set") or []:  # type: ignore[union-attr]
+            seen.append(np.asarray(y_eval, dtype=float))
+        return original_fit(self, x, y, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(XGBClassifier, "fit", spy)
+    result = runner.invoke(app, _argv(train_workdir, "train"), catch_exceptions=False)
+    assert result.exit_code == 0, result.stderr or result.stdout
+    assert len(seen) == 2  # the fitted target and the eval-set target
+    assert not any(np.isnan(y).any() for y in seen)
+    # 160 kept rows: train int(160 * 0.7) = 112, val int(160 * 0.15) = 24
+    assert [y.size for y in seen] == [112, 24]

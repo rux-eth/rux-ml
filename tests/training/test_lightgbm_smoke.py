@@ -136,3 +136,12 @@ def test_lightgbm_logloss_metric_translated_to_binary_logloss() -> None:
     # translated metric is in the constructor kwargs that flow through **kwargs.
     params = trainer.get_params()  # pyright: ignore[reportAttributeAccessIssue]
     assert params["metric"] == "binary_logloss"
+
+
+def test_lightgbm_brier_metric_translated_to_rmse() -> None:
+    """PR-041: ``brier`` joined the shared metric registry; LightGBM has no
+    ``brier`` metric, and Brier = RMSE^2 on a probability, so early stopping on
+    ``rmse`` selects the same iteration (the XGBoost translation's rationale)."""
+    cfg = LightGBMTraining(device="cpu", metric="brier", n_estimators=4, early_stopping_rounds=None)
+    params = make_trainer(cfg).get_params()  # pyright: ignore[reportAttributeAccessIssue]
+    assert params["metric"] == "rmse"

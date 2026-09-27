@@ -16,7 +16,7 @@ from rux_ml.training.metrics import (
 
 
 def test_registry_keys_match_spec() -> None:
-    assert set(METRIC_REGISTRY) == {"auc", "logloss", "rmse", "mae"}
+    assert set(METRIC_REGISTRY) == {"auc", "logloss", "rmse", "mae", "brier"}
 
 
 @pytest.mark.parametrize(
@@ -26,6 +26,7 @@ def test_registry_keys_match_spec() -> None:
         ("logloss", "classification"),
         ("rmse", "regression"),
         ("mae", "regression"),
+        ("brier", "regression"),
     ],
 )
 def test_task_for_metric(metric: str, expected_task: str) -> None:
@@ -112,3 +113,36 @@ def test_compute_score_mae_constant_prediction() -> None:
     score = compute_score("mae", reg, x_eval=np.zeros((3, 1)), y_eval=y_true)
     # mae = (|1-3| + 0 + |5-3|) / 3 = 4/3
     assert math.isclose(score, 4.0 / 3.0, rel_tol=1e-9)
+
+
+# ---------- PR-041: Brier score for a fractional outcome ----------
+
+
+class _ConstPredictor:
+    def __init__(self, value: float) -> None:
+        self._value = value
+
+    def fit(self, *args: object, **kwargs: object) -> _ConstPredictor:
+        return self
+
+    def predict(self, x: object) -> np.ndarray:
+        return np.full(len(x), self._value)  # type: ignore[arg-type]
+
+
+def test_brier_is_the_mean_squared_error_of_the_probability() -> None:
+    """y = fill fractions in [0, 1]; a constant 0.5 forecast scores mean((0.5 - y)^2)."""
+    y = np.array([0.0, 0.25, 1.0, 0.5])
+    score = compute_score("brier", _ConstPredictor(0.5), np.zeros((4, 1)), y)
+    assert math.isclose(score, float(np.mean((0.5 - y) ** 2)))
+    assert optuna_direction("brier") == "minimize"
+
+
+@pytest.mark.parametrize("bad", [np.array([0.0, 1.5]), np.array([-0.1, 0.5])])
+def test_brier_refuses_an_outcome_outside_the_unit_interval(bad: np.ndarray) -> None:
+    with pytest.raises(ValueError, match=r"\[0, 1\]"):
+        compute_score("brier", _ConstPredictor(0.5), np.zeros((2, 1)), bad)
+
+
+def test_brier_refuses_a_forecast_outside_the_unit_interval() -> None:
+    with pytest.raises(ValueError, match=r"\[0, 1\]"):
+        compute_score("brier", _ConstPredictor(1.2), np.zeros((2, 1)), np.array([0.0, 1.0]))

@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from xgboost import XGBClassifier, XGBModel, XGBRegressor
 
 from rux_ml.training import TRAINER_FAMILIES, Trainer, XGBoostTraining, make_trainer
+from rux_ml.training.xgboost.factory import _xgb_kwargs  # pyright: ignore[reportPrivateUsage]
 
 
 def _accept(_trainer: Trainer) -> None:
@@ -146,3 +147,11 @@ def test_trainer_exposes_best_iteration_after_early_stopping_fit() -> None:
     trainer.fit(x, y, eval_set=[(x, y)], verbose=False)
     best = getattr(trainer, "best_iteration", None)
     assert isinstance(best, int)
+
+
+def test_brier_early_stops_on_xgboost_rmse() -> None:
+    """XGBoost has no 'brier' eval metric; Brier = RMSE^2 on a probability, so early
+    stopping on rmse is the same ordering (PR-041)."""
+    cfg = XGBoostTraining(metric="brier")
+    assert _xgb_kwargs(cfg, seed=None)["eval_metric"] == "rmse"
+    assert isinstance(make_trainer(cfg), XGBRegressor)

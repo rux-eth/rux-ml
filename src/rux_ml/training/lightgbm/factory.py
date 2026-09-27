@@ -41,8 +41,10 @@ if TYPE_CHECKING:
     from rux_ml.training.protocol import Trainer
 
 # LightGBM rejects "logloss" as a metric name; canonical is "binary_logloss".
-# Other workbench metrics (auc, rmse, mae) pass through unchanged.
-_METRIC_TRANSLATE = {"logloss": "binary_logloss"}
+# LightGBM has no "brier" (PR-041): Brier = rmse^2 on a probability, so early
+# stopping on rmse selects the same iteration. Other workbench metrics (auc,
+# rmse, mae) pass through unchanged.
+_METRIC_TRANSLATE = {"logloss": "binary_logloss", "brier": "rmse"}
 
 
 class _LightGBMTrainerShim:
