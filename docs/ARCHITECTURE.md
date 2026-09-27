@@ -221,6 +221,10 @@ The program's M9 node (fill fraction, markout, book-walk) trains three **problem
 
 `train` records the split in `fold_meta.json` `split_definition` (the groups per partition, or the embargo and the rows it purged). With `[m9]` set, a `time_ordered` split requires `m9.h_max_ms` and `split_embargo ≥ h_max_ms` (fail closed). `h_max_ms` is the label's **reach** (program PR-024 amendment A3): entry latency + the order's resting horizon + the longest markout horizon = 1 s + 4 h + 4 h = 28,801,000 ms in the M9 configs (≥ 33 bars of the 15-min label grid); rows dropped by `[m9] row_filter_non_null` are recorded as `row_filter_dropped`, apart from `purged_rows`. The three new data fields are hash-neutral while None (`_HASH_OPTIONAL_FIELDS`).
 
+### The leakage audit and the M9 regimes (per PR-045; program v0.3 D41, ACCEPTANCE C9)
+
+Every `train` fit records `rux_ml.data.leakage.leakage_audit` in `fold_meta.json` `leakage`: **stamp violations** (rows of val, resp. test, with a stamp of the partitions fitted before them — train, resp. train + val — within the window, `|s − t| ≤ window`; the window is `[m9] h_max_ms`, else `data.split_embargo`) and **group overlaps** (groups present in two partitions, per pair). It is a different algorithm from the splitters (binary search over sorted unique stamps; set intersection), so it checks them. For an `[m9]` fit, `assert_regime_clean` refuses (exit 2) a `time_ordered` split with any stamp violation and a `symbol_holdout` split with any group overlap; `random` (row-random, diagnostic) promises nothing and is recorded only. The three regimes are committed as study overlays `configs/studies/m9_regime_{row_random,time_block,symbol_holdout}.toml`.
+
 ### Categorical encoding (per D4)
 
 ```

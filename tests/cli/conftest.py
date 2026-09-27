@@ -24,7 +24,8 @@ GRID_MS = 900_000  # a 15-minute label grid, as program D45 #3's label_grid_ms
 
 def _c6_day(day: int, rng: np.random.Generator) -> pl.DataFrame:
     stamps = [day * DAY_MS + i * GRID_MS for i in range(DAY_MS // GRID_MS)]
-    coins = ["BTC", "ETH", "SOL", "DOGE", "AVAX", "LINK"]
+    # 12 coins: under the M9 configs' symbol_holdout_seed every partition gets one.
+    coins = ["BTC", "ETH", "SOL", "DOGE", "AVAX", "LINK", "XRP", "ADA", "SUI", "HYPE", "BNB", "LTC"]
     rows = [(t, c, s) for t in stamps for c in coins for s in ("buy", "sell")]
     n = len(rows)
     q = rng.choice([100.0, 300.0, 1000.0, 3000.0], size=n)

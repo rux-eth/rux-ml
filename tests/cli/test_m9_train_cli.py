@@ -102,3 +102,43 @@ def test_markout_fit_trains_and_scores_on_filled_rows_only(
     assert meta["split_definition"]["row_filter_dropped"] == nulls
     oos = meta["oos"]
     assert oos["metric"] == "mae" and oos["n_scored"] == oos["n_rows"] > 0
+
+
+# ---------- PR-045: the three regimes, audited on every fit ----------
+
+
+def _fit(
+    runner: CliRunner, tmp: Path, c6: Path, gates: dict[str, str], study: str
+) -> dict[str, Any]:
+    argv = m9_argv(tmp, c6, "m9_walk_bp", *m9_gates_overrides(gates), "--study", study, "train")
+    result = runner.invoke(app, argv, catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    return _fold_meta(tmp, "m9_walk_bp")
+
+
+def test_row_random_regime_records_leakage_on_both_axes(
+    runner: CliRunner, c6_set: Path, tmp_path: Path, signed_m9_gates: dict[str, str]
+) -> None:
+    meta = _fit(runner, tmp_path, c6_set, signed_m9_gates, "m9_regime_row_random")
+    leak = meta["leakage"]
+    assert meta["split_definition"]["kind"] == "random"
+    assert leak["window"] == 14_400_000  # [m9] h_max_ms
+    assert leak["stamp_violations"]["test_vs_fitted"] > 0
+    assert leak["group_overlap"]["train&test"] > 0
+
+
+def test_time_block_regime_has_no_fitted_stamp_within_h_max(
+    runner: CliRunner, c6_set: Path, tmp_path: Path, signed_m9_gates: dict[str, str]
+) -> None:
+    meta = _fit(runner, tmp_path, c6_set, signed_m9_gates, "m9_regime_time_block")
+    assert meta["leakage"]["stamp_violations"] == {"val_vs_train": 0, "test_vs_fitted": 0}
+    assert meta["split_definition"]["purged_rows"] > 0
+
+
+def test_symbol_holdout_regime_has_no_holdout_coin_in_train(
+    runner: CliRunner, c6_set: Path, tmp_path: Path, signed_m9_gates: dict[str, str]
+) -> None:
+    meta = _fit(runner, tmp_path, c6_set, signed_m9_gates, "m9_regime_symbol_holdout")
+    assert meta["leakage"]["group_overlap"] == {"train&val": 0, "train&test": 0, "val&test": 0}
+    groups = meta["split_definition"]["groups"]
+    assert groups == {"train": sorted(groups["train"]), "val": ["SUI"], "test": ["ADA", "AVAX"]}

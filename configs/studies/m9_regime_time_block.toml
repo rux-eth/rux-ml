@@ -1,0 +1,10 @@
+# M9 evaluation regime overlay (PR-045; rux-capital program v0.3 D41, ACCEPTANCE C9).
+#
+# Time-block purged (program D41): time-ordered on stamp_ms with the problem's split_embargo >= [m9] h_max_ms (refused at load otherwise); the leakage audit must find no fitted stamp within h_max of a later row's stamp, else the fit is refused.
+#
+# Use with any M9 problem: rux-ml --problem m9_walk_bp --study m9_regime_time_block train
+# The fit's fold_meta.json records split_definition (the fold definition) and
+# leakage (the audit), the C9 evidence per (target, regime).
+
+[data]
+split_kind = "time_ordered"
