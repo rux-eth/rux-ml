@@ -22,6 +22,8 @@ dependencies = [
     "category-encoders>=2.6",
     "pyarrow>=17",
     "optuna>=4.0",
+    # PR-044: read the program's signed gates.yaml (already locked, via optuna).
+    "pyyaml>=6.0",
     "skfolio>=0.20.1",
     "optuna-integration[xgboost]>=4.8.0",
     "skops>=0.10",

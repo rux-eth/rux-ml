@@ -69,7 +69,22 @@ metric = "mae"
 # boundary read past it. Every term is an existing program key: re-derive this (and
 # split_embargo) if any of them moves.
 h_max_ms = 28801000
+# PR-044 (program D45 #3): MAE in bp with the signed-error honesty test on the held-out partition.
+signed_error_honesty = true
 # The other labels of the table, summarised per fold beside every run and never
 # trained on (D45 #3: "the others diagnostics"). The markout horizon-curve columns
 # and time-to-fill are added when PR-024's schema file names them — QUESTION Q4.
 diagnostic_columns = ["y__fill_frac", "y__markout_bp"]
+
+[m9.gates]
+# PR-044: the four operator-signed M9 keys (program ACCEPTANCE C9) are read from
+# the rux-capital program's signed registry, verified with ssh-keygen -Y against
+# the signer named HERE (never the file's own signature block). Paths are relative
+# to the rux-ml checkout, assuming the sibling layout ~/projects/{rux-ml,
+# rux-capital/program} — QUESTION Q11 for the lead (the desktop's layout).
+# Fail closed: until the operator signs the four keys in, M9 training refuses.
+path = "../rux-capital/program/config/gates.yaml"
+signature_path = "../rux-capital/program/config/gates.yaml.sig"
+allowed_signers = "../rux-capital/program/config/allowed_signers"
+identity = "operator@rumpy"
+namespace = "rumpy-gates"

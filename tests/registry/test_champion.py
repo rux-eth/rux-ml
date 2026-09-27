@@ -61,6 +61,6 @@ def test_atomic_write_no_partial_file_on_replace_failure(
 
 def test_read_champion_rejects_non_object(tmp_path: Path) -> None:
     path = tmp_path / "champion.json"
-    path.write_text('[1, 2, 3]')
+    path.write_text("[1, 2, 3]")
     with pytest.raises(TypeError, match="JSON object"):
         read_champion(path)

@@ -85,3 +85,63 @@ def oracle_cfg() -> OracleQuarantineConfig:
 @pytest.fixture
 def oracle_toml() -> str:
     return repo_oracle_toml()
+
+
+# ---------- PR-044: an operator-signed gates file, signed here with a throwaway key ----------
+
+# The four signed keys and program D45 #3's proposed values (test data, not code).
+M9_GATE_VALUES: dict[str, float] = {
+    "m9_honesty_no_underdeduct_frac_min": 0.90,
+    "m9_honesty_overdeduct_max_rel": 0.30,
+    "m9_learning_curve_tolerance_rel": 0.05,
+    "m9_floor_quantile": 0.90,
+}
+M9_GATE_IDENTITY = "operator@test"
+M9_GATE_NAMESPACE = "test-gates"
+
+
+def write_signed_gates(directory: Path, thresholds: dict[str, object]) -> dict[str, str]:
+    """Write ``gates.yaml`` with ``thresholds`` (program layout), sign it with a fresh
+    ed25519 key via ``ssh-keygen -Y sign``, and return the ``[m9.gates]`` settings."""
+    import json  # noqa: PLC0415
+    import subprocess  # noqa: PLC0415
+
+    directory.mkdir(parents=True, exist_ok=True)
+    key = directory / "key"
+    if not key.exists():
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True)
+    body = "version: 1\nthresholds:\n" + "".join(
+        f"  {k}: {{value: {json.dumps(v)}, unit: ratio, label: bg}}\n"
+        for k, v in thresholds.items()
+    )
+    gates = directory / "gates.yaml"
+    gates.write_text(body)
+    sig = directory / "gates.yaml.sig"
+    sig.unlink(missing_ok=True)
+    subprocess.run(
+        ["ssh-keygen", "-q", "-Y", "sign", "-f", str(key), "-n", M9_GATE_NAMESPACE, str(gates)],
+        check=True,
+        capture_output=True,
+    )
+    signers = directory / "allowed_signers"
+    signers.write_text(f"{M9_GATE_IDENTITY} {(directory / 'key.pub').read_text().strip()}\n")
+    return {
+        "path": str(gates),
+        "signature_path": str(sig),
+        "allowed_signers": str(signers),
+        "identity": M9_GATE_IDENTITY,
+        "namespace": M9_GATE_NAMESPACE,
+    }
+
+
+@pytest.fixture
+def signed_m9_gates(tmp_path: Path) -> dict[str, str]:
+    return write_signed_gates(tmp_path / "gates", dict(M9_GATE_VALUES))
+
+
+def m9_gates_overrides(gates: dict[str, str]) -> list[str]:
+    """``--set`` arguments pointing ``[m9.gates]`` at a signed fixture."""
+    out: list[str] = []
+    for k, v in gates.items():
+        out += ["--set", f"m9.gates.{k}={v}"]
+    return out

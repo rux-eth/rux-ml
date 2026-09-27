@@ -63,9 +63,7 @@ def test_pin_threads_exports_all_four(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "POLARS_MAX_THREADS"):
         monkeypatch.delenv(key, raising=False)
 
-    memory = MemoryConfig(
-        omp_threads=12, openblas_threads=2, mkl_threads=3, polars_threads=8
-    )
+    memory = MemoryConfig(omp_threads=12, openblas_threads=2, mkl_threads=3, polars_threads=8)
     pin_threads(memory)
     assert os.environ["OMP_NUM_THREADS"] == "12"
     assert os.environ["OPENBLAS_NUM_THREADS"] == "2"
@@ -130,9 +128,13 @@ def test_trial_runner_runs_one_trial_end_to_end(child_workdir: Path) -> None:
 
     result = subprocess.run(
         [
-            sys.executable, "-m", "rux_ml._internal.trial_runner",
-            "--config", str(config),
-            "--study-name", "child_smoke",
+            sys.executable,
+            "-m",
+            "rux_ml._internal.trial_runner",
+            "--config",
+            str(config),
+            "--study-name",
+            "child_smoke",
         ],
         capture_output=True,
         text=True,
@@ -146,9 +148,18 @@ def test_trial_runner_runs_one_trial_end_to_end(child_workdir: Path) -> None:
     assert len(completed) == 1
     # 8-layer provenance set was recorded (PR-006 + PR-015 + PR-007).
     for key in (
-        "data_cfg_hash", "features_cfg_hash", "training_cfg_hash", "tuning_cfg_hash",
-        "runs_cfg_hash", "registry_cfg_hash", "memory_cfg_hash", "cv_cfg_hash",
-        "root_cfg_hash", "git_sha", "data_hash", "metric",
+        "data_cfg_hash",
+        "features_cfg_hash",
+        "training_cfg_hash",
+        "tuning_cfg_hash",
+        "runs_cfg_hash",
+        "registry_cfg_hash",
+        "memory_cfg_hash",
+        "cv_cfg_hash",
+        "root_cfg_hash",
+        "git_sha",
+        "data_hash",
+        "metric",
     ):
         assert key in completed[0].user_attrs
 
@@ -162,10 +173,15 @@ def test_trial_runner_overrides_json_round_trips(child_workdir: Path) -> None:
 
     result = subprocess.run(
         [
-            sys.executable, "-m", "rux_ml._internal.trial_runner",
-            "--config", str(config),
-            "--study-name", "child_overrides",
-            "--overrides-json", str(overrides),
+            sys.executable,
+            "-m",
+            "rux_ml._internal.trial_runner",
+            "--config",
+            str(config),
+            "--study-name",
+            "child_overrides",
+            "--overrides-json",
+            str(overrides),
         ],
         capture_output=True,
         text=True,
@@ -179,14 +195,22 @@ def test_trial_runner_overrides_json_round_trips(child_workdir: Path) -> None:
     # training_cfg_hash should differ from the no-overrides baseline because lr changed.
     baseline = subprocess.run(
         [
-            sys.executable, "-m", "rux_ml._internal.trial_runner",
-            "--config", str(config),
-            "--study-name", "child_baseline",
+            sys.executable,
+            "-m",
+            "rux_ml._internal.trial_runner",
+            "--config",
+            str(config),
+            "--study-name",
+            "child_baseline",
         ],
-        capture_output=True, text=True, check=False, timeout=60,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
     )
     assert baseline.returncode == 0
     baseline_study = optuna.load_study(study_name="child_baseline", storage=storage)
-    assert trial.user_attrs["training_cfg_hash"] != baseline_study.trials[0].user_attrs[
-        "training_cfg_hash"
-    ]
+    assert (
+        trial.user_attrs["training_cfg_hash"]
+        != baseline_study.trials[0].user_attrs["training_cfg_hash"]
+    )

@@ -82,9 +82,7 @@ def _argv(workdir: Path, *args: str) -> list[str]:
     return ["--config", str(workdir / "base.toml"), *args]
 
 
-def test_tune_start_in_process_mode_runs_2_trials(
-    runner: CliRunner, tune_workdir: Path
-) -> None:
+def test_tune_start_in_process_mode_runs_2_trials(runner: CliRunner, tune_workdir: Path) -> None:
     """Explicitly force ``trial_isolation = "in_process"`` and verify the legacy
     PR-007 path still works (no subprocess spawn). Default is "subprocess";
     other tests in this module exercise that path."""
@@ -92,8 +90,13 @@ def test_tune_start_in_process_mode_runs_2_trials(
         app,
         _argv(
             tune_workdir,
-            "--set", "tuning.trial_isolation=\"in_process\"",
-            "tune", "start", "smoke_in_proc", "--n-trials", "2",
+            "--set",
+            'tuning.trial_isolation="in_process"',
+            "tune",
+            "start",
+            "smoke_in_proc",
+            "--n-trials",
+            "2",
         ),
         catch_exceptions=False,
     )
@@ -109,7 +112,8 @@ def test_tune_start_runs_2_trials_and_records_user_attrs(
     runner: CliRunner, tune_workdir: Path
 ) -> None:
     result = runner.invoke(
-        app, _argv(tune_workdir, "tune", "start", "smoke_a", "--n-trials", "2"),
+        app,
+        _argv(tune_workdir, "tune", "start", "smoke_a", "--n-trials", "2"),
         catch_exceptions=False,
     )
     assert result.exit_code == 0, result.stderr or result.stdout
@@ -150,12 +154,14 @@ def test_tune_start_runs_2_trials_and_records_user_attrs(
 
 def test_tune_resume_appends_trials(runner: CliRunner, tune_workdir: Path) -> None:
     r1 = runner.invoke(
-        app, _argv(tune_workdir, "tune", "start", "smoke_b", "--n-trials", "2"),
+        app,
+        _argv(tune_workdir, "tune", "start", "smoke_b", "--n-trials", "2"),
         catch_exceptions=False,
     )
     assert r1.exit_code == 0, r1.stderr or r1.stdout
     r2 = runner.invoke(
-        app, _argv(tune_workdir, "tune", "resume", "smoke_b", "--n-trials", "1"),
+        app,
+        _argv(tune_workdir, "tune", "resume", "smoke_b", "--n-trials", "1"),
         catch_exceptions=False,
     )
     assert r2.exit_code == 0, r2.stderr or r2.stdout
@@ -167,7 +173,8 @@ def test_tune_resume_appends_trials(runner: CliRunner, tune_workdir: Path) -> No
 
 def test_tune_status_reports_best_value(runner: CliRunner, tune_workdir: Path) -> None:
     runner.invoke(
-        app, _argv(tune_workdir, "tune", "start", "smoke_c", "--n-trials", "2"),
+        app,
+        _argv(tune_workdir, "tune", "start", "smoke_c", "--n-trials", "2"),
         catch_exceptions=False,
     )
     result = runner.invoke(app, _argv(tune_workdir, "tune", "status", "smoke_c"))
@@ -183,9 +190,7 @@ def test_tune_status_missing_study_raises_bad_parameter(
     assert result.exit_code != 0
 
 
-def test_tune_retry_trial_enqueues_prior_params(
-    runner: CliRunner, tune_workdir: Path
-) -> None:
+def test_tune_retry_trial_enqueues_prior_params(runner: CliRunner, tune_workdir: Path) -> None:
     """Retry verb re-enqueues a prior trial's params; new trial completes with same params.
 
     The retry verb at ``cli/tune.py:retry_trial`` is state-agnostic — it looks up
@@ -240,9 +245,7 @@ def test_tune_retry_trial_missing_study_raises_bad_parameter(
     assert result.exit_code != 0
 
 
-def test_tune_start_honors_tuning_n_trials_from_toml(
-    runner: CliRunner, tune_workdir: Path
-) -> None:
+def test_tune_start_honors_tuning_n_trials_from_toml(runner: CliRunner, tune_workdir: Path) -> None:
     """PR-039 Bug 1a (RED): ``tune start`` w/o ``--n-trials`` honors TOML ``[tuning] n_trials``.
 
     Fixture sets ``[tuning] n_trials = 2``. Pre-fix: Typer binds the parameter
@@ -254,8 +257,11 @@ def test_tune_start_honors_tuning_n_trials_from_toml(
         app,
         _argv(
             tune_workdir,
-            "--set", "tuning.trial_isolation=\"in_process\"",
-            "tune", "start", "smoke_toml_honored",
+            "--set",
+            'tuning.trial_isolation="in_process"',
+            "tune",
+            "start",
+            "smoke_toml_honored",
         ),
         catch_exceptions=False,
     )
@@ -270,9 +276,7 @@ def test_tune_start_honors_tuning_n_trials_from_toml(
     )
 
 
-def test_tune_start_cli_flag_overrides_toml_n_trials(
-    runner: CliRunner, tune_workdir: Path
-) -> None:
+def test_tune_start_cli_flag_overrides_toml_n_trials(runner: CliRunner, tune_workdir: Path) -> None:
     """PR-039 Bug 1a (regression guard): explicit ``--n-trials`` beats TOML ``[tuning] n_trials``.
 
     Locks the ``CLI > TOML`` half of the override-precedence contract
@@ -283,8 +287,13 @@ def test_tune_start_cli_flag_overrides_toml_n_trials(
         app,
         _argv(
             tune_workdir,
-            "--set", "tuning.trial_isolation=\"in_process\"",
-            "tune", "start", "smoke_cli_override", "--n-trials", "3",
+            "--set",
+            'tuning.trial_isolation="in_process"',
+            "tune",
+            "start",
+            "smoke_cli_override",
+            "--n-trials",
+            "3",
         ),
         catch_exceptions=False,
     )
@@ -313,8 +322,13 @@ def test_tune_resume_honors_tuning_n_trials_from_toml(
         app,
         _argv(
             tune_workdir,
-            "--set", "tuning.trial_isolation=\"in_process\"",
-            "tune", "start", "smoke_resume_toml", "--n-trials", "1",
+            "--set",
+            'tuning.trial_isolation="in_process"',
+            "tune",
+            "start",
+            "smoke_resume_toml",
+            "--n-trials",
+            "1",
         ),
         catch_exceptions=False,
     )
@@ -323,8 +337,11 @@ def test_tune_resume_honors_tuning_n_trials_from_toml(
         app,
         _argv(
             tune_workdir,
-            "--set", "tuning.trial_isolation=\"in_process\"",
-            "tune", "resume", "smoke_resume_toml",
+            "--set",
+            'tuning.trial_isolation="in_process"',
+            "tune",
+            "resume",
+            "smoke_resume_toml",
         ),
         catch_exceptions=False,
     )
@@ -351,8 +368,13 @@ def test_tune_resume_cli_flag_overrides_toml_n_trials(
         app,
         _argv(
             tune_workdir,
-            "--set", "tuning.trial_isolation=\"in_process\"",
-            "tune", "start", "smoke_resume_cli_override", "--n-trials", "1",
+            "--set",
+            'tuning.trial_isolation="in_process"',
+            "tune",
+            "start",
+            "smoke_resume_cli_override",
+            "--n-trials",
+            "1",
         ),
         catch_exceptions=False,
     )
@@ -361,8 +383,13 @@ def test_tune_resume_cli_flag_overrides_toml_n_trials(
         app,
         _argv(
             tune_workdir,
-            "--set", "tuning.trial_isolation=\"in_process\"",
-            "tune", "resume", "smoke_resume_cli_override", "--n-trials", "3",
+            "--set",
+            'tuning.trial_isolation="in_process"',
+            "tune",
+            "resume",
+            "smoke_resume_cli_override",
+            "--n-trials",
+            "3",
         ),
         catch_exceptions=False,
     )
@@ -383,8 +410,13 @@ def test_tune_start_runs_on_gpu(runner: CliRunner, tune_workdir: Path) -> None:
         app,
         _argv(
             tune_workdir,
-            "--set", "training.device=cuda",
-            "tune", "start", "smoke_gpu", "--n-trials", "2",
+            "--set",
+            "training.device=cuda",
+            "tune",
+            "start",
+            "smoke_gpu",
+            "--n-trials",
+            "2",
         ),
         catch_exceptions=False,
     )
