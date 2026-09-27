@@ -13,7 +13,7 @@ unset optional layer contributes nothing to ``root_cfg_hash`` (``config/root.py`
 
 from __future__ import annotations
 
-from pydantic import Field, field_validator
+from pydantic import Field, ValidationInfo, field_validator
 
 from rux_ml.config._strict_model import StrictModel
 
@@ -25,13 +25,20 @@ class M9Config(StrictModel):
     # Labels carried beside the target as diagnostics (distinct, non-empty names).
     diagnostic_columns: list[str] = Field(default_factory=list)
 
-    @field_validator("diagnostic_columns")
+    # The row predicate applied before the split (program PR-024 A9): a row with a
+    # null (or NaN) in any listed column is dropped, so it is neither trained nor
+    # scored. The markout problem lists its own target — ``y__markout_bp`` is null
+    # on an unfilled order — and trains and scores on filled rows only. Empty keeps
+    # every row. A listed column absent from the set refuses the split.
+    row_filter_non_null: list[str] = Field(default_factory=list)
+
+    @field_validator("diagnostic_columns", "row_filter_non_null")
     @classmethod
-    def _distinct_non_empty(cls, v: list[str]) -> list[str]:
+    def _distinct_non_empty(cls, v: list[str], info: ValidationInfo) -> list[str]:
         if any(not c for c in v):
-            msg = "m9.diagnostic_columns: empty column name"
+            msg = f"m9.{info.field_name}: empty column name"
             raise ValueError(msg)
         if len(set(v)) != len(v):
-            msg = f"m9.diagnostic_columns must be distinct, got {v}"
+            msg = f"m9.{info.field_name} must be distinct, got {v}"
             raise ValueError(msg)
         return v

@@ -14,11 +14,13 @@
 # time-ordered one-off baseline split.
 
 [data]
-# The harness training root is declared by program PR-024 (not landed as of
-# 2026-09-26). Until then this path is a placeholder under the workbench's
-# gitignored data/ (symlink the set there, or --set data.source_path=...).
-# QUESTION Q1 for the lead: the training root's path and the set-id convention.
-source_path = "data/m9/training_set"
+# The training set has two per-target subtrees (program PR-024 §Scope, amendment
+# A7, operator-approved 2026-09-26): fill/ = the post-only rows (y__fill_frac,
+# y__markout_bp), walk/ = the taker rows (y__walk_bp). This problem reads fill/.
+# The root is a placeholder under the workbench's gitignored data/ until
+# PR-024's materializer lands (symlink the set's root there, or
+# --set data.source_path=<root>/fill).
+source_path = "data/m9/training_set/fill"
 target_column = "y__markout_bp"
 # PR-024 (rux-ml): the one-off baseline is time-ordered on the decision stamp
 # (Int64 epoch milliseconds, program ACCEPTANCE C6).
@@ -50,3 +52,7 @@ metric = "mae"
 # trained on (D45 #3: "the others diagnostics"). The markout horizon-curve columns
 # and time-to-fill are added when PR-024's schema file names them — QUESTION Q4.
 diagnostic_columns = ["y__fill_frac", "y__walk_bp"]
+# The markout is null on an unfilled order (program PR-024 §Scope, amendment A9:
+# "null when unfilled", never 0), so this problem trains and scores on the filled
+# rows only: the row predicate drops a row whose target is null before the split.
+row_filter_non_null = ["y__markout_bp"]

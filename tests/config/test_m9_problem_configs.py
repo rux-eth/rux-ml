@@ -93,3 +93,38 @@ def test_cost_problems_use_no_objective_override(problem: str) -> None:
     cfg = _load(problem)
     assert isinstance(cfg.training, XGBoostTraining)
     assert "objective" not in cfg.training.model_kwargs
+
+
+# ---------- program PR-024 A7 / A9 (operator-approved 2026-09-26) ----------
+
+# problem -> the training set's per-target subtree (program PR-024 A7): ``fill/`` holds
+# the post-only rows (y__fill_frac, y__markout_bp), ``walk/`` the taker rows (y__walk_bp).
+SUBTREES: dict[str, str] = {
+    "m9_fill_frac": "fill",
+    "m9_markout_bp": "fill",
+    "m9_walk_bp": "walk",
+}
+
+
+@pytest.mark.parametrize("problem", sorted(PROBLEMS))
+def test_problem_reads_its_own_training_subtree(problem: str) -> None:
+    cfg = _load(problem)
+    assert cfg.data.source_path is not None
+    assert cfg.data.source_path.name == SUBTREES[problem]
+    # the three problems share one training root; only the subtree differs
+    assert cfg.data.source_path.parent == _load("m9_fill_frac").data.source_path.parent  # type: ignore[union-attr]
+
+
+def test_markout_problem_trains_and_scores_on_filled_rows_only() -> None:
+    """y__markout_bp is null on an unfilled row (program PR-024 A9), so the markout
+    problem keeps only the rows where its target is present."""
+    cfg = _load("m9_markout_bp")
+    assert cfg.m9 is not None
+    assert cfg.m9.row_filter_non_null == ["y__markout_bp"]
+
+
+@pytest.mark.parametrize("problem", ["m9_fill_frac", "m9_walk_bp"])
+def test_fill_and_walk_problems_keep_every_row(problem: str) -> None:
+    cfg = _load(problem)
+    assert cfg.m9 is not None
+    assert cfg.m9.row_filter_non_null == []

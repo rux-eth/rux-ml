@@ -26,10 +26,10 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING
 
+import polars as pl
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
-
-    import polars as pl
 
     from rux_ml.config import RuxMLConfig
 
@@ -121,6 +121,25 @@ def temporal_train_val_test_split(
     }
 
 
+def filter_non_null(df: pl.DataFrame, columns: list[str]) -> pl.DataFrame:
+    """Keep the rows where every listed column is present (not null, not NaN).
+
+    A listed column absent from ``df`` raises ``ValueError`` — a predicate on a
+    column the set does not carry would otherwise pass every row silently.
+    """
+    missing = [c for c in columns if c not in df.columns]
+    if missing:
+        msg = f"m9.row_filter_non_null {missing} not in the training set columns {df.columns}"
+        raise ValueError(msg)
+    keep = [
+        pl.col(c).is_not_null() & pl.col(c).is_not_nan()
+        if df.schema[c].is_float()
+        else pl.col(c).is_not_null()
+        for c in columns
+    ]
+    return df.filter(keep)
+
+
 def make_splits(
     cfg: RuxMLConfig, df: pl.DataFrame, *, seed: int
 ) -> dict[str, pl.DataFrame]:
@@ -131,7 +150,12 @@ def make_splits(
     The ``RuxMLConfig`` model_validator enforces that ``time_ordered``
     implies ``cfg.data.time_column`` is set, so the temporal branch is safe
     to reach without re-validating here.
+
+    ``[m9] row_filter_non_null`` (program PR-024 A9) is applied first, so every
+    consumer of the split — train, tune, promote, score — sees the same rows.
     """
+    if cfg.m9 is not None and cfg.m9.row_filter_non_null:
+        df = filter_non_null(df, cfg.m9.row_filter_non_null)
     if cfg.data.split_kind == "time_ordered":
         # validator guarantees time_column is set; assert defensively for type
         # narrowing without runtime cost in the happy path.

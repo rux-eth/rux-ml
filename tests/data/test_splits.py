@@ -5,7 +5,7 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
-from rux_ml.config import DataConfig, KFoldCV, RuxMLConfig, TimeSeriesSplitCV
+from rux_ml.config import DataConfig, KFoldCV, M9Config, RuxMLConfig, TimeSeriesSplitCV
 from rux_ml.data.splits import (
     make_splits,
     temporal_train_val_test_split,
@@ -195,3 +195,40 @@ def test_validator_accepts_consistent_time_ordered_pair() -> None:
 def test_validator_accepts_random_split_with_non_temporal_cv() -> None:
     cfg = RuxMLConfig(data=DataConfig(), cv=KFoldCV())
     assert cfg.data.split_kind == "random"
+
+
+# ---------- m9.row_filter_non_null: a null target never reaches a partition ----------
+
+
+def _nullable_target_frame() -> pl.DataFrame:
+    # 10 rows; the target is null on rows 1, 4, 7 and NaN on row 8 -> 6 rows kept
+    y = [0.5, None, 1.5, 2.5, None, 3.5, 4.5, None, float("nan"), 5.5]
+    return pl.DataFrame({"t": list(range(10)), "x": [float(i) for i in range(10)], "y": y})
+
+
+@pytest.mark.parametrize("split_kind", ["random", "time_ordered"])
+def test_make_splits_drops_rows_where_a_filter_column_is_null_or_nan(split_kind: str) -> None:
+    cfg = RuxMLConfig(
+        data=DataConfig(target_column="y", split_kind=split_kind, time_column="t"),  # type: ignore[arg-type]
+        m9=M9Config(row_filter_non_null=["y"]),
+    )
+    parts = make_splits(cfg, _nullable_target_frame(), seed=7)
+    kept = pl.concat(list(parts.values()))
+    assert kept.height == 6
+    assert sorted(kept["t"].to_list()) == [0, 2, 3, 5, 6, 9]
+    assert kept["y"].null_count() == 0 and not kept["y"].is_nan().any()
+
+
+def test_make_splits_without_a_filter_keeps_null_rows() -> None:
+    data = DataConfig(target_column="y", split_kind="time_ordered", time_column="t")
+    parts = make_splits(RuxMLConfig(data=data), _nullable_target_frame(), seed=7)
+    assert sum(p.height for p in parts.values()) == 10
+
+
+def test_make_splits_refuses_a_filter_column_missing_from_the_set() -> None:
+    cfg = RuxMLConfig(
+        data=DataConfig(target_column="y", split_kind="time_ordered", time_column="t"),
+        m9=M9Config(row_filter_non_null=["y__absent"]),
+    )
+    with pytest.raises(ValueError, match="y__absent"):
+        make_splits(cfg, _nullable_target_frame(), seed=7)

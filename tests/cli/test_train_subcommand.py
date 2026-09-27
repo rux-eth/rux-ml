@@ -19,6 +19,7 @@ import polars as pl
 import pytest
 from optuna.artifacts import download_artifact
 from typer.testing import CliRunner
+from xgboost import XGBClassifier
 
 from rux_ml.cli import app
 from rux_ml.cli.train import _label_diagnostics  # pyright: ignore[reportPrivateUsage]
@@ -368,3 +369,38 @@ def test_label_diagnostics_count_nulls_apart_and_never_report_a_missing_mean_as_
     b = out["val"]["y__b"]
     assert (b["n"], b["null_count"], b["mean"], b["min"], b["max"]) == (1.0, 1.0, 0.5, 0.5, 0.5)
     assert b["std"] is None  # one value has no sample std
+
+
+# ---------- program PR-024 A9: a null target never reaches XGBoost ----------
+
+
+def test_row_filter_keeps_null_targets_out_of_the_xgboost_fit(
+    runner: CliRunner, train_workdir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A label undefined on a row (the markout of an unfilled order is null, program
+    PR-024 A9) is dropped by ``[m9] row_filter_non_null`` before the split, so neither
+    the fitted nor the early-stopping target XGBoost receives holds a missing value."""
+    src = train_workdir / "synth.parquet"
+    df = pl.read_parquet(src).with_row_index("i")
+    null_rows = df["i"] % 5 == 0  # 40 of the 200 rows lose their target
+    df = df.with_columns(pl.when(null_rows).then(None).otherwise(pl.col("y")).alias("y"))
+    df.drop("i").write_parquet(src)
+    config = train_workdir / "base.toml"
+    config.write_text(config.read_text() + '\n[m9]\nrow_filter_non_null = ["y"]\n')
+
+    seen: list[np.ndarray] = []
+    original_fit = XGBClassifier.fit
+
+    def spy(self: XGBClassifier, x: object, y: object, **kw: object) -> object:
+        seen.append(np.asarray(y, dtype=float))
+        for _, y_eval in kw.get("eval_set") or []:  # type: ignore[union-attr]
+            seen.append(np.asarray(y_eval, dtype=float))
+        return original_fit(self, x, y, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(XGBClassifier, "fit", spy)
+    result = runner.invoke(app, _argv(train_workdir, "train"), catch_exceptions=False)
+    assert result.exit_code == 0, result.stderr or result.stdout
+    assert len(seen) == 2  # the fitted target and the eval-set target
+    assert not any(np.isnan(y).any() for y in seen)
+    # 160 kept rows: train int(160 * 0.7) = 112, val int(160 * 0.15) = 24
+    assert [y.size for y in seen] == [112, 24]

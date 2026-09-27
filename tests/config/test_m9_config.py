@@ -75,3 +75,14 @@ def test_diagnostics_must_be_distinct_non_empty_names() -> None:
         M9Config(diagnostic_columns=["z", "z"])
     with pytest.raises(ValidationError):
         M9Config(diagnostic_columns=[""])
+
+
+# ---------- m9.row_filter_non_null (program PR-024 A9) ----------
+
+
+def test_row_filter_columns_must_be_distinct_and_named() -> None:
+    with pytest.raises(ValidationError, match="row_filter_non_null"):
+        M9Config(row_filter_non_null=["y", "y"])
+    with pytest.raises(ValidationError, match="row_filter_non_null"):
+        M9Config(row_filter_non_null=[""])
+    assert M9Config(row_filter_non_null=["y"]).row_filter_non_null == ["y"]
