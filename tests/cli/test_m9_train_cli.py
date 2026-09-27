@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import optuna
+import polars as pl
 from optuna.artifacts import download_artifact
 from typer.testing import CliRunner
 
@@ -81,3 +82,23 @@ def test_unsigned_keys_refuse_the_run_with_exit_2_and_no_trial(
     assert not (tmp_path / "studies" / "studies.db").exists() or not optuna.get_all_study_summaries(
         storage=f"sqlite:///{tmp_path}/studies/studies.db"
     )
+
+
+def test_markout_fit_trains_and_scores_on_filled_rows_only(
+    runner: CliRunner, c6_set: Path, tmp_path: Path, signed_m9_gates: dict[str, str]
+) -> None:
+    """Program PR-024 A9: y__markout_bp is null on an unfilled rung. The markout
+    problem's row predicate drops those rows before the split, so every fitted and
+    held-out row has a target (n_scored == n_rows) and the drop is recorded apart."""
+    nulls = pl.scan_parquet(c6_set).select(pl.col("y__markout_bp").null_count()).collect().item()
+    assert nulls > 0  # the fixture carries unfilled rungs
+    argv = m9_argv(
+        tmp_path, c6_set, "m9_markout_bp", *m9_gates_overrides(signed_m9_gates), "train"
+    )
+    result = runner.invoke(app, argv, catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    meta = _fold_meta(tmp_path, "m9_markout_bp")
+    assert meta["split_definition"]["row_filter_non_null"] == ["y__markout_bp"]
+    assert meta["split_definition"]["row_filter_dropped"] == nulls
+    oos = meta["oos"]
+    assert oos["metric"] == "mae" and oos["n_scored"] == oos["n_rows"] > 0
