@@ -32,6 +32,11 @@ class M9Config(StrictModel):
     # every row. A listed column absent from the set refuses the split.
     row_filter_non_null: list[str] = Field(default_factory=list)
 
+    # PR-042: the longest label horizon, in ``data.time_column`` units (epoch ms).
+    # Program D41 / D45 #4: the time-block regime's embargo >= h_max. Required
+    # whenever ``data.split_kind == "time_ordered"`` (fail closed).
+    h_max_ms: int | None = Field(default=None, gt=0)
+
     @field_validator("diagnostic_columns", "row_filter_non_null")
     @classmethod
     def _distinct_non_empty(cls, v: list[str], info: ValidationInfo) -> list[str]:

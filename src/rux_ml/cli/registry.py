@@ -115,9 +115,7 @@ def score(
     """
     cfg = _load_cfg(ctx)
     try:
-        receipt = score_bundle_on_holdout(
-            cfg, problem=problem, version=version, output_dir=output
-        )
+        receipt = score_bundle_on_holdout(cfg, problem=problem, version=version, output_dir=output)
     except (FileNotFoundError, KeyError, ValueError) as exc:
         raise typer.BadParameter(f"score failed: {exc}") from exc
 
@@ -140,9 +138,7 @@ def score(
 def rollback(
     ctx: typer.Context,
     problem: Annotated[str, typer.Option("--problem", help="Problem name.")],
-    to: Annotated[
-        str, typer.Option("--to", help="Target version-id (e.g. v_2026_05_16_a8f3c2).")
-    ],
+    to: Annotated[str, typer.Option("--to", help="Target version-id (e.g. v_2026_05_16_a8f3c2).")],
 ) -> None:
     """Atomically rewrite champion.json to point at a prior version."""
     cfg = _load_cfg(ctx)

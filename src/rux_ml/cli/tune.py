@@ -133,7 +133,9 @@ def start(
     n_trials: Annotated[
         int | None,
         typer.Option(
-            "--n-trials", "-n", min=1,
+            "--n-trials",
+            "-n",
+            min=1,
             help="Number of trials; defaults to `[tuning] n_trials` in active TOML.",
         ),
     ] = None,
@@ -165,7 +167,9 @@ def resume(
     n_trials: Annotated[
         int | None,
         typer.Option(
-            "--n-trials", "-n", min=1,
+            "--n-trials",
+            "-n",
+            min=1,
             help="Number of additional trials; defaults to `[tuning] n_trials` in active TOML.",
         ),
     ] = None,
@@ -184,8 +188,7 @@ def resume(
     completed = [t for t in study_obj.trials if t.state == optuna.trial.TrialState.COMPLETE]
     best_value = study_obj.best_value if completed else float("nan")
     typer.echo(
-        f"\ntotal trials: {len(study_obj.trials)} "
-        f"(best {cfg.training.metric}={best_value:.6f})"
+        f"\ntotal trials: {len(study_obj.trials)} (best {cfg.training.metric}={best_value:.6f})"
     )
 
 

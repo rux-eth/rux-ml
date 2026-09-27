@@ -57,13 +57,27 @@ class DataConfig(StrictModel):
     # at config validation time; ``time_ordered`` requires ``time_column`` to
     # be set. Cross-field validation lives on ``RuxMLConfig`` (data ↔ cv.kind
     # consistency check).
-    split_kind: Literal["random", "time_ordered"] = "random"
+    # PR-042 adds ``symbol_holdout``: whole groups (coins) per partition, see
+    # ``group_column`` / ``symbol_holdout_seed`` below.
+    split_kind: Literal["random", "time_ordered", "symbol_holdout"] = "random"
 
     # PR-024: column holding the timestamp used by ``time_ordered`` splits and
     # by PR-023's time-aware CV variants (``TimeSeriesSplitCV.time_column``,
     # ``PanelCombinatorialPurgedCV.time_column``). Set per problem; absent in
     # base.toml. None is valid when ``split_kind == "random"``.
     time_column: str | None = None
+
+    # PR-042: ``time_ordered`` embargo in ``time_column``'s own units (epoch ms for
+    # an Int64 stamp). None = legacy row-count slicing; an int keeps a row only if
+    # ``t + split_embargo <`` the next partition's first stamp. Inapplicable to the
+    # other kinds (a regime overlay may switch kind without unsetting it).
+    split_embargo: int | None = Field(default=None, ge=0)
+
+    # PR-042: ``symbol_holdout`` — the column naming the group (coin) and the seed
+    # that fixes each group's partition (config, never the per-trial seed, so every
+    # fit of a study holds out the same groups). Both required by that kind.
+    group_column: str | None = None
+    symbol_holdout_seed: int | None = None
 
     # PR-040: oracle quarantine. None refuses every ingest (fail closed) rather
     # than disabling the check; configs/base.toml sets it. Hash-elided in

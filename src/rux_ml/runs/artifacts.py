@@ -105,9 +105,7 @@ def build_metrics_dict(
         f"fold_{i}_{metric_name}": float(score) for i, score in enumerate(fold_scores)
     }
     out["metric_mean"] = float(statistics.fmean(fold_scores)) if n else 0.0
-    out["metric_std"] = (
-        float(statistics.pstdev(fold_scores)) if n >= _MIN_FOLDS_FOR_STD else 0.0
-    )
+    out["metric_std"] = float(statistics.pstdev(fold_scores)) if n >= _MIN_FOLDS_FOR_STD else 0.0
     out["n_folds"] = float(n)
     out["peak_rss_mb"] = float(peak_rss_mb)
     return out

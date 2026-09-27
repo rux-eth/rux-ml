@@ -202,6 +202,16 @@ The program's M9 node (fill fraction, markout, book-walk) trains three **problem
 - **Scoring**: the fill fraction is scored by `brier` (mean squared error of a probability against an outcome in [0, 1], refusing either side outside it; `sklearn.metrics.brier_score_loss` 1.8.0 accepts only binary outcomes) and fitted as `XGBRegressor(objective="reg:logistic")`; the families early-stop on `rmse` (Brier = RMSE² on a probability: same ordering). Markout and walk are scored by `mae` in bp.
 - **Hashing**: `m9` is an optional top-level layer, **hash-neutral while unset** (`_HASH_OPTIONAL_LAYERS` in `config/root.py`), so every existing config keeps its recorded `root_cfg_hash`; once set it is part of the trial identity.
 
+### One-off split kinds: symbol holdout and the embargoed temporal split (per PR-042; program v0.3 D41)
+
+`data.split_kind` selects the one-off train/val/test split used by `train`, `promote` and `registry score` (`make_splits`):
+
+- `random` — seeded row shuffle (the row-random regime; diagnostic only for panels).
+- `time_ordered` — sorted by `time_column`, sliced by row count. **`data.split_embargo`** (int, the time column's own units; None = legacy slicing) keeps a row at `t` only if `t + split_embargo <` the first stamp of every later partition, so no label horizon ≤ the embargo reaches past the split (program D45 #4's "t + h_max < the split"); 0 is timestamp-atomic; integer time columns only; a fully purged train is refused.
+- `symbol_holdout` — whole groups (`data.group_column`, e.g. coin) per partition. A group's partition is a function of `(data.symbol_holdout_seed, group)` alone — sha256 of `"<seed>:<group>"` mapped to [0, 1) against the cumulative ratios — so a coin holds out identically in every coin universe (every target, every nested prefix). The per-trial split seed is deliberately not used. Sizes are ratios in expectation; a positive-ratio partition with no group, a missing or null group column are refused.
+
+`train` records the split in `fold_meta.json` `split_definition` (the groups per partition, or the embargo and the rows it purged). With `[m9]` set, a `time_ordered` split requires `m9.h_max_ms` and `split_embargo ≥ h_max_ms` (fail closed). The three new data fields are hash-neutral while None (`_HASH_OPTIONAL_FIELDS`).
+
 ### Categorical encoding (per D4)
 
 ```

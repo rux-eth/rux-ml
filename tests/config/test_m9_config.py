@@ -41,7 +41,15 @@ def test_unset_layer_leaves_every_pinned_root_hash_unchanged() -> None:
 
 
 def test_set_layer_is_part_of_the_trial_identity() -> None:
-    cfg = _hpo(overrides={"m9.diagnostic_columns": ["y__other"]})
+    # The hpo study splits time_ordered, so [m9] also needs h_max_ms and a covering
+    # embargo (PR-042's fail-closed rule).
+    cfg = _hpo(
+        overrides={
+            "m9.diagnostic_columns": ["y__other"],
+            "m9.h_max_ms": 1,
+            "data.split_embargo": 1,
+        }
+    )
     assert cfg.m9 is not None
     assert cfg.m9.diagnostic_columns == ["y__other"]
     assert cfg_hash(cfg) != HPO_ROOT_CFG_HASH

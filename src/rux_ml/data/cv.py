@@ -225,10 +225,7 @@ class TimeSeriesSplitter:
             return self._embargo_time
         # str path: time-unit embargo translated via the DataFrame's timestamps.
         if self._time_column is None:
-            msg = (
-                "TimeSeriesSplitCV.embargo_time as duration string requires "
-                "time_column to be set"
-            )
+            msg = "TimeSeriesSplitCV.embargo_time as duration string requires time_column to be set"
             raise ValueError(msg)
         if self._time_column not in X.columns:
             msg = (
@@ -385,9 +382,7 @@ class CombinatorialPurgedSplitter:
             CombinatorialPurgedCV as _SkfolioCPCV,
         )
 
-        effective_purged = (
-            self._purged_size if self._purged_size > 0 else self._target_horizon_bars
-        )
+        effective_purged = self._purged_size if self._purged_size > 0 else self._target_horizon_bars
         effective_embargo = (
             self._embargo_size if self._embargo_size > 0 else int(n_rows * self._embargo_pct)
         )
@@ -474,8 +469,7 @@ class PanelCombinatorialPurgedSplitter:
         for col in (self._time_column, self._asset_column):
             if col not in X.columns:
                 msg = (
-                    f"PanelCombinatorialPurgedCV requires column {col!r}; "
-                    f"DataFrame has {X.columns}"
+                    f"PanelCombinatorialPurgedCV requires column {col!r}; DataFrame has {X.columns}"
                 )
                 raise ValueError(msg)
 
@@ -509,9 +503,7 @@ class PanelCombinatorialPurgedSplitter:
             train_mask = np.isin(row_ts_idx, train_ts_idx)
             train_rows = np.flatnonzero(train_mask).astype(np.int64)
             test_ts_concat = (
-                np.concatenate(test_ts_paths)
-                if test_ts_paths
-                else np.array([], dtype=np.int64)
+                np.concatenate(test_ts_paths) if test_ts_paths else np.array([], dtype=np.int64)
             )
             test_mask = np.isin(row_ts_idx, test_ts_concat)
             test_rows = np.flatnonzero(test_mask).astype(np.int64)
@@ -536,9 +528,7 @@ def make_splitter(cfg: CVConfig, *, seed: int | None = None) -> Splitter:
         case KFoldCV():
             return KFoldSplitter(n_splits=cfg.n_splits, shuffle=cfg.shuffle, seed=seed)
         case StratifiedKFoldCV():
-            return StratifiedKFoldSplitter(
-                n_splits=cfg.n_splits, shuffle=cfg.shuffle, seed=seed
-            )
+            return StratifiedKFoldSplitter(n_splits=cfg.n_splits, shuffle=cfg.shuffle, seed=seed)
         case TimeSeriesSplitCV():
             return TimeSeriesSplitter(
                 n_splits=cfg.n_splits,

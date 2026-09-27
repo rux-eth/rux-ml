@@ -76,9 +76,18 @@ _HASH_ELIDED_FIELDS: dict[str, set[str]] = {
 # Group D finding). Once set, the layer is hashed like any other.
 _HASH_OPTIONAL_LAYERS: frozenset[str] = frozenset({"m9"})
 
+# Optional fields added to an existing layer after configs had recorded hashes
+# (PR-042). Dropped from the hashed dump while None, so ``data_cfg_hash`` and
+# ``root_cfg_hash`` stay put for every config that does not use them (the PR-040
+# pins); once set they are part of the trial identity.
+_HASH_OPTIONAL_FIELDS: dict[str, frozenset[str]] = {
+    "data": frozenset({"split_embargo", "group_column", "symbol_holdout_seed"}),
+}
 
-def _elide(d: dict[str, Any], excluded: set[str]) -> dict[str, Any]:
-    return {k: v for k, v in d.items() if k not in excluded}
+
+def _elide(d: dict[str, Any], excluded: set[str], layer: str | None = None) -> dict[str, Any]:
+    optional = _HASH_OPTIONAL_FIELDS.get(layer or "", frozenset())
+    return {k: v for k, v in d.items() if k not in excluded and not (k in optional and v is None)}
 
 
 def _unflatten_dot_paths(flat: dict[str, Any]) -> dict[str, Any]:
@@ -151,6 +160,11 @@ class RuxMLConfig(BaseSettings):
                 "(name a timestamp column on the input DataFrame). See PR-024."
             )
             raise ValueError(msg)
+        if self.data.split_kind == "symbol_holdout":
+            for name in ("group_column", "symbol_holdout_seed"):
+                if getattr(self.data, name) is None:
+                    msg = f"data.split_kind == 'symbol_holdout' requires data.{name} (PR-042)"
+                    raise ValueError(msg)
         if self.cv.kind in _TEMPORAL_CV_KINDS and self.data.split_kind != "time_ordered":
             msg = (
                 f"cv.kind == {self.cv.kind!r} is temporal but data.split_kind == "
@@ -174,6 +188,19 @@ class RuxMLConfig(BaseSettings):
                 f"{self.data.target_column!r}: a problem trains on one label only"
             )
             raise ValueError(msg)
+        if self.data.split_kind == "time_ordered":
+            # PR-042 (program D41 / D45 #4): the time-block regime's embargo covers
+            # the longest label horizon. Fail closed: no h_max, no time-block run.
+            h_max = self.m9.h_max_ms
+            if h_max is None:
+                msg = "an [m9] problem split time_ordered needs m9.h_max_ms (the embargo floor)"
+                raise ValueError(msg)
+            embargo = self.data.split_embargo
+            if embargo is None or embargo < h_max:
+                msg = (
+                    f"data.split_embargo {embargo} < m9.h_max_ms {h_max}: a label reaches the split"
+                )
+                raise ValueError(msg)
         spec = self.features.spec
         leaked = sorted(diagnostics & {*spec.numeric_columns, *spec.categorical_columns})
         if leaked:
@@ -269,7 +296,7 @@ def cfg_hash(cfg: RuxMLConfig) -> str:
         if layer in _HASH_OPTIONAL_LAYERS and value is None:
             continue
         if isinstance(value, dict) and layer in _HASH_ELIDED_FIELDS:
-            elided[layer] = _elide(cast("dict[str, Any]", value), _HASH_ELIDED_FIELDS[layer])
+            elided[layer] = _elide(cast("dict[str, Any]", value), _HASH_ELIDED_FIELDS[layer], layer)
         else:
             elided[layer] = value
     return hashlib.sha256(canonical_json(elided).encode()).hexdigest()
@@ -286,5 +313,5 @@ def layer_cfg_hash(cfg: RuxMLConfig, layer: str) -> str:
     dumped = _dump_canonical(cfg)
     layer_data: Any = dumped.get(layer, {})
     if isinstance(layer_data, dict):
-        layer_data = _elide(cast("dict[str, Any]", layer_data), _HASH_ELIDED_FIELDS[layer])
+        layer_data = _elide(cast("dict[str, Any]", layer_data), _HASH_ELIDED_FIELDS[layer], layer)
     return hashlib.sha256(canonical_json(layer_data).encode()).hexdigest()

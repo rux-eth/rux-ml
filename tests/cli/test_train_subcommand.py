@@ -404,3 +404,80 @@ def test_row_filter_keeps_null_targets_out_of_the_xgboost_fit(
     assert not any(np.isnan(y).any() for y in seen)
     # 160 kept rows: train int(160 * 0.7) = 112, val int(160 * 0.15) = 24
     assert [y.size for y in seen] == [112, 24]
+
+
+# ---------- PR-042: the split definition is recorded with every one-off fit ----------
+
+
+def _fold_meta(train_workdir: Path) -> dict:
+    storage = f"sqlite:///{train_workdir}/studies/studies.db"
+    summary = optuna.get_all_study_summaries(storage=storage)[0]
+    metas = list_trial_artifacts(storage, summary.study_name, 0)
+    fold_meta_id = next(m.artifact_id for m in metas if m.filename == "fold_meta.json")
+    cfg = RuxMLConfig.from_layers(train_workdir / "base.toml")
+    store = make_artifact_store(cfg, study_name=summary.study_name)
+    out = train_workdir / "fold_meta.json"
+    download_artifact(artifact_store=store, artifact_id=fold_meta_id, file_path=str(out))
+    return json.loads(out.read_text())[0]
+
+
+def test_train_records_the_symbol_holdout_groups_per_partition(
+    runner: CliRunner, train_workdir: Path
+) -> None:
+    """C9 'the fold definitions committed': the coin lists of a symbol-holdout fit."""
+    import hashlib  # noqa: PLC0415
+
+    src = train_workdir / "synth.parquet"
+    coins = [f"C{i:02d}" for i in range(40)]
+    pl.read_parquet(src).with_columns(
+        pl.Series("coin", [coins[i % 40] for i in range(200)])
+    ).write_parquet(src)
+    config = train_workdir / "base.toml"
+    text = config.read_text().replace(
+        'target_column = "y"\n',
+        'target_column = "y"\nsplit_kind = "symbol_holdout"\ngroup_column = "coin"\n'
+        "symbol_holdout_seed = 1\n",
+    )
+    config.write_text(text)
+    result = runner.invoke(app, _argv(train_workdir, "train"), catch_exceptions=False)
+    assert result.exit_code == 0, result.stderr or result.stdout
+
+    split = _fold_meta(train_workdir)["split_definition"]
+    expected: dict[str, list[str]] = {"train": [], "val": [], "test": []}
+    for c in coins:  # the documented contract, computed independently
+        u = int.from_bytes(hashlib.sha256(f"1:{c}".encode()).digest()[:8], "big") / 2**64
+        expected["train" if u < 0.7 else "val" if u < 0.85 else "test"].append(c)
+    assert split == {
+        "kind": "symbol_holdout",
+        "group_column": "coin",
+        "symbol_holdout_seed": 1,
+        "groups": expected,
+        "rows": {k: 5 * len(v) for k, v in expected.items()},
+    }
+
+
+def test_train_records_the_embargo_and_the_rows_it_purged(
+    runner: CliRunner, train_workdir: Path
+) -> None:
+    src = train_workdir / "synth.parquet"
+    pl.read_parquet(src).with_columns(pl.Series("t", list(range(200)))).write_parquet(src)
+    config = train_workdir / "base.toml"
+    config.write_text(
+        config.read_text().replace(
+            'target_column = "y"\n',
+            'target_column = "y"\nsplit_kind = "time_ordered"\ntime_column = "t"\n'
+            "split_embargo = 5\n",
+        )
+    )
+    result = runner.invoke(app, _argv(train_workdir, "train"), catch_exceptions=False)
+    assert result.exit_code == 0, result.stderr or result.stdout
+    split = _fold_meta(train_workdir)["split_definition"]
+    # 200 rows: train 0..139, val 140..169, test 170..199; embargo 5 purges t in
+    # 135..139 from train and 165..169 from val -> 10 rows.
+    assert split == {
+        "kind": "time_ordered",
+        "time_column": "t",
+        "split_embargo": 5,
+        "rows": {"train": 135, "val": 25, "test": 30},
+        "purged_rows": 10,
+    }

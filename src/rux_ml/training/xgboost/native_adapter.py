@@ -165,10 +165,7 @@ class XGBoostNativeAdapter:
         # ExtMemQuantileDMatrix"). Gate on the trainer's device so CPU
         # smoke tests stay clean while the real workbench GPU path still
         # consumes `cfg.memory.cache_host_ratio`.
-        if (
-            self._memory_cfg.cache_host_ratio is not None
-            and self._cfg.device == "cuda"
-        ):
+        if self._memory_cfg.cache_host_ratio is not None and self._cfg.device == "cuda":
             kwargs["cache_host_ratio"] = self._memory_cfg.cache_host_ratio
         return xgb.ExtMemQuantileDMatrix(data_iter, **kwargs)
 

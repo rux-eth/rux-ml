@@ -17,7 +17,13 @@ from rux_ml.data.cv import (
 from rux_ml.data.data_iter import ParquetDataIter, single_source_iter
 from rux_ml.data.loaders import load_parquet, materialize
 from rux_ml.data.quarantine import OracleQuarantineError, check_oracle_quarantine
-from rux_ml.data.splits import make_splits, temporal_train_val_test_split, train_val_test_split
+from rux_ml.data.splits import (
+    make_splits,
+    split_definition,
+    symbol_holdout_split,
+    temporal_train_val_test_split,
+    train_val_test_split,
+)
 from rux_ml.data.versioning import (
     Manifest,
     compute_data_hash,
@@ -48,6 +54,8 @@ __all__ = [
     "read_manifest",
     "single_source_iter",
     "snapshot",
+    "split_definition",
+    "symbol_holdout_split",
     "temporal_train_val_test_split",
     "train_val_test_split",
     "write_manifest",

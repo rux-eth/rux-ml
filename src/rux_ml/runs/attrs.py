@@ -83,7 +83,7 @@ class TrialAttrs(BaseModel):
     peak_rss_mb: float
 
     # Optional: filled in conditionally (today) or by later PRs.
-    best_iteration: int | None = None        # PR-006 writes when early stopping fires
+    best_iteration: int | None = None  # PR-006 writes when early stopping fires
 
     # PR-013: GPU-only — populated when `nvidia-smi` is available. CPU dev
     # hosts (e.g., Mac) genuinely don't have these so they stay Optional.
@@ -133,9 +133,7 @@ class TrialAttrs(BaseModel):
             cv_cfg_hash=layer_cfg_hash(cfg, "cv"),
             # PR-020: solving_cfg_hash populated only when cfg.solving is set
             # (Trainer trials leave it None; solver trials get the hash).
-            solving_cfg_hash=(
-                layer_cfg_hash(cfg, "solving") if cfg.solving is not None else None
-            ),
+            solving_cfg_hash=(layer_cfg_hash(cfg, "solving") if cfg.solving is not None else None),
             root_cfg_hash=cfg_hash(cfg),
             git_sha=git_sha(),
             data_hash=data_hashes["data_hash"],

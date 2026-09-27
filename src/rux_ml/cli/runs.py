@@ -65,9 +65,7 @@ def show(
     trial_number: Annotated[
         int, typer.Argument(help="Trial number within --study (Optuna trial.number).")
     ],
-    study: Annotated[
-        str, typer.Option("--study", "-s", help="Optuna study name (required).")
-    ],
+    study: Annotated[str, typer.Option("--study", "-s", help="Optuna study name (required).")],
 ) -> None:
     """Display one trial's params + metric + 8-layer provenance triple."""
     cfg = _load_cfg(ctx)
@@ -111,9 +109,7 @@ def compare(
             help="Two or more trial numbers within --study.",
         ),
     ],
-    study: Annotated[
-        str, typer.Option("--study", "-s", help="Optuna study name (required).")
-    ],
+    study: Annotated[str, typer.Option("--study", "-s", help="Optuna study name (required).")],
 ) -> None:
     """Side-by-side params + metric + cfg-hash comparison across trials."""
     cfg = _load_cfg(ctx)
