@@ -19,9 +19,7 @@ from tests.conftest import repo_oracle_cfg, repo_oracle_toml
 
 
 @pytest.fixture
-def runs_workdir(
-    tmp_path: Path, seed_bag: SeedBag, env_versions: EnvironmentVersions
-) -> Path:
+def runs_workdir(tmp_path: Path, seed_bag: SeedBag, env_versions: EnvironmentVersions) -> Path:
     """Workdir with a base.toml + 2 completed trials in one study."""
     src = tmp_path / "synth.parquet"
     rng = np.random.default_rng(0)
@@ -127,9 +125,7 @@ def test_runs_show_displays_provenance_triple(runner: CliRunner, runs_workdir: P
         assert layer in result.stdout
 
 
-def test_runs_show_lists_diagnostic_artifacts(
-    runner: CliRunner, runs_workdir: Path
-) -> None:
+def test_runs_show_lists_diagnostic_artifacts(runner: CliRunner, runs_workdir: Path) -> None:
     """PR-034: ``runs show`` emits a ``diagnostic artifacts:`` section.
 
     Optuna rejects uploads onto finished trials, so we create a fresh
@@ -160,9 +156,7 @@ def test_runs_show_lists_diagnostic_artifacts(
 
     study.optimize(objective, n_trials=1)
 
-    result = runner.invoke(
-        app, _argv(runs_workdir, "runs", "show", "0", "--study", study_name)
-    )
+    result = runner.invoke(app, _argv(runs_workdir, "runs", "show", "0", "--study", study_name))
     assert result.exit_code == 0, result.stderr or result.stdout
     assert "diagnostic artifacts:" in result.stdout
     assert "metrics.json" in result.stdout

@@ -13,9 +13,27 @@ unset optional layer contributes nothing to ``root_cfg_hash`` (``config/root.py`
 
 from __future__ import annotations
 
-from pydantic import Field, ValidationInfo, field_validator
+from pathlib import Path  # noqa: TC003 — Pydantic resolves field annotations at runtime
+
+from pydantic import Field, ValidationInfo, field_validator, model_validator
 
 from rux_ml.config._strict_model import StrictModel
+
+
+class M9GatesConfig(StrictModel):
+    """Where the operator-signed M9 keys live and who must have signed them (PR-044).
+
+    The keys are in the rux-capital program's ``config/gates.yaml``, signed with
+    ``ssh-keygen -Y sign``. The signer identity, namespace and allowed-signers
+    file come from here — never from the signed file itself, which could name its
+    own signer. Every field is required: no default location, no default signer.
+    """
+
+    path: Path
+    signature_path: Path
+    allowed_signers: Path
+    identity: str = Field(min_length=1)
+    namespace: str = Field(min_length=1)
 
 
 class M9Config(StrictModel):
@@ -38,6 +56,20 @@ class M9Config(StrictModel):
     # Program D41 / D45 #4: the time-block regime's embargo >= h_max. Required
     # whenever ``data.split_kind == "time_ordered"`` (fail closed).
     h_max_ms: int | None = Field(default=None, gt=0)
+
+    # PR-044 (program D45 #3): markout and walk are scored by MAE in bp "with the
+    # signed-error honesty test"; the fill fraction by Brier alone. True runs the
+    # test on the held-out partition at the operator-signed thresholds, which
+    # requires ``gates`` (fail closed: refused at load without it).
+    signed_error_honesty: bool = False
+    gates: M9GatesConfig | None = None
+
+    @model_validator(mode="after")
+    def _honesty_needs_the_signed_keys(self) -> M9Config:
+        if self.signed_error_honesty and self.gates is None:
+            msg = "m9.signed_error_honesty needs [m9.gates] (the operator-signed thresholds)"
+            raise ValueError(msg)
+        return self
 
     @field_validator("diagnostic_columns", "row_filter_non_null")
     @classmethod

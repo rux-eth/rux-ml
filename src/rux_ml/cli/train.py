@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+import numpy as np
 import optuna
 import polars as pl
 import typer
@@ -28,6 +29,7 @@ from rux_ml._internal.memory import MemoryPressureError, Watchdog
 from rux_ml._internal.seeds import SeedBag, make_seed_bag
 from rux_ml.cli._shared import get_options, refuse_oracle_source
 from rux_ml.config import RuxMLConfig, XGBoostTraining
+from rux_ml.config.m9_gates import M9Gates, M9GatesError, load_m9_gates
 from rux_ml.data import load_parquet, make_splits, materialize, split_definition
 from rux_ml.features import cardinalities_from, make_features
 from rux_ml.runs import (
@@ -46,6 +48,7 @@ from rux_ml.training import (
     optuna_direction,
     select_ingest,
 )
+from rux_ml.training.honesty import signed_error_honesty
 
 
 def _require(cfg: RuxMLConfig) -> tuple[Path, str]:
@@ -101,8 +104,63 @@ def _label_diagnostics(
     return out
 
 
+def _m9_gates(cfg: RuxMLConfig) -> M9Gates | None:
+    """PR-044: read the operator-signed M9 keys before any trial row (exit 2 on doubt)."""
+    if cfg.m9 is None or cfg.m9.gates is None:
+        return None
+    try:
+        return load_m9_gates(cfg.m9.gates)
+    except M9GatesError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+def _oos_record(
+    cfg: RuxMLConfig,
+    model: Any,
+    pipeline: Any,
+    test: pl.DataFrame,
+    target_col: str,
+    gates: M9Gates | None,
+) -> dict[str, Any]:
+    """PR-044: an ``[m9]`` fit scored on the held-out ``test`` partition.
+
+    The workbench metric (Brier for the fill fraction, MAE in bp for markout and
+    walk — program D45 #3) on the rows with a realized label, and, with
+    ``[m9] signed_error_honesty``, the honesty test at the signed thresholds
+    (:func:`rux_ml.training.honesty.signed_error_honesty`) with the gates file's
+    sha256. The partition was not used to fit or to early-stop.
+    """
+    out: dict[str, Any] = {"partition": "test", "n_rows": test.height}
+    if gates is not None:
+        out["gates_sha256"] = gates.sha256
+        out["gates_path"] = gates.path
+    if test.height == 0:
+        return out
+    x_test, y_test = _strip_target(test, target_col)
+    x_pd = cast("pl.DataFrame", pipeline.transform(x_test)).to_pandas()  # pyright: ignore[reportUnknownMemberType]
+    realized = y_test.cast(pl.Float64).fill_nan(None).to_numpy()
+    keep = ~np.isnan(realized)
+    out["n_scored"] = int(keep.sum())
+    if keep.any():
+        out["metric"] = cfg.training.metric
+        out["score"] = compute_score(cfg.training.metric, model, x_pd[keep], realized[keep])
+    if cfg.m9 is not None and cfg.m9.signed_error_honesty:
+        assert gates is not None  # M9Config validator: honesty requires [m9.gates]
+        out["honesty"] = signed_error_honesty(
+            model.predict(x_pd),
+            realized,
+            no_underdeduct_frac_min=gates.no_underdeduct_frac_min,
+            overdeduct_max_rel=gates.overdeduct_max_rel,
+        )
+    return out
+
+
 def _fit_and_score(
-    cfg: RuxMLConfig, source_path: Path, target_col: str, bag: SeedBag
+    cfg: RuxMLConfig,
+    source_path: Path,
+    target_col: str,
+    bag: SeedBag,
+    gates: M9Gates | None = None,
 ) -> tuple[float, int | None, float, int, dict[str, Any]]:
     """Fit + score one baseline using PR-013-derived seeds for split + trainer.
 
@@ -173,6 +231,10 @@ def _fit_and_score(
         score = compute_score(cfg.training.metric, adapter, x_val_t.to_pandas(), y_val.to_numpy())
         fit_seconds = time.perf_counter() - fit_start
         best_iter = adapter.best_iteration
+        if cfg.m9 is not None:
+            fold_extras["oos"] = _oos_record(
+                cfg, adapter, pipeline, splits["test"], target_col, gates
+            )
         return (
             score,
             int(best_iter) if best_iter is not None else None,
@@ -193,6 +255,8 @@ def _fit_and_score(
     score = compute_score(cfg.training.metric, trainer, x_val_pd, y_val.to_numpy())
     fit_seconds = time.perf_counter() - fit_start
     best_iter = getattr(trainer, "best_iteration", None)
+    if cfg.m9 is not None:
+        fold_extras["oos"] = _oos_record(cfg, trainer, pipeline, splits["test"], target_col, gates)
     return (
         score,
         int(best_iter) if best_iter is not None else None,
@@ -238,6 +302,7 @@ def run_command(ctx: typer.Context) -> None:
 
     source_path, target_col = _require(cfg)
     refuse_oracle_source(cfg)  # PR-040: before hashing or creating the trial row
+    gates = _m9_gates(cfg)  # PR-044: the signed M9 keys, before the trial row too
     hashes = data_hashes(source_path, oracle=cfg.data.oracle)
     versions = get_versions(cfg.memory)
 
@@ -260,7 +325,7 @@ def run_command(ctx: typer.Context) -> None:
         ) as wd:
             try:
                 score, best_iter, fit_seconds, train_row_count, fold_extras = _fit_and_score(
-                    cfg, source_path, target_col, bag
+                    cfg, source_path, target_col, bag, gates
                 )
             except MemoryPressureError:
                 _record_attrs(

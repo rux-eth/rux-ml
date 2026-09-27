@@ -14,7 +14,7 @@ from rux_ml.config.cv import (
 )
 from rux_ml.config.data import DataConfig
 from rux_ml.config.features import FeaturesConfig, FeaturesSpec
-from rux_ml.config.m9 import M9Config
+from rux_ml.config.m9 import M9Config, M9GatesConfig
 from rux_ml.config.memory import MemoryConfig
 from rux_ml.config.registry import RegistryConfig
 from rux_ml.config.root import RuxMLConfig, cfg_hash, layer_cfg_hash
@@ -44,6 +44,7 @@ __all__ = [
     "KFoldCV",
     "LightGBMTraining",
     "M9Config",
+    "M9GatesConfig",
     "MemoryConfig",
     "PanelCombinatorialPurgedCV",
     "RegistryConfig",

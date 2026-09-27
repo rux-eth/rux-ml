@@ -149,9 +149,7 @@ def test_make_splits_dispatches_temporal_when_time_ordered() -> None:
     cfg = RuxMLConfig(
         data=DataConfig(split_kind="time_ordered", time_column="ts"),
     )
-    expected = temporal_train_val_test_split(
-        df, time_column="ts", ratios=cfg.data.split_ratios
-    )
+    expected = temporal_train_val_test_split(df, time_column="ts", ratios=cfg.data.split_ratios)
     dispatched = make_splits(cfg, df, seed=42)
     for key in ("train", "val", "test"):
         assert dispatched[key].equals(expected[key])

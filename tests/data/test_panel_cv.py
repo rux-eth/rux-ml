@@ -338,9 +338,7 @@ def test_cpcv_row_count_wins_when_both_set() -> None:
         purged_size=5,
         embargo_size=10,
     )
-    for (te_a, ts_a), (te_b, ts_b) in zip(
-        explicit.split(df), expected.split(df), strict=True
-    ):
+    for (te_a, ts_a), (te_b, ts_b) in zip(explicit.split(df), expected.split(df), strict=True):
         assert np.array_equal(te_a, te_b)
         assert np.array_equal(ts_a, ts_b)
 

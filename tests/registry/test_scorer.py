@@ -179,9 +179,7 @@ def test_score_bundle_on_holdout_defaults_to_champion(
     study_name, trial_number = _populate_trial(cfg, seed_bag, env_versions)
     version = promote(cfg, problem="churn_v1", study_name=study_name, trial_number=trial_number)
 
-    receipt = score_bundle_on_holdout(
-        cfg, problem="churn_v1", output_dir=tmp_path / "receipts"
-    )
+    receipt = score_bundle_on_holdout(cfg, problem="churn_v1", output_dir=tmp_path / "receipts")
     assert receipt.bundle_version == version
 
 
