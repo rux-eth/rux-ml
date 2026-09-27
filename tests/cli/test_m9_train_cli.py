@@ -12,15 +12,18 @@ import json
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import optuna
 import polars as pl
+import pytest
 from optuna.artifacts import download_artifact
 from typer.testing import CliRunner
+from xgboost import XGBRegressor
 
 from rux_ml.cli import app
 from rux_ml.config import RuxMLConfig
 from rux_ml.runs import list_trial_artifacts, make_artifact_store
-from tests.cli.conftest import REPO, m9_argv
+from tests.cli.conftest import REPO, m9_argv, problem_subtree
 from tests.conftest import M9_GATE_VALUES, m9_gates_overrides
 
 
@@ -84,24 +87,59 @@ def test_unsigned_keys_refuse_the_run_with_exit_2_and_no_trial(
     )
 
 
-def test_markout_fit_trains_and_scores_on_filled_rows_only(
-    runner: CliRunner, c6_set: Path, tmp_path: Path, signed_m9_gates: dict[str, str]
+# ---------- PR-048: a NaN / null target never reaches XGBoost, on every problem ----------
+
+TARGETS = {
+    "m9_fill_frac": "y__fill_frac",
+    "m9_markout_bp": "y__markout_bp",
+    "m9_walk_bp": "y__walk_bp",
+}
+
+
+@pytest.mark.parametrize("problem", sorted(TARGETS))
+def test_no_missing_target_reaches_the_xgboost_fit(
+    problem: str,
+    runner: CliRunner,
+    c6_set: Path,
+    tmp_path: Path,
+    signed_m9_gates: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Program PR-024 A9: y__markout_bp is null on an unfilled rung. The markout
-    problem's row predicate drops those rows before the split, so every fitted and
-    held-out row has a target (n_scored == n_rows) and the drop is recorded apart."""
-    nulls = pl.scan_parquet(c6_set).select(pl.col("y__markout_bp").null_count()).collect().item()
-    assert nulls > 0  # the fixture carries unfilled rungs
-    argv = m9_argv(
-        tmp_path, c6_set, "m9_markout_bp", *m9_gates_overrides(signed_m9_gates), "train"
+    """Program PR-024 B-4 writes the no_book / below_one_lot / alo_expired rows with NaN
+    targets, a null markout on an unfilled rung (A9) and a null y__walk_bp where an IOC
+    filled nothing. Each problem's row predicate drops the rows its target lacks before
+    the split: neither the fitted nor the early-stopping target XGBoost receives holds a
+    missing value, every held-out row is scored, and the drop is recorded apart."""
+    target = TARGETS[problem]
+    subtree = c6_set / problem_subtree(problem)
+    missing = (
+        pl.scan_parquet(subtree)
+        .select((pl.col(target).is_null() | pl.col(target).is_nan()).sum())
+        .collect()
+        .item()
     )
+    assert missing > 0  # the fixture carries rows without the target
+
+    seen: list[np.ndarray] = []
+    original_fit = XGBRegressor.fit
+
+    def spy(self: XGBRegressor, x: object, y: object, **kw: object) -> object:
+        seen.append(np.asarray(y, dtype=float))
+        for _, y_eval in kw.get("eval_set") or []:  # type: ignore[union-attr]
+            seen.append(np.asarray(y_eval, dtype=float))
+        return original_fit(self, x, y, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(XGBRegressor, "fit", spy)
+    argv = m9_argv(tmp_path, c6_set, problem, *m9_gates_overrides(signed_m9_gates), "train")
     result = runner.invoke(app, argv, catch_exceptions=False)
     assert result.exit_code == 0, result.output
-    meta = _fold_meta(tmp_path, "m9_markout_bp")
-    assert meta["split_definition"]["row_filter_non_null"] == ["y__markout_bp"]
-    assert meta["split_definition"]["row_filter_dropped"] == nulls
+    assert len(seen) == 2  # the fitted target and the eval-set target
+    assert not any(np.isnan(y).any() for y in seen)
+    meta = _fold_meta(tmp_path, problem)
+    assert meta["split_definition"]["row_filter_non_null"] == [target]
+    assert meta["split_definition"]["row_filter_dropped"] == missing
     oos = meta["oos"]
-    assert oos["metric"] == "mae" and oos["n_scored"] == oos["n_rows"] > 0
+    assert oos["n_scored"] == oos["n_rows"] > 0
 
 
 # ---------- PR-045: the three regimes, audited on every fit ----------

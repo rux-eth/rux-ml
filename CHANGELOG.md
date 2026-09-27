@@ -29,6 +29,9 @@ All notable user-facing changes to `rux-ml`. Format: [Keep a Changelog 1.1.0](ht
 ### Changed
 - **README sync to v0.3** (PR-037). Documents `rux-ml registry score` verb (PR-032) — adds step 7 to the Quick Start (between `registry promote` and `load_model`), inserts new "§7b. Scoring a promoted bundle on its held-out test fold" lifecycle subsection (command examples + receipt schema + on-disk layout + per-split-kind reconstruction strategy), and adds the `registry score` row to the CLI reference table. Closes a v0.3.0 README staleness gap: the v0.3 sprint added the verb but never updated the navigational doc that new users walk through first. No source / test / config changes — README + CHANGELOG only.
 
+### Fixed
+- **The M9 problems fit the materialized set** (PR-048; program PR-024 B-4). `m9_fill_frac` and `m9_walk_bp` gain `[m9] row_filter_non_null` on their targets (the set writes `no_book` / `below_one_lot` / `alo_expired` rows with NaN targets and a null `y__walk_bp` on ≈ 2 % of walks; before, XGBoost raised "Label contains NaN"). Each problem's `diagnostic_columns` now names only labels of its own subtree (a `walk/` label listed for a `fill/` problem exited 2). `side` moves from categorical to numeric (int8 in the set; `cast(pl.Categorical)` raised). The harness schema is vendored at `tests/fixtures/m9_training_schema.json` and every configured column is tested against it.
+
 ## [0.3.0] - 2026-05-22
 
 ### Added
