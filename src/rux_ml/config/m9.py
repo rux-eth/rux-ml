@@ -14,6 +14,7 @@ unset optional layer contributes nothing to ``root_cfg_hash`` (``config/root.py`
 from __future__ import annotations
 
 from pathlib import Path  # noqa: TC003 — Pydantic resolves field annotations at runtime
+from typing import Literal
 
 from pydantic import Field, ValidationInfo, field_validator, model_validator
 
@@ -63,6 +64,14 @@ class M9Config(StrictModel):
     # requires ``gates`` (fail closed: refused at load without it).
     signed_error_honesty: bool = False
     gates: M9GatesConfig | None = None
+
+    # PR-046 (program D43): the learning-curve report. The nested prefixes (as
+    # fractions of the train window), the OOS value it follows — a dotted path into
+    # a fit's ``fold_meta.json`` ``oos`` record, e.g. "score" — and whether lower or
+    # higher is better. Required by ``rux-ml runs learning-curve``, not by ``train``.
+    learning_curve_fractions: list[float] | None = None
+    learning_curve_metric: str | None = None
+    learning_curve_direction: Literal["minimize", "maximize"] | None = None
 
     @model_validator(mode="after")
     def _honesty_needs_the_signed_keys(self) -> M9Config:

@@ -82,6 +82,11 @@ class DataConfig(StrictModel):
     group_column: str | None = None
     symbol_holdout_seed: int | None = None
 
+    # PR-046: the nested-prefix learning curve (program D43). Keeps the first
+    # fraction of the train partition's unique ``time_column`` stamps; val and test
+    # are untouched, so the prefixes of one regime share one OOS set. None = all.
+    train_prefix_frac: float | None = Field(default=None, gt=0.0, le=1.0)
+
     # PR-040: oracle quarantine. None refuses every ingest (fail closed) rather
     # than disabling the check; configs/base.toml sets it. Hash-elided in
     # config/root.py — it only decides whether ingest refuses, never what a

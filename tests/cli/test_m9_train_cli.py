@@ -142,3 +142,48 @@ def test_symbol_holdout_regime_has_no_holdout_coin_in_train(
     assert meta["leakage"]["group_overlap"] == {"train&val": 0, "train&test": 0, "val&test": 0}
     groups = meta["split_definition"]["groups"]
     assert groups == {"train": sorted(groups["train"]), "val": ["SUI"], "test": ["ADA", "AVAX"]}
+
+
+# ---------- PR-046: the learning-curve report over four prefix fits ----------
+
+
+def test_learning_curve_report_over_the_four_prefix_fits(
+    runner: CliRunner, c6_set: Path, tmp_path: Path, signed_m9_gates: dict[str, str]
+) -> None:
+    head = m9_argv(tmp_path, c6_set, "m9_walk_bp", *m9_gates_overrides(signed_m9_gates))
+    for frac in (0.25, 0.5, 0.75, None):  # the full window runs without the knob
+        extra = [] if frac is None else ["--set", f"data.train_prefix_frac={frac}"]
+        result = runner.invoke(app, [*head, *extra, "train"], catch_exceptions=False)
+        assert result.exit_code == 0, result.output
+    storage = f"sqlite:///{tmp_path}/studies/studies.db"
+    studies = [s.study_name for s in optuna.get_all_study_summaries(storage=storage)]
+    argv = [*head, "runs", "learning-curve", "--output", str(tmp_path / "lc.json")]
+    for name in studies:
+        argv += ["--study", name]
+    result = runner.invoke(app, argv, catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    report = json.loads((tmp_path / "lc.json").read_text())
+    assert [p["train_prefix_frac"] for p in report["curve"]] == [0.25, 0.5, 0.75, 1.0]
+    assert report["tolerance_rel"] == M9_GATE_VALUES["m9_learning_curve_tolerance_rel"]
+    assert (
+        report["gates_sha256"]
+        == hashlib.sha256(Path(signed_m9_gates["path"]).read_bytes()).hexdigest()
+    )
+    prev, last = report["curve"][2]["value"], report["curve"][3]["value"]
+    assert report["history_limited"] == ((prev - last) / abs(prev) > report["tolerance_rel"])
+    assert report["regime"] == "time_ordered" and report["target_column"] == "y__walk_bp"
+
+
+def test_learning_curve_refuses_an_incomplete_curve(
+    runner: CliRunner, c6_set: Path, tmp_path: Path, signed_m9_gates: dict[str, str]
+) -> None:
+    head = m9_argv(tmp_path, c6_set, "m9_walk_bp", *m9_gates_overrides(signed_m9_gates))
+    result = runner.invoke(app, [*head, "train"], catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    storage = f"sqlite:///{tmp_path}/studies/studies.db"
+    (summary,) = optuna.get_all_study_summaries(storage=storage)
+    argv = [*head, "runs", "learning-curve", "--study", summary.study_name]
+    result = runner.invoke(app, [*argv, "--output", str(tmp_path / "lc.json")])
+    assert result.exit_code == 2, result.output
+    assert "learning curve" in result.output
+    assert not (tmp_path / "lc.json").exists()
