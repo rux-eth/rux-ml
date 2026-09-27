@@ -109,8 +109,8 @@ def _leakage(cfg: RuxMLConfig, splits: dict[str, pl.DataFrame]) -> dict[str, Any
     """PR-045: audit the split (program C9's leakage tests) and, for an ``[m9]`` fit,
     refuse a regime whose separation the audit does not find (exit 2).
 
-    The stamp window is the longest label horizon (``[m9] h_max_ms``), else the
-    split embargo; every fit records the audit, only ``[m9]`` fits enforce it (a
+    The stamp window is the label's reach (``[m9] h_max_ms``, program PR-024 A3),
+    else the split embargo; every fit records the audit, only ``[m9]`` fits enforce it (a
     legacy ``time_ordered`` problem with no embargo promises no stamp separation).
     """
     window = cfg.m9.h_max_ms if cfg.m9 is not None else None

@@ -122,7 +122,7 @@ def test_row_random_regime_records_leakage_on_both_axes(
     meta = _fit(runner, tmp_path, c6_set, signed_m9_gates, "m9_regime_row_random")
     leak = meta["leakage"]
     assert meta["split_definition"]["kind"] == "random"
-    assert leak["window"] == 14_400_000  # [m9] h_max_ms
+    assert leak["window"] == 28_801_000  # [m9] h_max_ms = the label's reach (program PR-024 A3)
     assert leak["stamp_violations"]["test_vs_fitted"] > 0
     assert leak["group_overlap"]["train&test"] > 0
 
