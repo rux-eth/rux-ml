@@ -45,13 +45,48 @@ symbol_holdout_seed = 20260926
 categorical_low_card_threshold = 8
 
 [features.spec]
-# The order's own attributes are inputs of P(fill | p, Q, h) (D37 #1). The
-# point-in-time feat__ columns are appended from PR-024's schema file once it
-# exists (C10: "the feature list from the schema file") — QUESTION Q3.
-# stamp_ms and coin are keys, never features (C6).
-# PR-048: `side` is int8 (+1 buy / -1 sell) in the materialized set (schema
-# key_dtypes); Polars casts only a string to Categorical, so it enters as numeric.
-numeric_columns = ["p_bp", "q_usd", "h_ms", "side"]
+# The order's own attributes are inputs of P(fill | p, Q, h) (D37 #1); stamp_ms and coin
+# are keys, never features (C6). PR-048: `side` is int8 (+1 buy / -1 sell) in the
+# materialized set (schema key_dtypes); Polars casts only a string to Categorical, so it
+# enters as numeric.
+# PR-049 (program D38: the model's features are the feat__ columns; C10: the list comes
+# from the schema file): then EVERY feat__ column of THIS problem's subtree (walk/, 27
+# columns), named here in the schema's order (rumpy-harness spec/m9_training_schema.json v2,
+# vendored at tests/fixtures/) — tests/config/test_m9_problem_configs.py fails until this
+# list equals the schema's, so a schema change forces this file to follow. All are float64;
+# the ones the schema says can be empty (a thin book, no l2 transition, no return pair,
+# beyond the deepest level) arrive null -> NaN, XGBoost's `missing` (a learned default branch).
+# walk/ has no feat__queue_ahead_usd (a taker order does not queue).
+numeric_columns = [
+    "p_bp", "q_usd", "h_ms", "side",
+    "feat__spread_bp",
+    "feat__book_age_ms",
+    "feat__near_l1_usd",
+    "feat__opp_l1_usd",
+    "feat__near_depth_usd_10bp",
+    "feat__near_depth_usd_30bp",
+    "feat__opp_depth_usd_10bp",
+    "feat__opp_depth_usd_30bp",
+    "feat__qi_l1",
+    "feat__near_walk_bp_q1000",
+    "feat__near_walk_bp_q3000",
+    "feat__top_age_ms",
+    "feat__ofi_60s",
+    "feat__ofi_300s",
+    "feat__rv_bp_300s",
+    "feat__rv_bp_3600s",
+    "feat__ret_bp_60s",
+    "feat__ret_bp_300s",
+    "feat__ret_bp_3600s",
+    "feat__trade_n_60s",
+    "feat__trade_n_300s",
+    "feat__same_vol_usd_300s",
+    "feat__opp_vol_usd_300s",
+    "feat__trade_gap_ms_300s",
+    "feat__funding_rate",
+    "feat__oi_chg_3600s",
+    "feat__ctx_age_ms",
+]
 categorical_columns = ["kind"]
 
 [training]

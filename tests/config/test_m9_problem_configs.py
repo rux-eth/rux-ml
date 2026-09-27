@@ -8,6 +8,7 @@ lock what a study would actually run with.
 
 from __future__ import annotations
 
+import math
 import os
 import re
 from pathlib import Path
@@ -17,8 +18,15 @@ import pytest
 from xgboost import XGBRegressor
 
 from rux_ml.config import RuxMLConfig, XGBoostTraining
+from rux_ml.data import LabelAsFeatureError, check_feature_labels, check_label_quarantine
 from rux_ml.training import make_trainer, task_for_metric
-from tests.conftest import m9_column_dtypes, m9_schema, m9_subtree
+from tests.conftest import (
+    m9_column_dtypes,
+    m9_feature_columns,
+    m9_nullable_features,
+    m9_schema,
+    m9_subtree,
+)
 
 REPO_CONFIGS = Path(__file__).resolve().parents[2] / "configs"
 
@@ -222,3 +230,96 @@ def test_vendored_schema_matches_the_live_harness_schema() -> None:
     vendored = m9_schema()
     assert vendored["targets"] == live["targets"]
     assert vendored["key_dtypes"] == live["key_dtypes"]
+
+
+# ---------- PR-049: the features = the subtree's feat__ columns + the order attributes ----------
+
+# The order's own attributes, carried since PR-041 (PR-048: ``side`` is int8, so numeric).
+ORDER_NUMERIC = ["p_bp", "q_usd", "h_ms", "side"]
+ORDER_CATEGORICAL = ["kind"]
+# spec/m9_training_schema.json v2: 28 feat__ columns in fill/, 27 in walk/ —
+# feat__queue_ahead_usd (the queue at the order's own price) exists only for a resting order.
+FEAT_COUNTS = {"m9_fill_frac": 28, "m9_markout_bp": 28, "m9_walk_bp": 27}
+# The schema's feature definitions that say the value can be empty ("null when ...").
+_NULLABLE_BOTH = {
+    "feat__near_walk_bp_q1000", "feat__near_walk_bp_q3000", "feat__ofi_60s", "feat__ofi_300s",
+    "feat__rv_bp_300s", "feat__rv_bp_3600s",
+}  # fmt: skip
+NULLABLE = {"fill": _NULLABLE_BOTH | {"feat__queue_ahead_usd"}, "walk": _NULLABLE_BOTH}
+_NUMERIC_DTYPES = {"int8", "int16", "int32", "int64", "float32", "float64"}
+
+
+def _subtree_name(cfg: RuxMLConfig) -> str:
+    assert cfg.data.source_path is not None
+    return cfg.data.source_path.name
+
+
+@pytest.mark.parametrize("problem", sorted(PROBLEMS))
+def test_features_are_the_subtrees_feat_columns_plus_the_order_attributes(problem: str) -> None:
+    """Program D38: the model's features are the ``feat__`` columns (C10: the list comes
+    from the schema file). Each problem file names them explicitly, in the schema's order,
+    so a schema change fails here until the config follows."""
+    cfg = _load(problem)
+    subtree = _subtree_name(cfg)
+    feats = m9_feature_columns(subtree)
+    assert feats == [c["name"] for c in m9_subtree(subtree)["feat"]]  # columns and entries agree
+    assert len(feats) == FEAT_COUNTS[problem]
+    assert cfg.features.spec.numeric_columns == [*ORDER_NUMERIC, *feats]
+    assert cfg.features.spec.categorical_columns == ORDER_CATEGORICAL
+
+
+def test_queue_ahead_is_a_feature_of_the_resting_order_only() -> None:
+    for problem, present in [
+        ("m9_fill_frac", True),
+        ("m9_markout_bp", True),
+        ("m9_walk_bp", False),
+    ]:
+        cfg = _load(problem)
+        assert ("feat__queue_ahead_usd" in cfg.features.spec.numeric_columns) is present, problem
+
+
+@pytest.mark.parametrize("problem", sorted(PROBLEMS))
+def test_numeric_features_are_numeric_in_the_schema(problem: str) -> None:
+    """Nothing in the list is misdeclared: a numeric feature has a numeric schema dtype
+    (PR-048 found ``side``, int8, declared categorical — a Polars cast error)."""
+    cfg = _load(problem)
+    dtypes = m9_column_dtypes(_subtree_name(cfg))
+    misdeclared = {
+        c: dtypes[c] for c in cfg.features.spec.numeric_columns if dtypes[c] not in _NUMERIC_DTYPES
+    }
+    assert not misdeclared
+    assert not set(cfg.features.spec.numeric_columns) & set(cfg.features.spec.categorical_columns)
+
+
+@pytest.mark.parametrize("problem", sorted(PROBLEMS))
+def test_the_feature_list_passes_the_label_quarantine_and_the_refusal_still_bites(
+    problem: str,
+) -> None:
+    """PR-043: no feat__ column is a label; a y__ column added to the same list is refused."""
+    cfg = _load(problem)
+    check_feature_labels(cfg)
+    assert cfg.m9 is not None
+    spec = cfg.features.spec
+    for label in (cfg.data.target_column, cfg.m9.diagnostic_columns[0], "Y__anything"):
+        with pytest.raises(LabelAsFeatureError):
+            check_label_quarantine(
+                [*spec.numeric_columns, label, *spec.categorical_columns],
+                cfg.data.oracle,
+                diagnostics=cfg.m9.diagnostic_columns,
+            )
+
+
+@pytest.mark.parametrize("problem", sorted(PROBLEMS))
+def test_nullable_features_are_listed_and_fed_to_a_nan_native_family(problem: str) -> None:
+    """The schema's possibly-empty features (a thin book, no l2 transition, beyond the
+    deepest displayed level) are features too: the family is XGBoost, whose ``missing``
+    is NaN — a null arrives as NaN (Polars -> pandas) and takes the learned default branch.
+    The CLI test ``test_the_fit_sees_the_feat_columns_with_nulls_as_missing`` drives it."""
+    cfg = _load(problem)
+    subtree = _subtree_name(cfg)
+    nullable = set(m9_nullable_features(subtree))
+    assert nullable == NULLABLE[subtree]
+    assert nullable <= set(cfg.features.spec.numeric_columns)
+    assert isinstance(cfg.training, XGBoostTraining)
+    assert "missing" not in cfg.training.model_kwargs
+    assert math.isnan(make_trainer(cfg.training).get_params()["missing"])
