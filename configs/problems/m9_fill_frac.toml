@@ -1,0 +1,53 @@
+# M9 problem — y__fill_frac: the fill fraction under the queue rule (D37 #1): the filled fraction of a post-only rung in [0, 1], scored by Brier (D45 #3).
+#
+# One of the three M9 problems of rux-capital program v0.3 (docs/0.3/DESIGN-log.md
+# D37, D45 #3; ACCEPTANCE C9). Each problem trains on ONE label — the column the
+# program's EV consumes — and carries the other labels as diagnostics ([m9]).
+# The set is the harness's materialized training table (program PR-024,
+# ACCEPTANCE C6): day-partitioned parquet, keys stamp_ms/coin/side/kind/p_bp/
+# q_usd/h_ms, point-in-time feat__ columns stamped <= t, y__ labels from > t.
+# "Default-config GBT per target" (C9): no hyperparameter is set here — the
+# XGBoostTraining defaults ARE the default config.
+#
+# The regime (row-random / time-block purged / symbol holdout) is a STUDY overlay
+# (configs/studies/m9_regime_*.toml, PR-042); this file is regime-free beyond the
+# time-ordered one-off baseline split.
+
+[data]
+# The harness training root is declared by program PR-024 (not landed as of
+# 2026-09-26). Until then this path is a placeholder under the workbench's
+# gitignored data/ (symlink the set there, or --set data.source_path=...).
+# QUESTION Q1 for the lead: the training root's path and the set-id convention.
+source_path = "data/m9/training_set"
+target_column = "y__fill_frac"
+# PR-024 (rux-ml): the one-off baseline is time-ordered on the decision stamp
+# (Int64 epoch milliseconds, program ACCEPTANCE C6).
+split_kind = "time_ordered"
+time_column = "stamp_ms"
+
+[features]
+# side / kind are low-cardinality strings (2-3 values): below the threshold they
+# pass through as native categoricals. BEST-GUESS value, flagged — QUESTION Q2
+# for the lead (D4 has no default; rux-ml requires it whenever categoricals matter).
+categorical_low_card_threshold = 8
+
+[features.spec]
+# The order's own attributes are inputs of P(fill | p, Q, h) (D37 #1). The
+# point-in-time feat__ columns are appended from PR-024's schema file once it
+# exists (C10: "the feature list from the schema file") — QUESTION Q3.
+# stamp_ms and coin are keys, never features (C6).
+numeric_columns = ["p_bp", "q_usd", "h_ms"]
+categorical_columns = ["side", "kind"]
+
+[training]
+kind = "xgboost"
+device = "cuda"
+# Regression: routes the factory to XGBRegressor.
+metric = "brier"
+model_kwargs = { objective = "reg:logistic" }  # a fraction in [0, 1] fits as XGBoost logistic regression; predictions are probabilities
+
+[m9]
+# The other labels of the table, summarised per fold beside every run and never
+# trained on (D45 #3: "the others diagnostics"). The markout horizon-curve columns
+# and time-to-fill are added when PR-024's schema file names them — QUESTION Q4.
+diagnostic_columns = ["y__markout_bp", "y__walk_bp"]

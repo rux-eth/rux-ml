@@ -5,6 +5,11 @@ All notable user-facing changes to `rux-ml`. Format: [Keep a Changelog 1.1.0](ht
 ## [Unreleased]
 
 ### Added
+- **M9 problem configs** (PR-041; rux-capital program v0.3 D37 / D45 #3, ACCEPTANCE C9). Three problem files `configs/problems/m9_fill_frac.toml`, `m9_markout_bp.toml`, `m9_walk_bp.toml`: each trains one label (`y__fill_frac` / `y__markout_bp` / `y__walk_bp`) with default-config XGBoost, time-ordered on `stamp_ms`, and lists the other two labels as diagnostics.
+  - **New `[m9]` layer** (`M9Config`, `diagnostic_columns`): refuses a target listed as a diagnostic and a diagnostic listed as a feature at config load; optional and hash-neutral while unset (every existing `root_cfg_hash` unchanged, pinned by test).
+  - **`rux-ml train`** writes per-fold diagnostic summaries (`n`, `null_count`, `mean`, `std`, `min`, `max`) into `fold_meta.json`; a listed diagnostic missing from the set exits 2.
+  - **New metric `brier`** (regression task, minimize): Brier score for a fractional outcome in [0, 1], refusing values outside it; XGBoost / LightGBM / CatBoost early-stop on RMSE for it.
+  - The source path is a placeholder (`data/m9/training_set`) until the program's materializer (program PR-024) declares the training root.
 - **Oracle quarantine at ingest** (PR-040; rux-capital program ACCEPTANCE C13). Every training-set read now refuses oracle-derived inputs, raising `OracleQuarantineError` (a `ValueError` subclass). Refused CLI verbs exit 2: `train`, `tune start`/`resume`/`retry-trial`, `registry promote`/`score`, `data hash`/`version`.
   - **What is refused:** a source is refused if it has a column, or nested struct/list/array field, whose name starts with `[data.oracle] namespace` (case-insensitive; hive partition keys included). It is also refused if `[data.oracle] tag_file` sits in any ancestor of the source (the path as given and its resolved path), in any directory inside a directory source, or above the target of any symlink found inside it. Glob sources are refused, and so is a config with no `[data.oracle]` table (fail closed).
   - **Where it runs:** `check_oracle_quarantine` (new, `rux_ml.data`) is called from `load_parquet` and `compute_data_hash`, and as a pre-trial preflight in `train` and `tune`.

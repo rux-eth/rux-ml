@@ -192,6 +192,15 @@ It raises `OracleQuarantineError(ValueError)`, and every CLI verb maps that to e
 
 The check only raises. It never changes the scan target, the scan options or any hash input, so a clean dataset's `data_hash`, manifest and splits are unchanged. It is a syntactic layer of defense in depth, not a complete leakage defense: oracle values renamed or derived under clean names pass. The known evasions are recorded in `prs/PR-040-oracle-quarantine-training-set-refusal.md`.
 
+### M9 problem layer (`[m9]`, per PR-041; rux-capital program v0.3 D37 / D45 #3, ACCEPTANCE C9)
+
+The program's M9 node (fill fraction, markout, book-walk) trains three **problems** on one harness-materialized table. Each problem config (`configs/problems/m9_{fill_frac,markout_bp,walk_bp}.toml`) trains on exactly **one** label, `data.target_column` = the column the program's EV consumes (`y__fill_frac`, `y__markout_bp` at the decision interval, `y__walk_bp`), and lists the other labels under `[m9] diagnostic_columns`.
+
+- **Config-time refusals** (`RuxMLConfig` validator): the target may not be a diagnostic; a diagnostic may not be a feature.
+- **Run-time**: `rux-ml train` summarises every diagnostic per one-off fold (`n`, `null_count`, `mean`, `std`, `min`, `max`; nulls and NaNs counted apart, a statistic with no values is `null`) into `fold_meta.json`'s `diagnostics`; a listed column missing from the set exits 2.
+- **Scoring**: the fill fraction is scored by `brier` (mean squared error of a probability against an outcome in [0, 1], refusing either side outside it; `sklearn.metrics.brier_score_loss` 1.8.0 accepts only binary outcomes) and fitted as `XGBRegressor(objective="reg:logistic")`; the families early-stop on `rmse` (Brier = RMSE² on a probability: same ordering). Markout and walk are scored by `mae` in bp.
+- **Hashing**: `m9` is an optional top-level layer, **hash-neutral while unset** (`_HASH_OPTIONAL_LAYERS` in `config/root.py`), so every existing config keeps its recorded `root_cfg_hash`; once set it is part of the trial identity.
+
 ### Categorical encoding (per D4)
 
 ```
@@ -366,6 +375,7 @@ class RuxMLConfig(BaseSettings):
     runs: RunsConfig
     registry: RegistryConfig
     memory: MemoryConfig
+    m9: M9Config | None = None      # PR-041; hash-neutral while unset
     search_space: dict[str, SearchSpec] = {}
 
 # src/rux_ml/config/tuning.py

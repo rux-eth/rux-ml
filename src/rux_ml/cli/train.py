@@ -63,15 +63,54 @@ def _strip_target(df: pl.DataFrame, target_col: str) -> tuple[pl.DataFrame, pl.S
     return df.drop(target_col), df[target_col]
 
 
+def _label_diagnostics(
+    splits: dict[str, pl.DataFrame], columns: list[str]
+) -> dict[str, dict[str, dict[str, float | None]]]:
+    """Summarise ``[m9] diagnostic_columns`` per one-off fold (PR-041; D45 #3).
+
+    The other labels of an M9 table ride beside the target as diagnostics —
+    ``{fold: {column: {n, null_count, mean, std, min, max}}}`` in the ``fold_meta``
+    sidecar — and are never trained on. ``n`` counts values; ``null_count`` counts
+    nulls and NaNs (a label undefined on a row, e.g. a markout on an unfilled rung);
+    a statistic with no values behind it is ``None``, never a fabricated 0.0. A
+    listed column absent from the set refuses the run.
+    """
+    out: dict[str, dict[str, dict[str, float | None]]] = {}
+    for fold in ("train", "val"):
+        df = splits[fold]
+        missing = [c for c in columns if c not in df.columns]
+        if missing:
+            msg = f"m9.diagnostic_columns {missing} not in the training set columns {df.columns}"
+            raise typer.BadParameter(msg)
+        out[fold] = {}
+        for c in columns:
+            raw = df[c].cast(pl.Float64)
+            s = raw.fill_nan(None).drop_nulls()
+
+            def _stat(v: object) -> float | None:
+                return None if v is None else float(v)  # pyright: ignore[reportArgumentType]
+
+            out[fold][c] = {
+                "n": float(s.len()),
+                "null_count": float(raw.len() - s.len()),
+                "mean": _stat(s.mean()),
+                "std": _stat(s.std()),
+                "min": _stat(s.min()),
+                "max": _stat(s.max()),
+            }
+    return out
+
+
 def _fit_and_score(
     cfg: RuxMLConfig, source_path: Path, target_col: str, bag: SeedBag
-) -> tuple[float, int | None, float, int]:
+) -> tuple[float, int | None, float, int, dict[str, Any]]:
     """Fit + score one baseline using PR-013-derived seeds for split + trainer.
 
-    Returns ``(score, best_iter, fit_seconds, train_row_count)`` — the latter
-    two added by PR-034 so the diagnostic-artifact upload in ``run_command``
-    can populate ``fold_meta.json``'s single-fold entry without re-doing the
-    measurement.
+    Returns ``(score, best_iter, fit_seconds, train_row_count, diagnostics)`` —
+    the middle two added by PR-034 so the diagnostic-artifact upload in
+    ``run_command`` can populate ``fold_meta.json``'s single-fold entry without
+    re-doing the measurement; ``diagnostics`` (PR-041) is the per-fold summary
+    of ``[m9] diagnostic_columns`` (empty when the layer is unset).
 
     The one-off baseline shares the data-fold layout with the registry-side
     re-fit at promote time (both consume :func:`make_splits` with the same
@@ -83,6 +122,9 @@ def _fit_and_score(
     """
     df = materialize(load_parquet(source_path, oracle=cfg.data.oracle))
     splits = make_splits(cfg, df, seed=bag.split_seed)
+    diagnostics: dict[str, Any] = (
+        _label_diagnostics(splits, cfg.m9.diagnostic_columns) if cfg.m9 is not None else {}
+    )
     x_train, y_train = _strip_target(splits["train"], target_col)
     x_val, y_val = _strip_target(splits["val"], target_col)
 
@@ -124,9 +166,7 @@ def _fit_and_score(
             eval_set=[(x_val_t, y_val)],
             verbose=False,
         )
-        score = compute_score(
-            cfg.training.metric, adapter, x_val_t.to_pandas(), y_val.to_numpy()
-        )
+        score = compute_score(cfg.training.metric, adapter, x_val_t.to_pandas(), y_val.to_numpy())
         fit_seconds = time.perf_counter() - fit_start
         best_iter = adapter.best_iteration
         return (
@@ -134,6 +174,7 @@ def _fit_and_score(
             int(best_iter) if best_iter is not None else None,
             float(fit_seconds),
             train_row_count,
+            diagnostics,
         )
 
     trainer = make_trainer(cfg.training, seed=bag.xgb_seed)
@@ -153,6 +194,7 @@ def _fit_and_score(
         int(best_iter) if best_iter is not None else None,
         float(fit_seconds),
         train_row_count,
+        diagnostics,
     )
 
 
@@ -213,7 +255,7 @@ def run_command(ctx: typer.Context) -> None:
             sample_hz=cfg.memory.watchdog_sample_hz,
         ) as wd:
             try:
-                score, best_iter, fit_seconds, train_row_count = _fit_and_score(
+                score, best_iter, fit_seconds, train_row_count, diagnostics = _fit_and_score(
                     cfg, source_path, target_col, bag
                 )
             except MemoryPressureError:
@@ -246,15 +288,15 @@ def run_command(ctx: typer.Context) -> None:
         # no try/except guard (mirrors tuning/objective.py site). Single-fold
         # semantics (n_folds=1) for the one-off baseline.
         artifact_store = make_artifact_store(cfg, study_name=run.study.study_name)
-        metrics_dict = build_metrics_dict(
-            cfg.training.metric, [score], peak_rss_mb=wd.peak_mb
-        )
+        metrics_dict = build_metrics_dict(cfg.training.metric, [score], peak_rss_mb=wd.peak_mb)
         fold_meta: list[dict[str, Any]] = [
             {
                 "fold_idx": 0,
                 "row_count": train_row_count,
                 "fit_seconds": fit_seconds,
                 "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
+                # PR-041: the other M9 labels, summarised per fold (empty without [m9]).
+                "diagnostics": diagnostics,
             }
         ]
         with tempfile.TemporaryDirectory(prefix="rux_ml_artifacts_") as tmp:

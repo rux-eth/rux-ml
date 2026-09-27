@@ -92,11 +92,36 @@ def _mae(trainer: Trainer, x_eval: Any, y_eval: ArrayLike) -> float:
     return float(mean_absolute_error(y_eval, preds))
 
 
+def _brier(trainer: Trainer, x_eval: Any, y_eval: ArrayLike) -> float:
+    """Brier score of a probability forecast against an outcome in [0, 1].
+
+    PR-041 (program v0.3 D45 #3: the fill fraction is scored by Brier). The
+    outcome is a *fraction* (a partial-fill exchange), so this is the general
+    form mean((p - y)^2); ``sklearn.metrics.brier_score_loss`` (1.8.0) accepts
+    only a binary ``y_true`` and is not used. Either side outside [0, 1] is
+    refused rather than scored — a Brier score is meaningless there.
+    """
+    import numpy as np  # noqa: PLC0415
+
+    preds = np.asarray(trainer.predict(x_eval), dtype=float)
+    truth = np.asarray(y_eval, dtype=float)
+    for name, arr in (("outcome", truth), ("forecast", preds)):
+        if arr.size and (float(arr.min()) < 0.0 or float(arr.max()) > 1.0):
+            msg = (
+                f"brier: {name} outside [0, 1] (min {float(arr.min())}, max {float(arr.max())})"
+                " — the fill fraction and its forecast are probabilities"
+            )
+            raise ValueError(msg)
+    return float(mean_squared_error(truth, preds))
+
+
 METRIC_REGISTRY: dict[str, MetricSpec] = {
     "auc": MetricSpec("auc", "classification", "maximize", _auc),
     "logloss": MetricSpec("logloss", "classification", "minimize", _logloss),
     "rmse": MetricSpec("rmse", "regression", "minimize", _rmse),
     "mae": MetricSpec("mae", "regression", "minimize", _mae),
+    # Regression task: a fractional outcome trains as XGBRegressor(objective="reg:logistic").
+    "brier": MetricSpec("brier", "regression", "minimize", _brier),
 }
 
 
