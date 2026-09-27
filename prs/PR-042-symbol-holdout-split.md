@@ -53,7 +53,7 @@ Baseline: `pr-041/m9-problem-configs` @ `b476e52` (on `dev` `fcdbf3f`).
 - `data.split_embargo` (int ≥ 0, time-column units) for `time_ordered`: keep `t + e <` the next partition's first stamp; integer columns only; a fully purged train refused. None = legacy.
 - `[m9] h_max_ms`; with `[m9]` and `time_ordered`, `h_max_ms` is required and `split_embargo ≥ h_max_ms` (refused at load).
 - `train` writes `split_definition` into `fold_meta.json` (groups per partition / embargo + purged rows / rows per partition).
-- The three M9 configs: `split_embargo = h_max_ms = 14400000` (best-guess lower bound, Q6), `group_column = "coin"`, `symbol_holdout_seed = 20260926` (arbitrary, operator-reviewable).
+- The three M9 configs: `split_embargo = h_max_ms = 28801000` (the label's reach, program PR-024 A3 — corrected 2026-09-26 from the 14400000 lower bound; see Q6), `group_column = "coin"`, `symbol_holdout_seed = 20260926` (arbitrary, operator-reviewable).
 - The three new data fields hash-neutral while None.
 
 ## Dependencies
@@ -82,5 +82,6 @@ Program `docs/0.3/DESIGN-log.md` D41, D43, D45 #4; `docs/0.3/ACCEPTANCE.md` C9 a
 ## Notes — questions for the program lead
 
 - Q6: h_max — the longest label horizon over all labels. D45 #3 gives `markout_horizons_ms` (max 4 h) but the fill-horizon grid (`h_ms`) and the walk latency L are undefined; `h_max_ms = split_embargo = 14400000` is a lower bound. Raise both if any horizon is longer.
+  - **ANSWERED 2026-09-26 by program PR-024 §Findings Q5 / amendment A3 (operator-approved "approved, proceed on all fronts" ≈ 22:25 CDT):** h_max is the label's **reach**, not the longest markout horizon — entry latency (1 s) + the order's resting horizon (4 h) + the longest markout horizon (4 h) = **28,801,000 ms** (8 h 0 m 1 s; ceil = 33 bars at the 15-min label grid). A 4 h h_max let a label stamped 4–8 h before a boundary read past it. All three configs now set `h_max_ms = split_embargo = 28801000` with the derivation in a comment; pinned by `tests/data/test_symbol_holdout.py::test_repo_m9_problems_h_max_is_the_label_reach_not_the_markout_horizon` (+ the 4–8 h leak demonstrated). Also fixed while rebasing onto PR-041's row predicate: `split_definition` no longer counts rows dropped by `[m9] row_filter_non_null` as `purged_rows` (recorded as `row_filter_dropped`).
 - Q7: C9 names the panel purged splitter for the time-block regime but schedules one fit per (target, regime, prefix). Is the time-block regime this one-off embargoed split (as built), or a panel-CPCV study (n paths per cell)?
 - Q8: symbol holdout vs cross-sectional contemporaneous leakage — test coins share timestamps with training coins, so market-wide moves are learnable across coins. D41 lists the symbol holdout as its own regime (built as such); gen-2's design notes mention "purged time-block × symbol holdout". Should a combined regime exist?

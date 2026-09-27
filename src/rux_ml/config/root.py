@@ -190,7 +190,7 @@ class RuxMLConfig(BaseSettings):
             raise ValueError(msg)
         if self.data.split_kind == "time_ordered":
             # PR-042 (program D41 / D45 #4): the time-block regime's embargo covers
-            # the longest label horizon. Fail closed: no h_max, no time-block run.
+            # the label's reach (program PR-024 A3). Fail closed: no h_max, no time-block run.
             h_max = self.m9.h_max_ms
             if h_max is None:
                 msg = "an [m9] problem split time_ordered needs m9.h_max_ms (the embargo floor)"

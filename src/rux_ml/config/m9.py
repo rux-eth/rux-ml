@@ -32,7 +32,9 @@ class M9Config(StrictModel):
     # every row. A listed column absent from the set refuses the split.
     row_filter_non_null: list[str] = Field(default_factory=list)
 
-    # PR-042: the longest label horizon, in ``data.time_column`` units (epoch ms).
+    # PR-042: h_max, in ``data.time_column`` units (epoch ms) = the label's REACH — the
+    # latest price any label of a row stamped t reads, t + h_max (program PR-024 A3:
+    # entry latency + the order's resting horizon + the longest markout horizon).
     # Program D41 / D45 #4: the time-block regime's embargo >= h_max. Required
     # whenever ``data.split_kind == "time_ordered"`` (fail closed).
     h_max_ms: int | None = Field(default=None, gt=0)

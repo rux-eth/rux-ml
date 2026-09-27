@@ -10,6 +10,7 @@ against the cumulative ratios), independently of the implementation.
 from __future__ import annotations
 
 import hashlib
+import math
 from pathlib import Path
 
 import polars as pl
@@ -20,6 +21,7 @@ from rux_ml.config import DataConfig, M9Config, RuxMLConfig
 from rux_ml.config.root import cfg_hash, layer_cfg_hash
 from rux_ml.data.splits import (
     make_splits,
+    split_definition,
     symbol_holdout_split,
     temporal_train_val_test_split,
 )
@@ -206,3 +208,64 @@ def test_repo_m9_problems_embargo_at_least_their_h_max(tmp_path: Path) -> None:
         assert cfg.data.split_embargo >= cfg.m9.h_max_ms
         assert cfg.data.group_column == "coin"
         assert cfg.data.symbol_holdout_seed is not None
+
+
+# ---------- h_max is the label's REACH (program PR-024 §Findings Q5, amendment A3) ----------
+
+# A filled order's markout reads mid(tau + h_mk) with tau <= t + L + h_fill, so the label
+# reads prices up to t + reach. Every term is an existing program key (A3, operator-approved
+# 2026-09-26); the constants below are the test's independent derivation of the pin.
+ENTRY_LATENCY_MS = 1_000  # entry_ns: the order reaches the book 1 s after the decision
+RESTING_HORIZON_MS = 14_400_000  # the order rests 4 h (ladder_ttl_intervals x timeframe)
+MAX_MARKOUT_HORIZON_MS = 14_400_000  # max(markout_horizons_ms) = 4 h (program D45 #3)
+LABEL_GRID_MS = 900_000  # the 15-min label grid
+MIN_EMBARGO_BARS = 33  # ceil(28,801,000 / 900,000), program PR-024 A3 (not 16)
+
+
+def test_repo_m9_problems_h_max_is_the_label_reach_not_the_markout_horizon() -> None:
+    reach = ENTRY_LATENCY_MS + RESTING_HORIZON_MS + MAX_MARKOUT_HORIZON_MS
+    assert reach == 28_801_000
+    assert math.ceil(reach / LABEL_GRID_MS) == MIN_EMBARGO_BARS
+    repo = Path(__file__).resolve().parents[2] / "configs"
+    for problem in ("m9_fill_frac", "m9_markout_bp", "m9_walk_bp"):
+        cfg = RuxMLConfig.from_layers(
+            repo / "base.toml", problem=problem, problems_dir=repo / "problems"
+        )
+        assert cfg.m9 is not None and cfg.data.split_embargo is not None
+        assert cfg.m9.h_max_ms == reach, problem
+        assert cfg.data.split_embargo >= reach, problem
+        assert math.ceil(cfg.data.split_embargo / LABEL_GRID_MS) >= MIN_EMBARGO_BARS, problem
+
+
+def test_a_label_stamped_between_the_markout_horizon_and_the_reach_is_purged() -> None:
+    """The A3 leak: a row stamped 4-8 h before the next partition survives a 4 h embargo
+    while its label reads past the boundary; the reach-sized embargo purges it."""
+    hour = 3_600_000
+    boundary = 100 * hour
+    stamps = [0, boundary - 6 * hour, *[boundary + i * hour for i in range(18)]]
+    df = pl.DataFrame({"t": stamps, "y": [float(i) for i in range(len(stamps))]})
+    ratios = {"train": 0.1, "val": 0.45, "test": 0.45}
+    four_h = temporal_train_val_test_split(
+        df, time_column="t", ratios=ratios, embargo=MAX_MARKOUT_HORIZON_MS
+    )
+    assert boundary - 6 * hour in four_h["train"]["t"].to_list()  # the leak
+    reach = ENTRY_LATENCY_MS + RESTING_HORIZON_MS + MAX_MARKOUT_HORIZON_MS
+    full = temporal_train_val_test_split(df, time_column="t", ratios=ratios, embargo=reach)
+    assert full["train"]["t"].to_list() == [0]
+
+
+def test_split_definition_does_not_count_row_filtered_rows_as_purged() -> None:
+    """``[m9] row_filter_non_null`` drops rows before the split (program PR-024 A9);
+    the record reports them apart from the rows the embargo purged."""
+    df = pl.DataFrame(
+        {"t": list(range(20)), "y": [None if i % 4 == 0 else float(i) for i in range(20)]}
+    )
+    data = DataConfig(
+        target_column="y", split_kind="time_ordered", time_column="t", split_embargo=1
+    )
+    cfg = RuxMLConfig(data=data, m9=M9Config(h_max_ms=1, row_filter_non_null=["y"]))
+    splits = make_splits(cfg, df, seed=0)
+    record = split_definition(cfg, df, splits)
+    kept = sum(p.height for p in splits.values())
+    assert record["row_filter_dropped"] == 5
+    assert record["purged_rows"] == 15 - kept

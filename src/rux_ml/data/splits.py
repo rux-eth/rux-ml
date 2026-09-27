@@ -269,6 +269,16 @@ def split_definition(
     """
     rows = {k: splits[k].height for k in ("train", "val", "test")}
     kind = cfg.data.split_kind
+    # Rows dropped by ``[m9] row_filter_non_null`` before the split (program PR-024
+    # A9) are recorded apart — never counted as embargo-purged.
+    filtered: dict[str, object] = {}
+    split_rows = df.height  # the rows the split itself received
+    if cfg.m9 is not None and cfg.m9.row_filter_non_null:
+        split_rows = filter_non_null(df, cfg.m9.row_filter_non_null).height
+        filtered = {
+            "row_filter_non_null": cfg.m9.row_filter_non_null,
+            "row_filter_dropped": df.height - split_rows,
+        }
     if kind == "symbol_holdout":
         col = cfg.data.group_column
         assert col is not None  # validator-enforced
@@ -278,6 +288,7 @@ def split_definition(
             "symbol_holdout_seed": cfg.data.symbol_holdout_seed,
             "groups": {k: splits[k][col].unique().sort().to_list() for k in rows},
             "rows": rows,
+            **filtered,
         }
     if kind == "time_ordered":
         return {
@@ -285,6 +296,7 @@ def split_definition(
             "time_column": cfg.data.time_column,
             "split_embargo": cfg.data.split_embargo,
             "rows": rows,
-            "purged_rows": df.height - sum(rows.values()),
+            "purged_rows": split_rows - sum(rows.values()),
+            **filtered,
         }
-    return {"kind": kind, "rows": rows}
+    return {"kind": kind, "rows": rows, **filtered}
