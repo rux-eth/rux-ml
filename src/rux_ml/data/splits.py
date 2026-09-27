@@ -235,6 +235,19 @@ def make_splits(cfg: RuxMLConfig, df: pl.DataFrame, *, seed: int) -> dict[str, p
     """
     if cfg.m9 is not None and cfg.m9.row_filter_non_null:
         df = filter_non_null(df, cfg.m9.row_filter_non_null)
+    parts = _make_regime_splits(cfg, df, seed=seed)
+    frac = cfg.data.train_prefix_frac
+    if frac is not None:
+        # PR-046: the nested-prefix learning curve cuts train only; val / test fixed.
+        time_column = cfg.data.time_column
+        assert time_column is not None  # validator-enforced (RuxMLConfig)
+        parts["train"] = train_prefix(parts["train"], time_column=time_column, frac=frac)
+    return parts
+
+
+def _make_regime_splits(
+    cfg: RuxMLConfig, df: pl.DataFrame, *, seed: int
+) -> dict[str, pl.DataFrame]:
     if cfg.data.split_kind == "time_ordered":
         # validator guarantees time_column is set; assert defensively for type
         # narrowing without runtime cost in the happy path.
@@ -258,6 +271,26 @@ def make_splits(cfg: RuxMLConfig, df: pl.DataFrame, *, seed: int) -> dict[str, p
     return train_val_test_split(df, ratios=cfg.data.split_ratios, seed=seed)
 
 
+def train_prefix(train: pl.DataFrame, *, time_column: str, frac: float) -> pl.DataFrame:
+    """The first ``frac`` of ``train``'s unique stamps (PR-046; program v0.3 D43).
+
+    Keeps the rows whose stamp is among the first ``ceil(frac * n_unique)`` sorted
+    unique stamps, so the prefixes of one split nest (1/4 < 1/2 < 3/4 < full) while
+    val and test stay fixed — the learning curve compares fits on one OOS set.
+    """
+    if time_column not in train.columns:
+        msg = f"train_prefix: time_column={time_column!r} not in columns {train.columns}"
+        raise ValueError(msg)
+    if not 0.0 < frac <= 1.0:
+        msg = f"train_prefix: frac must be in (0, 1], got {frac}"
+        raise ValueError(msg)
+    stamps = train[time_column].unique().sort()
+    if stamps.len() == 0 or frac == 1.0:
+        return train
+    last = stamps[math.ceil(frac * stamps.len()) - 1]
+    return train.filter(pl.col(time_column) <= last)
+
+
 def split_definition(
     cfg: RuxMLConfig, df: pl.DataFrame, splits: Mapping[str, pl.DataFrame]
 ) -> dict[str, object]:
@@ -268,6 +301,19 @@ def split_definition(
     embargo purged. Every kind: the rows per partition.
     """
     rows = {k: splits[k].height for k in ("train", "val", "test")}
+    out = _regime_definition(cfg, df, splits, rows)
+    if cfg.data.train_prefix_frac is not None:
+        # PR-046; with a prefix, ``purged_rows`` also counts the rows the cut left out.
+        out["train_prefix_frac"] = cfg.data.train_prefix_frac
+    return out
+
+
+def _regime_definition(
+    cfg: RuxMLConfig,
+    df: pl.DataFrame,
+    splits: Mapping[str, pl.DataFrame],
+    rows: dict[str, int],
+) -> dict[str, object]:
     kind = cfg.data.split_kind
     # Rows dropped by ``[m9] row_filter_non_null`` before the split (program PR-024
     # A9) are recorded apart — never counted as embargo-purged.

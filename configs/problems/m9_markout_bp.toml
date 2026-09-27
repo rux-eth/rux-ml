@@ -79,6 +79,14 @@ diagnostic_columns = ["y__fill_frac", "y__walk_bp"]
 # "null when unfilled", never 0), so this problem trains and scores on the filled
 # rows only: the row predicate drops a row whose target is null before the split.
 row_filter_non_null = ["y__markout_bp"]
+# PR-046 (program D43 / C9): the nested-prefix learning curve at 1/4, 1/2, 3/4, full
+# (fractions of the train window; each fit: train --set data.train_prefix_frac=<f>),
+# read by `rux-ml runs learning-curve`. The value followed is the held-out score
+# (the problem's metric) — BEST-GUESS: D43's "the OOS honesty metric" names no
+# scalar — QUESTION Q17 for the lead.
+learning_curve_fractions = [0.25, 0.5, 0.75, 1.0]
+learning_curve_metric = "score"
+learning_curve_direction = "minimize"
 
 [m9.gates]
 # PR-044: the four operator-signed M9 keys (program ACCEPTANCE C9) are read from

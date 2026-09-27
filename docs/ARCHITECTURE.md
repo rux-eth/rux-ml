@@ -225,6 +225,10 @@ The program's M9 node (fill fraction, markout, book-walk) trains three **problem
 
 Every `train` fit records `rux_ml.data.leakage.leakage_audit` in `fold_meta.json` `leakage`: **stamp violations** (rows of val, resp. test, with a stamp of the partitions fitted before them — train, resp. train + val — within the window, `|s − t| ≤ window`; the window is `[m9] h_max_ms`, else `data.split_embargo`) and **group overlaps** (groups present in two partitions, per pair). It is a different algorithm from the splitters (binary search over sorted unique stamps; set intersection), so it checks them. For an `[m9]` fit, `assert_regime_clean` refuses (exit 2) a `time_ordered` split with any stamp violation and a `symbol_holdout` split with any group overlap; `random` (row-random, diagnostic) promises nothing and is recorded only. The three regimes are committed as study overlays `configs/studies/m9_regime_{row_random,time_block,symbol_holdout}.toml`.
 
+### The nested-prefix learning curve (per PR-046; program v0.3 D43, ACCEPTANCE C9)
+
+`data.train_prefix_frac` (hash-neutral while unset; requires `time_column`) keeps the first fraction of the train partition's unique stamps after the regime split, leaving val and test untouched, so the prefix fits of one regime nest and share one OOS set; the fraction is recorded in `split_definition`. `rux-ml runs learning-curve --study … --output report.json` reads every complete trial of the given studies, follows `[m9] learning_curve_metric` (a dotted path into each fit's `oos` record) at `[m9] learning_curve_fractions`, and refuses an incomparable curve (a fraction missing or repeated, more than one regime, different test row counts, a missing value). D43's verdict: the last step's relative improvement — `(prev − last) / |prev|` to minimize, the mirror to maximize — against the operator-signed `m9_learning_curve_tolerance_rel` (read fail-closed); "history-limited" when it exceeds it. The report carries the gates sha256.
+
 ### Categorical encoding (per D4)
 
 ```

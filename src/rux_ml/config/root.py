@@ -81,7 +81,9 @@ _HASH_OPTIONAL_LAYERS: frozenset[str] = frozenset({"m9"})
 # ``root_cfg_hash`` stay put for every config that does not use them (the PR-040
 # pins); once set they are part of the trial identity.
 _HASH_OPTIONAL_FIELDS: dict[str, frozenset[str]] = {
-    "data": frozenset({"split_embargo", "group_column", "symbol_holdout_seed"}),
+    "data": frozenset(
+        {"split_embargo", "group_column", "symbol_holdout_seed", "train_prefix_frac"}
+    ),
 }
 
 
@@ -158,6 +160,11 @@ class RuxMLConfig(BaseSettings):
             msg = (
                 "data.split_kind == 'time_ordered' requires data.time_column to be set "
                 "(name a timestamp column on the input DataFrame). See PR-024."
+            )
+            raise ValueError(msg)
+        if self.data.train_prefix_frac is not None and self.data.time_column is None:
+            msg = (
+                "data.train_prefix_frac cuts train by stamp: it requires data.time_column (PR-046)"
             )
             raise ValueError(msg)
         if self.data.split_kind == "symbol_holdout":
