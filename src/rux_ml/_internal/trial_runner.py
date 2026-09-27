@@ -72,8 +72,6 @@ def _load_overrides(path: Path | None) -> dict[str, Any]:
     return dict(raw)  # type: ignore[arg-type]
 
 
-
-
 def main(argv: list[str] | None = None) -> int:
     """Child entry point — run one trial and exit.
 

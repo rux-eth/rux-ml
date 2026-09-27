@@ -88,5 +88,3 @@ def data_hashes(source_path: Path, *, oracle: OracleQuarantineConfig | None) -> 
         "data_logical_hash": composite["logical_hash"],
         "data_hash": f"{composite['bytes_hash']}|{composite['logical_hash']}",
     }
-
-

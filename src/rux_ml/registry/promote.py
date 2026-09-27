@@ -70,9 +70,7 @@ def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]
     for key, value in overlay.items():
         existing = out.get(key)
         if isinstance(existing, dict) and isinstance(value, dict):
-            out[key] = _deep_merge(
-                cast("dict[str, Any]", existing), cast("dict[str, Any]", value)
-            )
+            out[key] = _deep_merge(cast("dict[str, Any]", existing), cast("dict[str, Any]", value))
         else:
             out[key] = value
     return out
@@ -150,9 +148,7 @@ def _library_versions() -> LibraryVersions:
 
 def _feature_list_hash(cfg: RuxMLConfig) -> str:
     """SHA-256 of the sorted feature-column list (numeric + categorical)."""
-    columns = sorted(
-        [*cfg.features.spec.numeric_columns, *cfg.features.spec.categorical_columns]
-    )
+    columns = sorted([*cfg.features.spec.numeric_columns, *cfg.features.spec.categorical_columns])
     return sha256_canonical(columns)
 
 
@@ -275,9 +271,7 @@ def promote(
     return version
 
 
-def rollback(
-    base_cfg: RuxMLConfig, *, problem: str, version: str
-) -> None:
+def rollback(base_cfg: RuxMLConfig, *, problem: str, version: str) -> None:
     """Atomically point ``champion.json`` at a prior ``version``.
 
     Raises:

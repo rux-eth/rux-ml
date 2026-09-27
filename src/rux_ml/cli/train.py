@@ -28,7 +28,7 @@ from rux_ml._internal.memory import MemoryPressureError, Watchdog
 from rux_ml._internal.seeds import SeedBag, make_seed_bag
 from rux_ml.cli._shared import get_options, refuse_oracle_source
 from rux_ml.config import RuxMLConfig, XGBoostTraining
-from rux_ml.data import load_parquet, make_splits, materialize
+from rux_ml.data import load_parquet, make_splits, materialize, split_definition
 from rux_ml.features import cardinalities_from, make_features
 from rux_ml.runs import (
     TrialAttrs,
@@ -106,11 +106,12 @@ def _fit_and_score(
 ) -> tuple[float, int | None, float, int, dict[str, Any]]:
     """Fit + score one baseline using PR-013-derived seeds for split + trainer.
 
-    Returns ``(score, best_iter, fit_seconds, train_row_count, diagnostics)`` —
+    Returns ``(score, best_iter, fit_seconds, train_row_count, fold_extras)`` —
     the middle two added by PR-034 so the diagnostic-artifact upload in
     ``run_command`` can populate ``fold_meta.json``'s single-fold entry without
-    re-doing the measurement; ``diagnostics`` (PR-041) is the per-fold summary
-    of ``[m9] diagnostic_columns`` (empty when the layer is unset).
+    re-doing the measurement; ``fold_extras`` holds ``diagnostics`` (PR-041, the
+    per-fold summary of ``[m9] diagnostic_columns``, empty without the layer)
+    and ``split_definition`` (PR-042, :func:`rux_ml.data.split_definition`).
 
     The one-off baseline shares the data-fold layout with the registry-side
     re-fit at promote time (both consume :func:`make_splits` with the same
@@ -122,9 +123,12 @@ def _fit_and_score(
     """
     df = materialize(load_parquet(source_path, oracle=cfg.data.oracle))
     splits = make_splits(cfg, df, seed=bag.split_seed)
-    diagnostics: dict[str, Any] = (
-        _label_diagnostics(splits, cfg.m9.diagnostic_columns) if cfg.m9 is not None else {}
-    )
+    fold_extras: dict[str, Any] = {
+        "diagnostics": (
+            _label_diagnostics(splits, cfg.m9.diagnostic_columns) if cfg.m9 is not None else {}
+        ),
+        "split_definition": split_definition(cfg, df, splits),
+    }
     x_train, y_train = _strip_target(splits["train"], target_col)
     x_val, y_val = _strip_target(splits["val"], target_col)
 
@@ -174,7 +178,7 @@ def _fit_and_score(
             int(best_iter) if best_iter is not None else None,
             float(fit_seconds),
             train_row_count,
-            diagnostics,
+            fold_extras,
         )
 
     trainer = make_trainer(cfg.training, seed=bag.xgb_seed)
@@ -194,7 +198,7 @@ def _fit_and_score(
         int(best_iter) if best_iter is not None else None,
         float(fit_seconds),
         train_row_count,
-        diagnostics,
+        fold_extras,
     )
 
 
@@ -255,7 +259,7 @@ def run_command(ctx: typer.Context) -> None:
             sample_hz=cfg.memory.watchdog_sample_hz,
         ) as wd:
             try:
-                score, best_iter, fit_seconds, train_row_count, diagnostics = _fit_and_score(
+                score, best_iter, fit_seconds, train_row_count, fold_extras = _fit_and_score(
                     cfg, source_path, target_col, bag
                 )
             except MemoryPressureError:
@@ -295,8 +299,9 @@ def run_command(ctx: typer.Context) -> None:
                 "row_count": train_row_count,
                 "fit_seconds": fit_seconds,
                 "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
-                # PR-041: the other M9 labels, summarised per fold (empty without [m9]).
-                "diagnostics": diagnostics,
+                # PR-041: the other M9 labels, summarised per fold (empty without [m9]);
+                # PR-042: the split definition (holdout groups / embargo + purged rows).
+                **fold_extras,
             }
         ]
         with tempfile.TemporaryDirectory(prefix="rux_ml_artifacts_") as tmp:

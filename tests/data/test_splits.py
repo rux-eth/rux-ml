@@ -208,14 +208,17 @@ def _nullable_target_frame() -> pl.DataFrame:
 
 @pytest.mark.parametrize("split_kind", ["random", "time_ordered"])
 def test_make_splits_drops_rows_where_a_filter_column_is_null_or_nan(split_kind: str) -> None:
+    # An [m9] time-ordered split needs an embargo >= h_max (PR-042): the smallest one,
+    # which purges the last train row before the next partition (t=5: 5 + 1 < 6 fails).
+    embargo = {"split_embargo": 1} if split_kind == "time_ordered" else {}
     cfg = RuxMLConfig(
-        data=DataConfig(target_column="y", split_kind=split_kind, time_column="t"),  # type: ignore[arg-type]
-        m9=M9Config(row_filter_non_null=["y"]),
+        data=DataConfig(target_column="y", split_kind=split_kind, time_column="t", **embargo),  # type: ignore[arg-type]
+        m9=M9Config(row_filter_non_null=["y"], h_max_ms=1),
     )
     parts = make_splits(cfg, _nullable_target_frame(), seed=7)
     kept = pl.concat(list(parts.values()))
-    assert kept.height == 6
-    assert sorted(kept["t"].to_list()) == [0, 2, 3, 5, 6, 9]
+    expected = [0, 2, 3, 5, 6, 9] if split_kind == "random" else [0, 2, 3, 6, 9]
+    assert sorted(kept["t"].to_list()) == expected
     assert kept["y"].null_count() == 0 and not kept["y"].is_nan().any()
 
 
@@ -227,8 +230,10 @@ def test_make_splits_without_a_filter_keeps_null_rows() -> None:
 
 def test_make_splits_refuses_a_filter_column_missing_from_the_set() -> None:
     cfg = RuxMLConfig(
-        data=DataConfig(target_column="y", split_kind="time_ordered", time_column="t"),
-        m9=M9Config(row_filter_non_null=["y__absent"]),
+        data=DataConfig(
+            target_column="y", split_kind="time_ordered", time_column="t", split_embargo=1
+        ),
+        m9=M9Config(row_filter_non_null=["y__absent"], h_max_ms=1),
     )
     with pytest.raises(ValueError, match="y__absent"):
         make_splits(cfg, _nullable_target_frame(), seed=7)

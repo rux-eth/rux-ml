@@ -26,6 +26,17 @@ target_column = "y__walk_bp"
 # (Int64 epoch milliseconds, program ACCEPTANCE C6).
 split_kind = "time_ordered"
 time_column = "stamp_ms"
+# PR-042: the time-block regime's embargo, in stamp_ms units (ms); >= [m9] h_max_ms
+# is enforced at load (program D41 / D45 #4). Set to the label's reach (see [m9]
+# h_max_ms): 28,801,000 ms = ceil 33 bars of the 15-min label grid (program PR-024
+# §Findings Q5 / amendment A3 — 33, not the 16 a 4 h h_max would give).
+split_embargo = 28801000
+# PR-042: the symbol-holdout regime (a study overlay sets split_kind = "symbol_holdout").
+# Each coin's partition is fixed by (seed, coin) alone, so every target and every
+# nested prefix holds out the same coins; the per-fold coin lists are recorded in
+# fold_meta.json. The seed value is an arbitrary operator-reviewable choice.
+group_column = "coin"
+symbol_holdout_seed = 20260926
 
 [features]
 # side / kind are low-cardinality strings (2-3 values): below the threshold they
@@ -48,6 +59,16 @@ device = "cuda"
 metric = "mae"
 
 [m9]
+# PR-042: h_max = the label's REACH (ms), not the longest markout horizon (program
+# PR-024 §Findings Q5, amendment A3, operator-approved 2026-09-26). A filled order's
+# markout reads mid(tau + h_mk) with tau <= t + L + h_fill, so a label stamped t reads
+# prices up to t + reach, where reach = entry latency (entry_ns, 1 s = 1,000)
+# + the order's resting horizon (h_ms = ladder_ttl_intervals x decision_timeframe_ms,
+# 4 h = 14,400,000) + max(markout_horizons_ms) (D45 #3, 4 h = 14,400,000)
+# = 28,801,000 ms (8 h 0 m 1 s). A 4 h h_max let a label stamped 4-8 h before the
+# boundary read past it. Every term is an existing program key: re-derive this (and
+# split_embargo) if any of them moves.
+h_max_ms = 28801000
 # The other labels of the table, summarised per fold beside every run and never
 # trained on (D45 #3: "the others diagnostics"). The markout horizon-curve columns
 # and time-to-fill are added when PR-024's schema file names them — QUESTION Q4.

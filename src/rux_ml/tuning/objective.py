@@ -79,9 +79,7 @@ if TYPE_CHECKING:
 # ---------- Search space walker ----------
 
 
-def walk_search_space(
-    search_space: dict[str, SearchSpec], trial: optuna.Trial
-) -> dict[str, Any]:
+def walk_search_space(search_space: dict[str, SearchSpec], trial: optuna.Trial) -> dict[str, Any]:
     """Translate each ``SearchSpec`` entry into a ``trial.suggest_*`` call.
 
     Keys are dot-paths into the ``RuxMLConfig`` schema (e.g.
@@ -127,9 +125,7 @@ def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]
     for key, value in overlay.items():
         existing = out.get(key)
         if isinstance(existing, dict) and isinstance(value, dict):
-            out[key] = _deep_merge(
-                cast("dict[str, Any]", existing), cast("dict[str, Any]", value)
-            )
+            out[key] = _deep_merge(cast("dict[str, Any]", existing), cast("dict[str, Any]", value))
         else:
             out[key] = value
     return out
@@ -184,9 +180,7 @@ def _carve_substrate(
     return _strip_target(df_substrate, target_col)
 
 
-def _check_extmem_compat(
-    x_full: pl.DataFrame, splitter: Any, cfg: RuxMLConfig
-) -> None:
+def _check_extmem_compat(x_full: pl.DataFrame, splitter: Any, cfg: RuxMLConfig) -> None:
     """Raise ``NotImplementedError`` for the incompatible ExtMem-Splitter pairing.
 
     Implements the PR-015 sub-decision C1 gate at its execution site. The
@@ -228,9 +222,7 @@ def _fold_scores(
     """
     scores: list[float] = []
     fold_meta: list[dict[str, Any]] = []
-    for fold_idx, (train_idx, test_idx) in enumerate(
-        splitter.split(x_full, y_full, groups=groups)
-    ):
+    for fold_idx, (train_idx, test_idx) in enumerate(splitter.split(x_full, y_full, groups=groups)):
         x_tr = x_full[train_idx.tolist()]
         x_te = x_full[test_idx.tolist()]
         y_tr = y_full[train_idx.tolist()]
@@ -378,9 +370,7 @@ def build_objective(base_cfg: RuxMLConfig) -> Callable[[optuna.Trial], float]:
         # + dashboard/hitl all upload here). Pruned / MemoryPressureError trials
         # already raised above and bypass this site by construction.
         artifact_store = make_artifact_store(trial_cfg, study_name=trial.study.study_name)
-        metrics_dict = build_metrics_dict(
-            trial_cfg.training.metric, scores, peak_rss_mb=wd.peak_mb
-        )
+        metrics_dict = build_metrics_dict(trial_cfg.training.metric, scores, peak_rss_mb=wd.peak_mb)
         with tempfile.TemporaryDirectory(prefix="rux_ml_artifacts_") as tmp:
             upload_diagnostics(
                 trial,

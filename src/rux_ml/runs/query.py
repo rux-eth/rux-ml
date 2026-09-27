@@ -109,10 +109,17 @@ def list_runs(
             {"number": "trial_number"}
         )
         # Keep base columns first; preserve user_attrs / params columns alongside.
-        ordered = ["study_name", "trial_number", "state", "value", *[
-            c for c in pl_df.columns
-            if c not in {"study_name", "trial_number", "state", "value"}
-        ]]
+        ordered = [
+            "study_name",
+            "trial_number",
+            "state",
+            "value",
+            *[
+                c
+                for c in pl_df.columns
+                if c not in {"study_name", "trial_number", "state", "value"}
+            ],
+        ]
         frames.append(pl_df.select(ordered))
     if not frames:
         return pl.DataFrame(
@@ -157,9 +164,7 @@ def load_run(storage_url: str, study_name: str, trial_number: int) -> Run:
     )
 
 
-def compare_runs(
-    storage_url: str, study_name: str, trial_numbers: list[int]
-) -> pl.DataFrame:
+def compare_runs(storage_url: str, study_name: str, trial_numbers: list[int]) -> pl.DataFrame:
     """Side-by-side comparison of multiple trials in one study.
 
     Each row is one trial; columns include ``trial_number``, ``state``,
