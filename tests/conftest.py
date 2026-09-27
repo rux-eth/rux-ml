@@ -12,6 +12,7 @@ restates the namespace or tag-file values.
 from __future__ import annotations
 
 import json
+import re
 import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -175,3 +176,16 @@ def m9_column_dtypes(name: str, path: Path = M9_SCHEMA_PATH) -> dict[str, str]:
     dtypes |= {c["name"]: c["dtype"] for c in entry["y"]}
     dtypes |= {c["name"]: c["dtype"] for c in entry["feat"]}
     return {c: dtypes[c] for c in entry["columns"]}
+
+
+def m9_feature_columns(name: str, path: Path = M9_SCHEMA_PATH) -> list[str]:
+    """PR-049: the subtree's ``feat__`` columns, in the schema's column order."""
+    return [c for c in m9_subtree(name, path)["columns"] if c.startswith("feat__")]
+
+
+def m9_nullable_features(name: str, path: Path = M9_SCHEMA_PATH) -> list[str]:
+    """PR-049: the subtree's ``feat__`` columns the schema defines as possibly empty
+    ("null when the displayed book holds less", "null beyond the deepest", ...)."""
+    return [
+        c["name"] for c in m9_subtree(name, path)["feat"] if re.search(r"\bnull\b", c["definition"])
+    ]

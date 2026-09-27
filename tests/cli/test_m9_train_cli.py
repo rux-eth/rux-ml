@@ -14,6 +14,7 @@ from typing import Any
 
 import numpy as np
 import optuna
+import pandas as pd
 import polars as pl
 import pytest
 from optuna.artifacts import download_artifact
@@ -24,7 +25,12 @@ from rux_ml.cli import app
 from rux_ml.config import RuxMLConfig
 from rux_ml.runs import list_trial_artifacts, make_artifact_store
 from tests.cli.conftest import REPO, m9_argv, problem_subtree
-from tests.conftest import M9_GATE_VALUES, m9_gates_overrides
+from tests.conftest import (
+    M9_GATE_VALUES,
+    m9_feature_columns,
+    m9_gates_overrides,
+    m9_nullable_features,
+)
 
 
 def _fold_meta(tmp: Path, problem: str) -> dict[str, Any]:
@@ -140,6 +146,60 @@ def test_no_missing_target_reaches_the_xgboost_fit(
     assert meta["split_definition"]["row_filter_dropped"] == missing
     oos = meta["oos"]
     assert oos["n_scored"] == oos["n_rows"] > 0
+
+
+# ---------- PR-049: every feat__ column reaches the fit, a null as XGBoost's missing ----------
+
+
+@pytest.mark.parametrize("problem", sorted(TARGETS))
+def test_the_fit_sees_the_feat_columns_with_nulls_as_missing(
+    problem: str,
+    runner: CliRunner,
+    c6_set: Path,
+    tmp_path: Path,
+    signed_m9_gates: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Program D38 / C10: the model's features are the subtree's ``feat__`` columns (plus
+    the order's own attributes). On a set whose possibly-empty features carry nulls, the
+    frame XGBoost fits (and early-stops on) holds exactly those columns, the numeric ones
+    as numbers, and each null arrives as NaN — XGBoost's ``missing`` — never refused,
+    imputed or dropped."""
+    subtree = problem_subtree(problem)
+    feats = m9_feature_columns(subtree)
+    nullable = m9_nullable_features(subtree)
+    nulls = (
+        pl.scan_parquet(c6_set / subtree)
+        .select([pl.col(c).null_count() for c in nullable])
+        .collect()
+        .row(0)
+    )
+    assert nullable
+    assert all(n > 0 for n in nulls)  # the fixture writes the schema's empties
+
+    seen: list[pd.DataFrame] = []
+    original_fit = XGBRegressor.fit
+
+    def spy(self: XGBRegressor, x: pd.DataFrame, y: object, **kw: object) -> object:
+        seen.append(x)
+        seen.extend(x_eval for x_eval, _ in kw.get("eval_set") or [])  # type: ignore[union-attr]
+        return original_fit(self, x, y, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(XGBRegressor, "fit", spy)
+    argv = m9_argv(tmp_path, c6_set, problem, *m9_gates_overrides(signed_m9_gates), "train")
+    result = runner.invoke(app, argv, catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    assert len(seen) == 2  # the fitted frame and the eval-set frame
+    numeric = ["p_bp", "q_usd", "h_ms", "side", *feats]
+    for x in seen:
+        assert list(x.columns) == [*numeric, "kind"]
+        assert all(pd.api.types.is_numeric_dtype(x[c]) for c in numeric)
+        assert isinstance(x["kind"].dtype, pd.CategoricalDtype)
+        assert all(x[c].isna().any() for c in nullable), "a null did not reach XGBoost as NaN"
+        assert not x[[c for c in numeric if c not in nullable]].isna().any().any()
+    assert np.isnan(XGBRegressor().get_params()["missing"])
+    oos = _fold_meta(tmp_path, problem)["oos"]
+    assert oos["n_scored"] == oos["n_rows"] > 0  # held-out rows with empty features are scored
 
 
 # ---------- PR-045: the three regimes, audited on every fit ----------

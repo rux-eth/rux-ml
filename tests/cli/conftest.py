@@ -11,7 +11,7 @@ import polars as pl
 import pytest
 from typer.testing import CliRunner
 
-from tests.conftest import m9_column_dtypes, m9_subtree
+from tests.conftest import m9_column_dtypes, m9_nullable_features, m9_subtree
 
 
 @pytest.fixture
@@ -58,6 +58,13 @@ def _c6_day(subtree: str, day: int, rng: np.random.Generator) -> pl.DataFrame:
     for f in entry["feat"]:
         cols[f["name"]] = rng.normal(0.0, 1.0, size=n)
     cols["feat__spread_bp"] = spread
+    # PR-049: a feature the schema defines as possibly empty ("null when ...") is written
+    # null on a deterministic 1-in-17 row set per column, drawing nothing from ``rng`` so
+    # every other column is unchanged.
+    for j, name in enumerate(m9_nullable_features(subtree)):
+        empty = np.arange(n) % 17 == j
+        values = np.asarray(cols[name], dtype=float)
+        cols[name] = [None if e else float(v) for e, v in zip(empty, values, strict=True)]
     nan = float("nan")
     if subtree == "fill":
         outcome = rng.choice(
