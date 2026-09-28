@@ -97,10 +97,13 @@ After study completes — promotion is an explicit step:
     │     raises pydantic.ValidationError if provenance is incomplete →
     │     promotion REFUSED (CONSTRAINTS.md reproducibility rule)
     ├─ apply trial.params overrides to base RuxMLConfig → trial_cfg
+    ├─ data_hashes(trial_cfg.data.source_path) must equal the trial's recorded
+    │     data_hash, else PromoteDataHashError → REFUSED, exit 2 (PR-050;
+    │     source_path is hash-elided, so the re-fit could read other data)
     ├─ re-fit final (pipeline, booster) on train+val (no CV folds, no
     │     per-fold reporting — just a clean final fit)
     ├─ compose ModelManifest from TrialAttrs + library versions +
-    │     feature_list_hash
+    │     feature_list_hash + the (equal) data hashes
     ├─ write registry/<problem>/<version>/{pipeline.skops, model.ubj, manifest.json}
     │     where <version> = v_<YYYY>_<MM>_<DD>_<short_hash>
     └─ atomic rewrite registry/<problem>/champion.json (tmp + os.replace)

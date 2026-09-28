@@ -27,8 +27,9 @@ from rux_ml.config import (
 from rux_ml.config.features import FeaturesSpec
 from rux_ml.registry import load_model
 from rux_ml.registry.champion import read_champion
+from rux_ml.registry.manifest import read as read_manifest
 from rux_ml.registry.paths import champion_path, version_dir
-from rux_ml.registry.promote import promote, rollback
+from rux_ml.registry.promote import PromoteDataHashError, promote, rollback
 from rux_ml.runs import TrialAttrs, data_hashes, one_off_run
 from tests.conftest import repo_oracle_cfg
 
@@ -107,6 +108,57 @@ def test_promote_writes_bundle_and_champion(
     assert champ["version"] == version
     assert champ["promoted_from"]["study"] == study_name
     assert champ["promoted_from"]["trial_number"] == trial_number
+
+
+@pytest.mark.parametrize("how", ["rewritten", "other_source"])
+def test_promote_refuses_a_refit_whose_data_hash_differs_from_the_trials(
+    synth_workdir: tuple[Path, RuxMLConfig],
+    seed_bag: SeedBag,
+    env_versions: EnvironmentVersions,
+    how: str,
+) -> None:
+    """PR-050 (PR-040 successor (i)): the re-fit's ``data_hash`` must equal the one the
+    trial recorded. ``data.source_path`` is hash-elided, so a trial can be promoted by
+    re-fitting on other data — the file rewritten in place, or the config pointed at
+    another file. Refused with a named error before any bundle is written."""
+    tmp_path, cfg = synth_workdir
+    study_name, trial_number = _populate_trial(cfg, seed_bag, env_versions)
+    assert cfg.data.source_path is not None
+    recorded = data_hashes(cfg.data.source_path, oracle=cfg.data.oracle)["data_hash"]
+    changed = pl.read_parquet(cfg.data.source_path).with_columns(pl.col("x1") * 2.0)
+    if how == "rewritten":
+        changed.write_parquet(cfg.data.source_path)
+    else:
+        other = tmp_path / "other.parquet"
+        changed.write_parquet(other)
+        cfg = cfg.model_copy(update={"data": cfg.data.model_copy(update={"source_path": other})})
+    refit = data_hashes(cfg.data.source_path, oracle=cfg.data.oracle)["data_hash"]
+    assert refit != recorded
+
+    with pytest.raises(PromoteDataHashError) as exc:
+        promote(cfg, problem="churn_v1", study_name=study_name, trial_number=trial_number)
+
+    assert isinstance(exc.value, ValueError)  # the CLI's exit-2 family
+    assert recorded in str(exc.value)
+    assert refit in str(exc.value)
+    assert f"{study_name}#{trial_number}" in str(exc.value)
+    assert not (cfg.registry.root / "churn_v1").exists()
+
+
+def test_promote_manifest_data_hash_equals_the_trials(
+    synth_workdir: tuple[Path, RuxMLConfig],
+    seed_bag: SeedBag,
+    env_versions: EnvironmentVersions,
+) -> None:
+    """The equal case: the bundle's ``data_hash`` is the trial's recorded one."""
+    _tmp_path, cfg = synth_workdir
+    study_name, trial_number = _populate_trial(cfg, seed_bag, env_versions)
+    run = optuna.load_study(study_name=study_name, storage=cfg.runs.storage_url).trials[
+        trial_number
+    ]
+    version = promote(cfg, problem="churn_v1", study_name=study_name, trial_number=trial_number)
+    manifest = read_manifest(version_dir(cfg.registry.root, "churn_v1", version) / "manifest.json")
+    assert manifest.data_hash == run.user_attrs["data_hash"]
 
 
 def test_load_model_returns_pipeline_and_booster_and_predict_works(
