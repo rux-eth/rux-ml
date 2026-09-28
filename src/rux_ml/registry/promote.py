@@ -12,7 +12,10 @@
    (:class:`PromoteDataHashError`). ``data.source_path`` is hash-elided, so
    without this a trial tuned on one dataset could be promoted by re-fitting on
    another. The check runs before the re-fit, and the bundle manifest carries
-   the same hashes.
+   the same hashes. Then (PR-051) read the harness set's manifest id from the
+   subtree's view (:func:`rux_ml.data.bridge.harness_manifest_ref`): required
+   for an ``[m9]`` problem, refused if the set manifest's copy of rux-ml's
+   ``data_hash`` differs from the re-fit's.
 4. Re-fit the features pipeline + trainer on the trial's data (final-fit
    reproduction; no CV folds, no per-fold reporting).
 5. Compose ``ModelManifest`` from trial attrs + library versions +
@@ -35,10 +38,12 @@ from rux_ml._internal.hashing import sha256_canonical
 from rux_ml._internal.seeds import SeedBag, make_seed_bag_from_hex
 from rux_ml.config import RuxMLConfig
 from rux_ml.data import check_feature_labels, load_parquet, make_splits, materialize
+from rux_ml.data.bridge import HarnessManifestError, harness_manifest_ref, harness_view_path
 from rux_ml.features import cardinalities_from, make_features
 from rux_ml.registry.bundle import save_bundle
 from rux_ml.registry.champion import write_champion
 from rux_ml.registry.manifest import (
+    HarnessManifestRef,
     LibraryVersions,
     ModelManifest,
     PromotedFrom,
@@ -195,10 +200,41 @@ def _refit_data_hashes(
     return hashes
 
 
+def _harness_manifest(cfg: RuxMLConfig, hashes: dict[str, str]) -> HarnessManifestRef | None:
+    """The harness set's manifest id for the bundle (PR-051; program D45 #6, C11).
+
+    ``None`` for a source with no harness view — refused for an ``[m9]`` problem, which
+    trains on a harness set by definition. Refused when the set manifest carries a
+    rux-ml ``data_hash`` for the subtree that is not the re-fit's.
+    """
+    source = cfg.data.source_path
+    if source is None:
+        msg = "promote requires data.source_path"
+        raise ValueError(msg)
+    ref = harness_manifest_ref(source)
+    if ref is None:
+        if cfg.m9 is not None:
+            msg = (
+                f"an [m9] model records its training set's manifest id, and {source} has "
+                f"no harness view at {harness_view_path(source)}"
+            )
+            raise HarnessManifestError(msg)
+        return None
+    theirs = ref["ruxml_data_hash"]
+    if theirs is not None and theirs != hashes["data_hash"]:
+        msg = (
+            f"{ref['manifest_id']} carries rux-ml data_hash {theirs} for {ref['subtree']}/, "
+            f"the re-fit's is {hashes['data_hash']}"
+        )
+        raise HarnessManifestError(msg)
+    return HarnessManifestRef.model_validate(ref)
+
+
 def _build_manifest(
     cfg: RuxMLConfig,
     attrs: TrialAttrs,
     hashes: dict[str, str],
+    harness: HarnessManifestRef | None,
     *,
     problem: str,
     version: str,
@@ -231,6 +267,7 @@ def _build_manifest(
         data_hash=hashes["data_hash"],
         data_bytes_hash=hashes["data_bytes_hash"],
         data_logical_hash=hashes["data_logical_hash"],
+        harness_manifest=harness,
         library_versions=_library_versions(),
         feature_list_hash=_feature_list_hash(cfg),
         created_at=now_iso(),
@@ -260,6 +297,8 @@ def promote(
             ``TrialAttrs.from_trial`` validation (PR-009 promotion-gate).
         PromoteDataHashError: if the re-fit source's ``data_hash`` differs from
             the trial's recorded one (PR-050).
+        HarnessManifestError: if an ``[m9]`` source has no harness view, or the
+            harness manifest does not describe the re-fit's set (PR-051).
         KeyError: if the study or trial doesn't exist in storage.
     """
     # 1. Load the trial + 2. validate provenance.
@@ -281,6 +320,8 @@ def promote(
 
     # 3b. PR-050: the re-fit reads the data the trial recorded, or promote refuses.
     hashes = _refit_data_hashes(trial_cfg, attrs, study_name=study_name, trial_number=trial_number)
+    # 3c. PR-051: the harness set's manifest id, checked against the set, before the re-fit.
+    harness = _harness_manifest(trial_cfg, hashes)
 
     # 4. Re-fit pipeline + booster — PR-013 reconstructs the original trial's
     # SeedBag from its recorded ``entropy_hex`` so the promoted bundle uses
@@ -295,6 +336,7 @@ def promote(
         trial_cfg,
         attrs,
         hashes,
+        harness,
         problem=problem,
         version=version,
         study_name=study_name,

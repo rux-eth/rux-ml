@@ -50,6 +50,25 @@ class LibraryVersions(BaseModel):
     rux_ml: str
 
 
+class HarnessManifestRef(BaseModel):
+    """The harness training set the model was trained on (PR-051; rux-capital program
+    v0.3 D45 #6, ACCEPTANCE C11: "rux-ml's model manifest carries the harness manifest
+    id"). Read at promote from the view program PR-024's materializer writes beside the
+    subtree (``<set>/<subtree>.manifest.json``), and checked against the set manifest."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # sha256 of the set's ``manifest.json`` — the id the harness's own view cites
+    # (``set_manifest_sha256``), verified against the file at promote.
+    manifest_id: str
+    set_name: str  # the set manifest's ``set`` (its directory name)
+    subtree: str  # ``fill`` / ``walk`` — the last part of ``data.source_path``
+    view_sha256: str  # sha256 of ``<subtree>.manifest.json`` as read at promote
+    # The set manifest's copy of rux-ml's ``data_hash`` (``ruxml_sidecars.<subtree>``);
+    # equal to ``ModelManifest.data_hash`` when present, else promote refuses.
+    ruxml_data_hash: str | None
+
+
 class ModelManifest(BaseModel):
     """Promoted model bundle metadata (per D8 + PR-010 sub-decisions C1/D1)."""
 
@@ -80,6 +99,8 @@ class ModelManifest(BaseModel):
     data_hash: str
     data_bytes_hash: str
     data_logical_hash: str
+    # PR-051: the harness set's provenance manifest; None for a source with no harness view.
+    harness_manifest: HarnessManifestRef | None = None
 
     # Library + runtime + features.
     library_versions: LibraryVersions

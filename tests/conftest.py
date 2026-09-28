@@ -11,6 +11,7 @@ restates the namespace or tag-file values.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import tomllib
@@ -189,3 +190,46 @@ def m9_nullable_features(name: str, path: Path = M9_SCHEMA_PATH) -> list[str]:
     return [
         c["name"] for c in m9_subtree(name, path)["feat"] if re.search(r"\bnull\b", c["definition"])
     ]
+
+
+def write_harness_manifest(
+    root: Path, subtrees: list[str], *, ruxml_data_hash: dict[str, str] | None = None
+) -> None:
+    """The provenance files program PR-024's materializer writes at a set root
+    (rumpy-harness ``training/materialize.py`` ``write_manifest``): ``manifest.json``
+    with every subtree's files (path relative to the subtree, sha256) and, once rux-ml
+    has written a sidecar, its ``data_hash`` under ``ruxml_sidecars``; then one view per
+    subtree, ``<subtree>.manifest.json``, naming the set manifest and its sha256."""
+
+    def sha(path: Path) -> str:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    files = {
+        t: [
+            {"path": f.relative_to(root / t).as_posix(), "sha256": sha(f)}
+            for f in sorted((root / t).rglob("*.parquet"))
+        ]
+        for t in subtrees
+    }
+    hashes = ruxml_data_hash or {}
+    manifest = {
+        "kind": "rumpy-harness M9 training set (test fixture)",
+        "set": root.name,
+        "subtrees": {
+            t: {"subtree": f"{t}/", "files": files[t], "view": f"{t}.manifest.json"}
+            for t in subtrees
+        },
+        "ruxml_sidecars": {
+            t: ({"data_hash": hashes[t]} if t in hashes else None) for t in subtrees
+        },
+    }
+    (root / "manifest.json").write_text(json.dumps(manifest, indent=1, sort_keys=True))
+    set_sha = sha(root / "manifest.json")
+    for t in subtrees:
+        view = {
+            "subtree": t,
+            "set_manifest": "manifest.json",
+            "set_manifest_sha256": set_sha,
+            "files": files[t],
+        }
+        (root / f"{t}.manifest.json").write_text(json.dumps(view, indent=1, sort_keys=True))

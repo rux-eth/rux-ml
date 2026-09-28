@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -25,13 +27,15 @@ from rux_ml.config import (
     XGBoostTraining,
 )
 from rux_ml.config.features import FeaturesSpec
+from rux_ml.data.bridge import HarnessManifestError
 from rux_ml.registry import load_model
 from rux_ml.registry.champion import read_champion
+from rux_ml.registry.manifest import HarnessManifestRef
 from rux_ml.registry.manifest import read as read_manifest
 from rux_ml.registry.paths import champion_path, version_dir
 from rux_ml.registry.promote import PromoteDataHashError, promote, rollback
 from rux_ml.runs import TrialAttrs, data_hashes, one_off_run
-from tests.conftest import repo_oracle_cfg
+from tests.conftest import repo_oracle_cfg, write_harness_manifest
 
 
 def _make_cfg(tmp_path: Path, source: Path, registry_root: Path) -> RuxMLConfig:
@@ -159,6 +163,99 @@ def test_promote_manifest_data_hash_equals_the_trials(
     version = promote(cfg, problem="churn_v1", study_name=study_name, trial_number=trial_number)
     manifest = read_manifest(version_dir(cfg.registry.root, "churn_v1", version) / "manifest.json")
     assert manifest.data_hash == run.user_attrs["data_hash"]
+
+
+@pytest.fixture
+def harness_workdir(tmp_path: Path) -> tuple[Path, RuxMLConfig]:
+    """A harness-shaped set (program PR-024): ``<set>/fill/<day>.parquet`` with the
+    set's ``manifest.json`` and the ``fill.manifest.json`` view; the source is ``fill/``."""
+    root = tmp_path / "training" / "3f1c0a9e2b7d-8a4e6c2f0d1b"
+    (root / "fill").mkdir(parents=True)
+    rng = np.random.default_rng(0)
+    for day in ("2026-05-01", "2026-05-02"):
+        x1, x2 = rng.normal(size=100), rng.normal(size=100)
+        y = ((0.7 * x1 + 0.3 * x2) > 0).astype(int)
+        frame = {"x1": x1.tolist(), "x2": x2.tolist(), "y": y.tolist()}
+        pl.DataFrame(frame).write_parquet(root / "fill" / f"{day}.parquet")
+    write_harness_manifest(root, ["fill"])
+    return root, _make_cfg(tmp_path, root / "fill", tmp_path / "registry")
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize("carries_data_hash", [False, True])
+def test_promote_records_the_harness_manifest_id(
+    harness_workdir: tuple[Path, RuxMLConfig],
+    seed_bag: SeedBag,
+    env_versions: EnvironmentVersions,
+    carries_data_hash: bool,
+) -> None:
+    """PR-051 (program D45 #6, C11): a model trained on a harness set records the id of
+    the set's provenance manifest — the sha256 of ``manifest.json``, the id the harness's
+    own view cites — with the set, the subtree, the view's sha256 and the manifest's copy
+    of rux-ml's ``data_hash`` (equal to the model's when present)."""
+    root, cfg = harness_workdir
+    study_name, trial_number = _populate_trial(cfg, seed_bag, env_versions)
+    assert cfg.data.source_path is not None
+    data_hash = data_hashes(cfg.data.source_path, oracle=cfg.data.oracle)["data_hash"]
+    if carries_data_hash:
+        write_harness_manifest(root, ["fill"], ruxml_data_hash={"fill": data_hash})
+
+    version = promote(cfg, problem="churn_v1", study_name=study_name, trial_number=trial_number)
+
+    manifest = read_manifest(version_dir(cfg.registry.root, "churn_v1", version) / "manifest.json")
+    assert manifest.harness_manifest == HarnessManifestRef(
+        manifest_id=_sha256(root / "manifest.json"),
+        set_name=root.name,
+        subtree="fill",
+        view_sha256=_sha256(root / "fill.manifest.json"),
+        ruxml_data_hash=data_hash if carries_data_hash else None,
+    )
+    assert manifest.data_hash == data_hash
+
+
+@pytest.mark.parametrize("defect", ["stale_view", "other_subtree", "other_data_hash", "no_set"])
+def test_promote_refuses_a_harness_manifest_that_does_not_describe_the_set(
+    harness_workdir: tuple[Path, RuxMLConfig],
+    seed_bag: SeedBag,
+    env_versions: EnvironmentVersions,
+    defect: str,
+) -> None:
+    """The id is recorded only if it is the id of this set: the view must cite the set
+    manifest as it is (not a rewrite), name this subtree, and the manifest's copy of
+    rux-ml's ``data_hash`` (if any) must equal the re-fit's. Refused before any bundle."""
+    root, cfg = harness_workdir
+    study_name, trial_number = _populate_trial(cfg, seed_bag, env_versions)
+    view_path, set_path = root / "fill.manifest.json", root / "manifest.json"
+    if defect == "stale_view":  # the set manifest rewritten, the view not
+        body = json.loads(set_path.read_text())
+        set_path.write_text(json.dumps({**body, "days_in_window_missing": ["2026-05-03"]}))
+    elif defect == "other_subtree":
+        view = json.loads(view_path.read_text())
+        view_path.write_text(json.dumps({**view, "subtree": "walk"}))
+    elif defect == "other_data_hash":
+        write_harness_manifest(root, ["fill"], ruxml_data_hash={"fill": "0" * 16 + "|" + "0" * 16})
+    else:  # the view names a set manifest that is not there
+        set_path.unlink()
+
+    with pytest.raises(HarnessManifestError, match="harness manifest"):
+        promote(cfg, problem="churn_v1", study_name=study_name, trial_number=trial_number)
+    assert not (cfg.registry.root / "churn_v1").exists()
+
+
+def test_promote_records_no_harness_manifest_for_a_plain_source(
+    synth_workdir: tuple[Path, RuxMLConfig],
+    seed_bag: SeedBag,
+    env_versions: EnvironmentVersions,
+) -> None:
+    """A source with no harness view (a non-M9 problem) records ``harness_manifest: null``."""
+    _tmp_path, cfg = synth_workdir
+    study_name, trial_number = _populate_trial(cfg, seed_bag, env_versions)
+    version = promote(cfg, problem="churn_v1", study_name=study_name, trial_number=trial_number)
+    manifest = read_manifest(version_dir(cfg.registry.root, "churn_v1", version) / "manifest.json")
+    assert manifest.harness_manifest is None
 
 
 def test_load_model_returns_pipeline_and_booster_and_predict_works(
