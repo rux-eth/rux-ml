@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from rux_ml.registry.manifest import (
+    HarnessManifestRef,
     LibraryVersions,
     ManifestSchemaError,
     ModelManifest,
@@ -96,3 +97,23 @@ def test_read_rejects_missing_required_field(tmp_path: Path) -> None:
     path.write_text(json.dumps(payload))
     with pytest.raises(ManifestSchemaError):
         read(path)
+
+
+def test_harness_manifest_round_trips_and_is_optional(tmp_path: Path) -> None:
+    """PR-051: the harness set's manifest id round-trips; a manifest written before
+    PR-051 (no ``harness_manifest`` key) still reads, as ``None``."""
+    ref = HarnessManifestRef(
+        manifest_id="a" * 64,
+        set_name="3f1c0a9e2b7d-8a4e6c2f0d1b",
+        subtree="walk",
+        view_sha256="b" * 64,
+        ruxml_data_hash=None,
+    )
+    path = tmp_path / "manifest.json"
+    write(path, _sample_manifest(harness_manifest=ref))
+    assert read(path).harness_manifest == ref
+
+    legacy = json.loads(path.read_text())
+    del legacy["harness_manifest"]
+    path.write_text(json.dumps(legacy))
+    assert read(path).harness_manifest is None

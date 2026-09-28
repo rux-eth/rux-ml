@@ -11,7 +11,12 @@ import polars as pl
 import pytest
 from typer.testing import CliRunner
 
-from tests.conftest import m9_column_dtypes, m9_nullable_features, m9_subtree
+from tests.conftest import (
+    m9_column_dtypes,
+    m9_nullable_features,
+    m9_subtree,
+    write_harness_manifest,
+)
 
 
 @pytest.fixture
@@ -111,7 +116,8 @@ def _c6_day(subtree: str, day: int, rng: np.random.Generator) -> pl.DataFrame:
 
 @pytest.fixture
 def c6_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """The set root: ``fill/<day>.parquet`` and ``walk/<day>.parquet``, flat (no hive key)."""
+    """The set root: ``fill/<day>.parquet`` and ``walk/<day>.parquet``, flat (no hive key),
+    with the harness's ``manifest.json`` and one view per subtree beside them (PR-051)."""
     monkeypatch.chdir(REPO)  # --problem resolves configs/problems against the cwd
     rng = np.random.default_rng(0)
     root = tmp_path / "training_root" / "set"
@@ -120,6 +126,7 @@ def c6_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         for day in range(20_500, 20_503):
             iso = (dt.date(1970, 1, 1) + dt.timedelta(days=day)).isoformat()
             _c6_day(subtree, day, rng).write_parquet(root / subtree / f"{iso}.parquet")
+    write_harness_manifest(root, ["fill", "walk"])  # the materializer's manifest + views
     return root
 
 

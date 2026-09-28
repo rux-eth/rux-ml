@@ -100,10 +100,14 @@ After study completes — promotion is an explicit step:
     ├─ data_hashes(trial_cfg.data.source_path) must equal the trial's recorded
     │     data_hash, else PromoteDataHashError → REFUSED, exit 2 (PR-050;
     │     source_path is hash-elided, so the re-fit could read other data)
+    ├─ harness_manifest_ref(source_path): the harness set's manifest id from the
+    │     subtree's view, checked against the set manifest (PR-051); required
+    │     for an [m9] problem; refused if the set manifest's rux-ml data_hash
+    │     differs → HarnessManifestError, exit 2
     ├─ re-fit final (pipeline, booster) on train+val (no CV folds, no
     │     per-fold reporting — just a clean final fit)
     ├─ compose ModelManifest from TrialAttrs + library versions +
-    │     feature_list_hash + the (equal) data hashes
+    │     feature_list_hash + the (equal) data hashes + harness_manifest
     ├─ write registry/<problem>/<version>/{pipeline.skops, model.ubj, manifest.json}
     │     where <version> = v_<YYYY>_<MM>_<DD>_<short_hash>
     └─ atomic rewrite registry/<problem>/champion.json (tmp + os.replace)
@@ -236,6 +240,8 @@ Every `train` fit records `rux_ml.data.leakage.leakage_audit` in `fold_meta.json
 ### The training-set data-hash bridge (per PR-047; program PR-024 amendment A13, ACCEPTANCE C6 / C11)
 
 rux-ml's `data_hash` includes a Polars row hash that Polars guarantees only within one version, so rux-ml computes it for each harness training subtree (`fill/`, `walk/`) in its own environment: `rux-ml --set data.source_path=<subtree> data bridge --output <sidecar.json> [--manifest <harness manifest>]` (`rux_ml.data.bridge`). The sidecar holds `data_hash` (composed as `runs.provenance.data_hashes`), every file with its sha256, the file list the hash covers and the file list the loader opens — the latter read from Polars itself (`include_file_paths` on the loader's own scan) — plus the rux-ml commit SHA and the Polars version. A source whose opened and hashed lists differ is refused (PR-040's successor (ii): e.g. a symlinked subdirectory Polars follows and `rglob` does not). `check_bridge` is the equality test: the harness manifest's files + sha256 equal the opened files, and its copy of rux-ml's `data_hash` (if present) equals the sidecar's; any difference exits 2. `tests/integration/test_training_set_bridge_real.py` runs it on the real set (`RUXML_BRIDGE_SOURCE`, `RUXML_BRIDGE_MANIFEST`). Assumed manifest shape: `{"files": [{"path", "sha256"}], "ruxml_data_hash"?}`.
+
+**The harness manifest id in the model manifest** (per PR-051; program D45 #6, ACCEPTANCE C11). The materializer (rumpy-harness `training/materialize.py` `write_manifest`) writes the set's provenance manifest `<set>/manifest.json` and one view per subtree beside it, `<set>/<subtree>.manifest.json`. The view cites the set manifest by name and sha256 (`set_manifest`, `set_manifest_sha256`). At promote, `rux_ml.data.bridge.harness_manifest_ref(data.source_path)` reads the view, recomputes the set manifest's sha256 and requires it to equal the cited one (a set manifest rewritten after its view is refused), and requires the view to name this subtree. The bundle's `ModelManifest.harness_manifest` then records `manifest_id` (that sha256), `set_name`, `subtree`, `view_sha256` and `ruxml_data_hash`, the set manifest's copy of rux-ml's `data_hash` from `ruxml_sidecars.<subtree>` (`null` until the harness lists rux-ml's sidecar). When that copy is present it must equal the model's `data_hash`. An `[m9]` problem refuses to promote without a view, and any other source records `harness_manifest: null`. Refusals raise `HarnessManifestError` (a `BridgeError`), and the CLI exits 2. The check runs before the re-fit.
 
 ### Categorical encoding (per D4)
 

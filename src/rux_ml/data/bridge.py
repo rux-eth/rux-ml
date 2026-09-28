@@ -14,6 +14,11 @@ The sidecar itself refuses a source whose loaded files differ from the files the
 hash covers (PR-040's named successor (ii)): a hash that does not cover what was
 loaded is not a hash of the training set.
 
+**The harness manifest id** (PR-051, :func:`harness_manifest_ref`): the materializer
+writes the set's ``manifest.json`` at the set root and one view per subtree beside it,
+``<set>/<subtree>.manifest.json``, citing the set manifest by name and sha256. That
+sha256 is the id a promoted model records; it is verified against the file.
+
 Assumed harness manifest shape (program PR-024 not landed — flagged):
 ``{"files": [{"path": <relative to the subtree>, "sha256": <hex>}, ...],
 "ruxml_data_hash": <optional>}``.
@@ -22,8 +27,10 @@ Assumed harness manifest shape (program PR-024 not landed — flagged):
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import polars as pl
@@ -34,13 +41,15 @@ from rux_ml.data.versioning import compute_data_hash
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-    from pathlib import Path
 
     from rux_ml.config.data import OracleQuarantineConfig
 
 # A temporary column naming each row's source file; refused if the set has one.
 _FILE_COL = "__ruxml_loader_source_file__"
 _CHUNK = 1 << 20
+# The harness's view of one subtree, beside it at the set root (program PR-024's
+# materializer: ``subtrees[t]["view"] = f"{t}.manifest.json"``) — its file contract.
+_VIEW_SUFFIX = ".manifest.json"
 
 
 class BridgeError(ValueError):
@@ -48,6 +57,13 @@ class BridgeError(ValueError):
 
     def __init__(self, detail: str) -> None:
         super().__init__(f"data bridge: {detail} — refused")
+
+
+class HarnessManifestError(BridgeError):
+    """The harness manifest a model would record does not describe its training set."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(f"harness manifest: {detail}")
 
 
 def _root(source: Path) -> Path:
@@ -148,3 +164,62 @@ def check_bridge(sidecar: Mapping[str, Any], manifest: Mapping[str, Any]) -> dic
         msg = f"manifest ruxml_data_hash {theirs_hash} != rux-ml data_hash {sidecar['data_hash']}"
         raise BridgeError(msg)
     return {"files": len(ours), "data_hash_checked": theirs_hash is not None, "equal": True}
+
+
+def harness_view_path(source: Path) -> Path:
+    """Where the harness's view of the subtree ``source`` is: ``<set>/<subtree>.manifest.json``."""
+    return source.parent / f"{source.name}{_VIEW_SUFFIX}"
+
+
+def harness_manifest_ref(source: Path) -> dict[str, Any] | None:
+    """The harness manifest of the set ``source`` is a subtree of, or ``None`` if the
+    subtree has no harness view (not a harness set).
+
+    Returns ``manifest_id`` (the sha256 of the set manifest the view cites, verified
+    against the file), ``set_name``, ``subtree``, ``view_sha256`` and ``ruxml_data_hash``
+    (the set manifest's copy of rux-ml's ``data_hash`` for the subtree, ``None`` before
+    rux-ml's sidecar is listed). Refuses (:class:`HarnessManifestError`) a view that
+    names another subtree or a missing set manifest, or cites a set manifest that has
+    been rewritten since the view was written.
+    """
+    view_path = harness_view_path(source)
+    if not view_path.is_file():
+        return None
+    view = cast("dict[str, Any]", json.loads(view_path.read_text()))
+    name, cited = view.get("set_manifest"), view.get("set_manifest_sha256")
+    if view.get("subtree") != source.name:
+        msg = f"{view_path} is the view of subtree {view.get('subtree')!r}, not {source.name!r}"
+        raise HarnessManifestError(msg)
+    if not isinstance(name, str) or Path(name).name != name or not isinstance(cited, str):
+        msg = f"{view_path} does not name the set manifest (set_manifest, set_manifest_sha256)"
+        raise HarnessManifestError(msg)
+    set_path = source.parent / name
+    if not set_path.is_file():
+        msg = f"{view_path} names {name}, which is not at {set_path}"
+        raise HarnessManifestError(msg)
+    actual = _sha256(set_path)
+    if actual != cited:
+        msg = (
+            f"{view_path} cites {name} sha256 {cited}, the file is {actual}: the set manifest "
+            f"was rewritten after the view"
+        )
+        raise HarnessManifestError(msg)
+    body = cast("dict[str, Any]", json.loads(set_path.read_text()))
+    set_name = body.get("set")
+    if not isinstance(set_name, str):
+        msg = f"{set_path} has no set name"
+        raise HarnessManifestError(msg)
+    sidecars: object = body.get("ruxml_sidecars")
+    sidecar: object = (
+        cast("dict[str, object]", sidecars).get(source.name) if isinstance(sidecars, dict) else None
+    )
+    theirs: object = (
+        cast("dict[str, object]", sidecar).get("data_hash") if isinstance(sidecar, dict) else None
+    )
+    return {
+        "manifest_id": actual,
+        "set_name": set_name,
+        "subtree": source.name,
+        "view_sha256": _sha256(view_path),
+        "ruxml_data_hash": theirs if isinstance(theirs, str) else None,
+    }
