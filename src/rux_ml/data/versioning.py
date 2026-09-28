@@ -1,7 +1,8 @@
 """Content-addressed dataset versioning per D9 + D14.
 
 Composite ``data_hash`` = ``bytes_hash`` (layout-sensitive) + ``logical_hash``
-(layout-invariant), with the schema and row count recorded alongside. Snapshots
+(layout-invariant, computed one file at a time since PR-053), with the schema and row count
+recorded alongside. Snapshots
 hardlink into a CAS (``data/cas/...``) with a JSON manifest under
 ``data/manifests/<name>/``. Hardlinks fall back to ``shutil.copy2`` if source
 and destination live on different filesystems (``OSError(errno.EXDEV)``).
@@ -19,6 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import polars as pl
 from pydantic import BaseModel, ConfigDict
 
@@ -57,14 +59,71 @@ def _bytes_hash(files: Iterable[Path]) -> str:
     return hashlib.sha256(canonical_json(sorted(digests)).encode()).hexdigest()
 
 
-def _logical_hash(files: list[Path]) -> tuple[str, int, dict[str, str]]:
-    """Layout-invariant row hash + row count + schema map.
+def _footer_rows(path: Path) -> int:
+    """One file's row count, from its footer (no row data is read)."""
+    return int(pl.scan_parquet(path).select(pl.len()).collect().item())
 
-    Implementation: load the Parquet (one file or hive-partitioned dir) lazily,
-    hash each row as a Polars struct over deterministically-sorted columns, sort
-    the resulting u64 hashes, and SHA-256 the raw bytes. Layout-invariance
-    follows because the per-row struct hash doesn't depend on row order or
-    physical chunking, and the final sort removes residual order.
+
+def _logical_hash(files: list[Path]) -> tuple[str, int, dict[str, str]]:
+    """Layout-invariant row hash + row count + schema map, computed one file at a time (PR-053).
+
+    Each row is hashed as a Polars struct over the sorted column names (``hash(seed=0)``). The
+    u64 row hashes of every file are sorted together and SHA-256'd as raw bytes. A row's hash
+    depends only on that row, and the sort removes order, so the digest does not depend on how
+    rows are split into files. It is bit-identical to ``_logical_hash_whole_source``, the
+    computation it replaces (tests/data/test_logical_hash_per_file.py).
+
+    Memory: Polars is handed one file at a time, and only that file's hash column is collected.
+    The whole source is held only as one u64 per row, in one preallocated array that is sorted in
+    place. On program PR-027's 156-day fill view (95.4M rows) the whole-source computation peaked
+    at 18.0 GiB and the per-file one at 7.3 GiB, with the same digest. The array is freed when
+    this function returns, before a caller loads the data for its fit.
+
+    Each file is scanned with the first file's schema (``schema=``). One scan over every file
+    applies that same check to every later file, so the per-file path refuses what it refused
+    (a missing column: ``ColumnNotFoundError``; an extra column or a dtype difference:
+    ``SchemaError``, now naming the file). It also accepts what it accepted: a different column
+    order, a different struct field order, a tz-naive datetime under a tz-aware first file.
+    """
+    if not files:
+        msg = "no parquet files found"
+        raise FileNotFoundError(msg)
+    reference = pl.scan_parquet(files[0]).collect_schema()
+    cols = sorted(reference.names())
+    schema_map = {name: str(reference[name]) for name in cols}
+
+    counts = [_footer_rows(f) for f in files]
+    row_h = np.empty(sum(counts), dtype=np.uint64)
+    at = 0
+    for f, rows in zip(files, counts, strict=True):
+        try:
+            part = (
+                pl.scan_parquet(f, schema=reference)
+                .select(pl.struct(cols).hash(seed=0).alias("_h"))
+                .collect(engine="streaming")["_h"]
+            )
+        except (pl.exceptions.SchemaError, pl.exceptions.ColumnNotFoundError) as exc:
+            msg = f"{f}: its schema differs from the first file's ({files[0]}): {exc}"
+            raise type(exc)(msg) from exc
+        if part.len() != rows:
+            msg = f"{f}: {part.len()} rows hashed but its footer declared {rows}; did it change?"
+            raise RuntimeError(msg)
+        row_h[at : at + rows] = part.to_numpy()
+        at += rows
+        del part
+    row_h.sort()
+    digest = hashlib.sha256(memoryview(row_h).cast("B")).hexdigest()
+    row_count = len(row_h)
+    del row_h
+    return digest, row_count, schema_map
+
+
+def _logical_hash_whole_source(files: list[Path]) -> tuple[str, int, dict[str, str]]:  # pyright: ignore[reportUnusedFunction]  -- the reference: tests + scripts only
+    """The pre-PR-053 ``_logical_hash``, kept verbatim as the reference. Not on any runtime path.
+
+    Only the equality tests and ``scripts/check_logical_hash_per_file.py`` call it. That script is
+    the real-set check of program PR-027 A2. This path loads the whole source into one scan and
+    sorts it: 18.0 GiB on the 156-day fill view.
     """
     if not files:
         msg = "no parquet files found"
