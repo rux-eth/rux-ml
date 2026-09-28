@@ -732,7 +732,7 @@ The tag steps (1-4) run before any polars call, because polars raises on a non-e
 
 Neither is a prerequisite of PR-040, and neither has a number yet. Take the next free `prs/PR-NNN` when either is scheduled. Both were recorded by the program lead at `rux-capital/program` 2330457 / 807f7ee.
 
-1. **Promote compares the re-fit `data_hash` with the trial's recorded one.**
+1. **Promote compares the re-fit `data_hash` with the trial's recorded one.** *(Scheduled as PR-050, 2026-09-27: refused with `PromoteDataHashError`, exit 2, no override flag.)*
    - **Gap:** `registry/promote.py` re-reads `cfg.data.source_path` for the re-fit and recomputes `data_hashes(...)` into the bundle manifest (`promote.py:174`). It never compares that value with the trial's `user_attrs["data_hash"]`. Because `source_path` is hash-elided, a trial tuned on one dataset can be promoted by re-fitting on another, and nothing notices.
    - **Why it matters for C13:** rux-ml's promotion-path half is currently a refusal at re-fit ingest only. It cannot show that a trial was not *tuned* on oracle inputs.
    - **Why it is not urgent:** all 24 existing workbench trials carry the clean crypto `data_hash` (b2d36926…|29a2c053…), and after PR-040 no new trial can ingest oracle data.

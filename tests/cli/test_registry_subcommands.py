@@ -234,3 +234,26 @@ def test_registry_score_missing_champion_raises_bad_parameter(
         ["--config", str(config), "registry", "score", "--problem", "nonexistent"],
     )
     assert result.exit_code != 0
+
+
+def test_registry_promote_refuses_a_refit_on_other_data_exit_2(
+    runner: CliRunner, registry_workdir: tuple[Path, str, int]
+) -> None:
+    """PR-050: ``--set data.source_path=<other>`` re-fits a trial on data it was not
+    trained on — exit 2, the reason named, no bundle and no champion."""
+    workdir, study_name, trial_number = registry_workdir
+    other = workdir / "other.parquet"
+    pl.read_parquet(workdir / "synth.parquet").with_columns(pl.col("x2") + 1.0).write_parquet(other)
+    result = runner.invoke(
+        app,
+        _argv(
+            workdir,
+            "--set", f"data.source_path={other}",
+            "registry", "promote", "--problem", "churn_v1",
+            "--study", study_name, "--trial", str(trial_number),
+        ),
+    )  # fmt: skip
+    assert result.exit_code == 2, result.output
+    assert "data_hash" in result.output
+    assert "refused" in result.output
+    assert not (workdir / "registry" / "churn_v1").exists()

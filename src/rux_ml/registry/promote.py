@@ -7,6 +7,12 @@
    raises ``pydantic.ValidationError`` if any required-now provenance field
    is missing; promote refuses.
 3. Apply ``trial.params`` overrides to ``base_cfg`` → fresh ``trial_cfg``.
+   Then (PR-050; PR-040's successor (i)) hash the re-fit's source and refuse
+   unless its ``data_hash`` equals the one the trial recorded
+   (:class:`PromoteDataHashError`). ``data.source_path`` is hash-elided, so
+   without this a trial tuned on one dataset could be promoted by re-fitting on
+   another. The check runs before the re-fit, and the bundle manifest carries
+   the same hashes.
 4. Re-fit the features pipeline + trainer on the trial's data (final-fit
    reproduction; no CV folds, no per-fold reporting).
 5. Compose ``ModelManifest`` from trial attrs + library versions +
@@ -43,9 +49,26 @@ from rux_ml.runs.provenance import data_hashes
 from rux_ml.training import make_trainer
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     import polars as pl
     import xgboost as xgb
     from sklearn.pipeline import Pipeline
+
+
+class PromoteDataHashError(ValueError):
+    """The re-fit would read other data than the trial recorded (PR-050; PR-040 successor (i)).
+
+    A ``ValueError``, so ``rux-ml registry promote`` exits 2 like every other refusal.
+    """
+
+    def __init__(
+        self, *, study: str, trial_number: int, recorded: str, refit: str, source: Path
+    ) -> None:
+        super().__init__(
+            f"promote: the re-fit data_hash {refit} (data.source_path={source}) != the "
+            f"data_hash trial {study}#{trial_number} recorded, {recorded} — refused"
+        )
 
 
 def _unflatten(flat: dict[str, Any]) -> dict[str, Any]:
@@ -153,9 +176,29 @@ def _feature_list_hash(cfg: RuxMLConfig) -> str:
     return sha256_canonical(columns)
 
 
+def _refit_data_hashes(
+    cfg: RuxMLConfig, attrs: TrialAttrs, *, study_name: str, trial_number: int
+) -> dict[str, str]:
+    """The re-fit source's data hashes, refused unless ``data_hash`` equals the trial's."""
+    if cfg.data.source_path is None:
+        msg = "promote requires data.source_path"
+        raise ValueError(msg)
+    hashes = data_hashes(cfg.data.source_path, oracle=cfg.data.oracle)
+    if hashes["data_hash"] != attrs.data_hash:
+        raise PromoteDataHashError(
+            study=study_name,
+            trial_number=trial_number,
+            recorded=attrs.data_hash,
+            refit=hashes["data_hash"],
+            source=cfg.data.source_path,
+        )
+    return hashes
+
+
 def _build_manifest(
     cfg: RuxMLConfig,
     attrs: TrialAttrs,
+    hashes: dict[str, str],
     *,
     problem: str,
     version: str,
@@ -165,10 +208,6 @@ def _build_manifest(
 ) -> ModelManifest:
     from rux_ml.registry.champion import now_iso  # noqa: PLC0415 — same-package helper
 
-    if cfg.data.source_path is None:
-        msg = "promote requires data.source_path"
-        raise ValueError(msg)
-    hashes = data_hashes(cfg.data.source_path, oracle=cfg.data.oracle)
     return ModelManifest(
         version=version,
         problem=problem,
@@ -219,6 +258,8 @@ def promote(
     Raises:
         pydantic.ValidationError: if the trial's ``user_attrs`` fail
             ``TrialAttrs.from_trial`` validation (PR-009 promotion-gate).
+        PromoteDataHashError: if the re-fit source's ``data_hash`` differs from
+            the trial's recorded one (PR-050).
         KeyError: if the study or trial doesn't exist in storage.
     """
     # 1. Load the trial + 2. validate provenance.
@@ -238,6 +279,9 @@ def promote(
     # 3. Apply trial.params to base_cfg.
     trial_cfg = _apply_trial_params(base_cfg, run.params)
 
+    # 3b. PR-050: the re-fit reads the data the trial recorded, or promote refuses.
+    hashes = _refit_data_hashes(trial_cfg, attrs, study_name=study_name, trial_number=trial_number)
+
     # 4. Re-fit pipeline + booster — PR-013 reconstructs the original trial's
     # SeedBag from its recorded ``entropy_hex`` so the promoted bundle uses
     # the SAME split + xgb_seed the trial reported metrics for.
@@ -250,6 +294,7 @@ def promote(
     manifest = _build_manifest(
         trial_cfg,
         attrs,
+        hashes,
         problem=problem,
         version=version,
         study_name=study_name,
