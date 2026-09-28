@@ -94,15 +94,20 @@ def bridge(
     output: Annotated[Path, typer.Option("--output", help="Where to write rux-ml's sidecar.")],
     manifest: Annotated[
         Path | None,
-        typer.Option("--manifest", help="The harness manifest of this subtree (equality test)."),
+        typer.Option(
+            "--manifest",
+            help="The harness set manifest, <set>/manifest.json (equality test; PR-052).",
+        ),
     ] = None,
 ) -> None:
     """PR-047: rux-ml's data-hash sidecar for ``data.source_path`` (one training subtree).
 
     Writes ``data_hash``, every file with its sha256, the rux-ml commit SHA and the
     Polars version (program PR-024 A13); refuses a source whose loaded files differ
-    from the hashed ones. With ``--manifest``, also runs the equality test against
-    the harness manifest and records it in the sidecar; any difference exits 2.
+    from the hashed ones. With ``--manifest`` (the harness set manifest), also runs the
+    equality test — the subtree's files and the ``data_hash`` the harness lists under
+    ``ruxml_sidecars.<subtree>`` — and records it; any difference, or no listed
+    ``data_hash``, exits 2 (PR-052).
     """
     cfg = _load_cfg(ctx)
     if cfg.data.source_path is None:
@@ -116,7 +121,9 @@ def bridge(
     if manifest is not None:
         record["manifest_path"] = str(manifest)
         try:
-            record["manifest_check"] = check_bridge(record, json.loads(manifest.read_text()))
+            record["manifest_check"] = check_bridge(
+                record, json.loads(manifest.read_text()), subtree=cfg.data.source_path.name
+            )
         except BridgeError as exc:
             record["manifest_check"] = {"equal": False, "error": str(exc)}
             error = exc

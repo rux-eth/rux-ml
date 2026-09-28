@@ -196,32 +196,59 @@ def write_harness_manifest(
     root: Path, subtrees: list[str], *, ruxml_data_hash: dict[str, str] | None = None
 ) -> None:
     """The provenance files program PR-024's materializer writes at a set root
-    (rumpy-harness ``training/materialize.py`` ``write_manifest``): ``manifest.json``
-    with every subtree's files (path relative to the subtree, sha256) and, once rux-ml
-    has written a sidecar, its ``data_hash`` under ``ruxml_sidecars``; then one view per
-    subtree, ``<subtree>.manifest.json``, naming the set manifest and its sha256."""
+    (rumpy-harness ``training/materialize.py`` ``write_manifest``; shape checked against
+    the real set ``98c848d277ab-83a175d4b812`` on 2026-09-27): ``manifest.json`` with
+    ``subtrees.<t>.files`` (``path`` relative to the subtree, ``sha256``, ``day``,
+    ``rows``, ``bytes``, ``bytes_per_row``) and ``ruxml_sidecars.<t>`` — ``null`` until
+    rux-ml's sidecar ``<t>.ruxml-sidecar.json`` exists, then its path, sha256,
+    ``data_hash``, ``rux_ml_git_sha`` and ``polars_version``. No top-level ``files`` or
+    ``ruxml_data_hash``. Then one view per subtree, ``<t>.manifest.json``, citing the
+    set manifest by sha256."""
+    import polars as pl  # noqa: PLC0415 — only the fixture needs it
 
     def sha(path: Path) -> str:
         return hashlib.sha256(path.read_bytes()).hexdigest()
 
-    files = {
-        t: [
-            {"path": f.relative_to(root / t).as_posix(), "sha256": sha(f)}
-            for f in sorted((root / t).rglob("*.parquet"))
-        ]
-        for t in subtrees
-    }
-    hashes = ruxml_data_hash or {}
+    def entry(f: Path, t: str) -> dict[str, Any]:
+        rows = int(pl.scan_parquet(f).select(pl.len()).collect().item())
+        size = f.stat().st_size
+        return {
+            "bytes": size,
+            "bytes_per_row": round(size / rows, 2),
+            "day": f.stem,
+            "path": f.relative_to(root / t).as_posix(),
+            "rows": rows,
+            "sha256": sha(f),
+        }
+
+    files = {t: [entry(f, t) for f in sorted((root / t).rglob("*.parquet"))] for t in subtrees}
+    sidecars: dict[str, dict[str, Any] | None] = {}
+    for t in subtrees:
+        if ruxml_data_hash is None or t not in ruxml_data_hash:
+            sidecars[t] = None
+            continue
+        side = root / f"{t}.ruxml-sidecar.json"
+        body = {
+            "data_hash": ruxml_data_hash[t],
+            "rux_ml_git_sha": "fixture",
+            "polars_version": pl.__version__,
+        }
+        side.write_text(json.dumps(body))
+        sidecars[t] = {"path": side.name, "sha256": sha(side), **body}
     manifest = {
         "kind": "rumpy-harness M9 training set (test fixture)",
         "set": root.name,
         "subtrees": {
-            t: {"subtree": f"{t}/", "files": files[t], "view": f"{t}.manifest.json"}
+            t: {
+                "subtree": f"{t}/",
+                "files": files[t],
+                "rows": sum(f["rows"] for f in files[t]),
+                "bytes": sum(f["bytes"] for f in files[t]),
+                "view": f"{t}.manifest.json",
+            }
             for t in subtrees
         },
-        "ruxml_sidecars": {
-            t: ({"data_hash": hashes[t]} if t in hashes else None) for t in subtrees
-        },
+        "ruxml_sidecars": sidecars,
     }
     (root / "manifest.json").write_text(json.dumps(manifest, indent=1, sort_keys=True))
     set_sha = sha(root / "manifest.json")
@@ -230,6 +257,6 @@ def write_harness_manifest(
             "subtree": t,
             "set_manifest": "manifest.json",
             "set_manifest_sha256": set_sha,
-            "files": files[t],
+            "files": [{"path": f["path"], "sha256": f["sha256"]} for f in files[t]],
         }
         (root / f"{t}.manifest.json").write_text(json.dumps(view, indent=1, sort_keys=True))

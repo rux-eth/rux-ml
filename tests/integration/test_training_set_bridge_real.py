@@ -3,12 +3,13 @@
 Runs only when pointed at a materialized subtree and its harness manifest:
 
     RUXML_BRIDGE_SOURCE=<training root>/<set>/walk \\
-    RUXML_BRIDGE_MANIFEST=<the harness manifest for that subtree> \\
+    RUXML_BRIDGE_MANIFEST=<training root>/<set>/manifest.json \\
     uv run pytest tests/integration/test_training_set_bridge_real.py
 
-It computes rux-ml's sidecar in this environment and asserts the manifest's file
-list + sha256 (and its copy of rux-ml's data_hash, when present) equal the files
-rux-ml's loader opened. The recorded run is program C6 / C11 evidence.
+It computes rux-ml's sidecar in this environment and asserts the set manifest's file
+list + sha256 for the subtree equal the files rux-ml's loader opened, and its copy of
+rux-ml's data_hash (``ruxml_sidecars.<subtree>.data_hash``, required — PR-052) equals
+this environment's. The recorded run is program C6 / C11 evidence.
 """
 
 from __future__ import annotations
@@ -31,5 +32,5 @@ MANIFEST = os.environ.get("RUXML_BRIDGE_MANIFEST")
 def test_the_real_subtree_equals_its_harness_manifest() -> None:
     assert SOURCE is not None and MANIFEST is not None
     side = training_set_sidecar(Path(SOURCE), oracle=repo_oracle_cfg())
-    result = check_bridge(side, json.loads(Path(MANIFEST).read_text()))
+    result = check_bridge(side, json.loads(Path(MANIFEST).read_text()), subtree=Path(SOURCE).name)
     assert result["equal"] is True
