@@ -6,22 +6,27 @@ includes a Polars row hash that Polars guarantees only within one version, so th
 harness never re-implements it: rux-ml computes it here, in its own environment,
 and records it in a **sidecar** with the rux-ml commit SHA and the Polars version.
 
-The **equality test** (:func:`check_bridge`): the harness manifest's file list +
-sha256 must equal the files rux-ml's loader opens — read from Polars itself, via
-``include_file_paths`` on the loader's own scan — with their sha256, and the
-manifest's copy of rux-ml's ``data_hash`` (when present) must equal the sidecar's.
-The sidecar itself refuses a source whose loaded files differ from the files the
-hash covers (PR-040's named successor (ii)): a hash that does not cover what was
-loaded is not a hash of the training set.
+The **equality test** (:func:`check_bridge`, PR-052) runs against the harness's **set
+manifest** (``<set>/manifest.json``): its ``subtrees.<subtree>.files`` (path relative to
+the subtree + sha256) must equal the files rux-ml's loader opens — read from Polars
+itself, via ``include_file_paths`` on the loader's own scan — with their sha256, and its
+``ruxml_sidecars.<subtree>.data_hash`` (the harness's copy of rux-ml's ``data_hash``,
+listed once rux-ml's sidecar exists) must equal the sidecar's. It fails closed: while
+the harness has not listed the sidecar, the test refuses rather than passing on the
+file list alone. The sidecar itself refuses a source whose loaded files differ from the
+files the hash covers (PR-040's named successor (ii)): a hash that does not cover what
+was loaded is not a hash of the training set.
 
 **The harness manifest id** (PR-051, :func:`harness_manifest_ref`): the materializer
 writes the set's ``manifest.json`` at the set root and one view per subtree beside it,
 ``<set>/<subtree>.manifest.json``, citing the set manifest by name and sha256. That
 sha256 is the id a promoted model records; it is verified against the file.
 
-Assumed harness manifest shape (program PR-024 not landed — flagged):
-``{"files": [{"path": <relative to the subtree>, "sha256": <hex>}, ...],
-"ruxml_data_hash": <optional>}``.
+The harness shape (program PR-024, rumpy-harness ``training/materialize.py``
+``write_manifest``; checked against the real set 2026-09-27): ``{"set", "subtrees":
+{<t>: {"files": [{"path", "sha256", ...}], ...}}, "ruxml_sidecars": {<t>: null |
+{"path", "sha256", "data_hash", "rux_ml_git_sha", "polars_version"}}, ...}``. Nothing
+writes a top-level ``files`` / ``ruxml_data_hash`` (PR-047's assumed shape, removed).
 """
 
 from __future__ import annotations
@@ -131,11 +136,32 @@ def training_set_sidecar(source: Path, *, oracle: OracleQuarantineConfig | None)
     }
 
 
-def check_bridge(sidecar: Mapping[str, Any], manifest: Mapping[str, Any]) -> dict[str, Any]:
-    """The equality test: the harness manifest's files + sha256 vs the files rux-ml's
-    loader opened with their sha256, and the manifest's ``ruxml_data_hash`` (if any)
-    vs rux-ml's ``data_hash``. Any difference raises :class:`BridgeError`."""
-    raw: object = manifest.get("files")
+def listed_data_hash(manifest: Mapping[str, Any], subtree: str) -> str | None:
+    """The harness set manifest's copy of rux-ml's ``data_hash`` for ``subtree``
+    (``ruxml_sidecars.<subtree>.data_hash``), or ``None`` while it lists no sidecar."""
+    sidecars: object = manifest.get("ruxml_sidecars")
+    listed: object = (
+        cast("dict[str, object]", sidecars).get(subtree) if isinstance(sidecars, dict) else None
+    )
+    theirs: object = (
+        cast("dict[str, object]", listed).get("data_hash") if isinstance(listed, dict) else None
+    )
+    return theirs if isinstance(theirs, str) else None
+
+
+def check_bridge(
+    sidecar: Mapping[str, Any], manifest: Mapping[str, Any], *, subtree: str
+) -> dict[str, Any]:
+    """The equality test against the harness **set manifest** (``<set>/manifest.json``):
+    ``subtrees.<subtree>.files`` (path + sha256) vs the files rux-ml's loader opened with
+    their sha256, and ``ruxml_sidecars.<subtree>.data_hash`` vs rux-ml's ``data_hash``.
+    Any difference raises :class:`BridgeError`, and so does an absent ``data_hash``
+    (the harness has not listed the sidecar yet): never a pass on the file list alone."""
+    subtrees: object = manifest.get("subtrees")
+    entry: object = (
+        cast("dict[str, object]", subtrees).get(subtree) if isinstance(subtrees, dict) else None
+    )
+    raw: object = cast("dict[str, object]", entry).get("files") if isinstance(entry, dict) else None
     entries: list[dict[str, Any]] = (
         [cast("dict[str, Any]", f) for f in cast("list[object]", raw) if isinstance(f, dict)]
         if isinstance(raw, list)
@@ -146,7 +172,10 @@ def check_bridge(sidecar: Mapping[str, Any], manifest: Mapping[str, Any]) -> dic
         or len(entries) != len(cast("list[object]", raw))
         or not all({"path", "sha256"} <= set(f) for f in entries)
     ):
-        msg = "the manifest has no files list of {path, sha256}"
+        msg = (
+            f"the manifest has no subtrees.{subtree}.files list of {{path, sha256}} "
+            f"(pass the harness set's manifest.json)"
+        )
         raise BridgeError(msg)
     theirs = {str(f["path"]): str(f["sha256"]) for f in entries}
     ours = {str(f["path"]): str(f["sha256"]) for f in sidecar["files"]}
@@ -159,11 +188,20 @@ def check_bridge(sidecar: Mapping[str, Any], manifest: Mapping[str, Any]) -> dic
             f"sha256 differs {differ}"
         )
         raise BridgeError(msg)
-    theirs_hash = manifest.get("ruxml_data_hash")
-    if theirs_hash is not None and theirs_hash != sidecar["data_hash"]:
-        msg = f"manifest ruxml_data_hash {theirs_hash} != rux-ml data_hash {sidecar['data_hash']}"
+    theirs_hash = listed_data_hash(manifest, subtree)
+    if theirs_hash is None:
+        msg = (
+            f"the harness manifest lists no rux-ml data_hash for {subtree}/ "
+            f"(ruxml_sidecars.{subtree}): write the sidecar, let the harness list it, then check"
+        )
         raise BridgeError(msg)
-    return {"files": len(ours), "data_hash_checked": theirs_hash is not None, "equal": True}
+    if theirs_hash != sidecar["data_hash"]:
+        msg = (
+            f"harness ruxml_sidecars.{subtree}.data_hash {theirs_hash} != rux-ml data_hash "
+            f"{sidecar['data_hash']}"
+        )
+        raise BridgeError(msg)
+    return {"subtree": subtree, "files": len(ours), "data_hash": theirs_hash, "equal": True}
 
 
 def harness_view_path(source: Path) -> Path:
@@ -209,17 +247,10 @@ def harness_manifest_ref(source: Path) -> dict[str, Any] | None:
     if not isinstance(set_name, str):
         msg = f"{set_path} has no set name"
         raise HarnessManifestError(msg)
-    sidecars: object = body.get("ruxml_sidecars")
-    sidecar: object = (
-        cast("dict[str, object]", sidecars).get(source.name) if isinstance(sidecars, dict) else None
-    )
-    theirs: object = (
-        cast("dict[str, object]", sidecar).get("data_hash") if isinstance(sidecar, dict) else None
-    )
     return {
         "manifest_id": actual,
         "set_name": set_name,
         "subtree": source.name,
         "view_sha256": _sha256(view_path),
-        "ruxml_data_hash": theirs if isinstance(theirs, str) else None,
+        "ruxml_data_hash": listed_data_hash(body, source.name),
     }

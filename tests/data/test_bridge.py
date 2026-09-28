@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 import pytest
@@ -35,20 +36,26 @@ def _subtree(root: Path) -> Path:
     return walk
 
 
-def _manifest(source: Path, sidecar: dict[str, object] | None = None) -> dict[str, object]:
-    files = sorted(p for p in source.rglob("*.parquet"))
-    out: dict[str, object] = {
-        "files": [
-            {
-                "path": str(p.relative_to(source)),
-                "sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
-            }
-            for p in files
-        ]
+def _files(source: Path) -> list[dict[str, object]]:
+    return [
+        {"path": str(p.relative_to(source)), "sha256": hashlib.sha256(p.read_bytes()).hexdigest()}
+        for p in sorted(source.rglob("*.parquet"))
+    ]
+
+
+def _manifest(source: Path, sidecar: dict[str, object] | None = None) -> dict[str, Any]:
+    """The harness set manifest's shape (program PR-024 ``write_manifest``): the subtree's
+    files under ``subtrees.<t>`` (with the harness's extra keys) and rux-ml's listed
+    sidecar under ``ruxml_sidecars.<t>`` — ``null`` until the harness lists it."""
+    t = source.name
+    files = [{**f, "day": "d", "rows": 4, "bytes": 1} for f in _files(source)]
+    listed = None if sidecar is None else {"path": f"{t}.ruxml-sidecar.json", "sha256": "0" * 64,
+                                           "data_hash": sidecar["data_hash"]}  # fmt: skip
+    return {
+        "set": "s",
+        "subtrees": {t: {"subtree": f"{t}/", "files": files, "view": f"{t}.manifest.json"}},
+        "ruxml_sidecars": {t: listed},
     }
-    if sidecar is not None:
-        out["ruxml_data_hash"] = sidecar["data_hash"]
-    return out
 
 
 def test_the_loader_file_set_is_what_polars_reads(tmp_path: Path, oracle_cfg: object) -> None:
@@ -68,15 +75,43 @@ def test_the_sidecar_carries_the_hash_the_files_and_the_environment(
     assert side["polars_version"] == pl.__version__
     assert side["rux_ml_git_sha"] == git_sha()
     assert side["row_count"] == 12
-    assert side["files"] == _manifest(src)["files"]
+    assert side["files"] == _files(src)
     assert side["hashed_files"] == side["opened_files"] == [f["path"] for f in side["files"]]  # type: ignore[index]
 
 
 def test_the_bridge_holds_on_an_equal_manifest(tmp_path: Path, oracle_cfg: object) -> None:
     src = _subtree(tmp_path)
     side = training_set_sidecar(src, oracle=oracle_cfg)  # type: ignore[arg-type]
-    result = check_bridge(side, _manifest(src, side))
-    assert result == {"files": 3, "data_hash_checked": True, "equal": True}
+    result = check_bridge(side, _manifest(src, side), subtree="walk")
+    assert result == {"subtree": "walk", "files": 3, "data_hash": side["data_hash"], "equal": True}
+
+
+@pytest.mark.parametrize("listed", ["null", "no_entry", "no_ruxml_sidecars"])
+def test_the_bridge_fails_closed_without_the_harness_listed_data_hash(
+    tmp_path: Path, oracle_cfg: object, listed: str
+) -> None:
+    """PR-052: the harness lists rux-ml's data_hash at ``ruxml_sidecars.<t>.data_hash``;
+    while it is absent the test refuses — the file list alone never passes."""
+    src = _subtree(tmp_path)
+    side = training_set_sidecar(src, oracle=oracle_cfg)  # type: ignore[arg-type]
+    man = _manifest(src)  # ruxml_sidecars.walk = null: the sidecar not yet listed
+    if listed == "no_entry":
+        man["ruxml_sidecars"] = {}
+    elif listed == "no_ruxml_sidecars":
+        del man["ruxml_sidecars"]
+    with pytest.raises(BridgeError, match=r"no rux-ml data_hash for walk/"):
+        check_bridge(side, man, subtree="walk")
+
+
+def test_the_pr047_assumed_shape_is_not_read(tmp_path: Path, oracle_cfg: object) -> None:
+    """PR-052: nothing real writes a top-level ``files`` + ``ruxml_data_hash`` (the harness
+    asserts its view has no ``ruxml_data_hash``); that shape — which passed on the file list
+    — is refused."""
+    src = _subtree(tmp_path)
+    side = training_set_sidecar(src, oracle=oracle_cfg)  # type: ignore[arg-type]
+    assumed = {"files": _files(src), "ruxml_data_hash": side["data_hash"]}
+    with pytest.raises(BridgeError, match=r"subtrees\.walk\.files"):
+        check_bridge(side, assumed, subtree="walk")
 
 
 @pytest.mark.parametrize("defect", ["missing", "extra", "sha", "data_hash"])
@@ -84,7 +119,7 @@ def test_the_bridge_refuses_any_difference(tmp_path: Path, oracle_cfg: object, d
     src = _subtree(tmp_path)
     side = training_set_sidecar(src, oracle=oracle_cfg)  # type: ignore[arg-type]
     man = _manifest(src, side)
-    files = man["files"]
+    files = man["subtrees"]["walk"]["files"]
     assert isinstance(files, list)
     if defect == "missing":
         files.pop()
@@ -93,9 +128,9 @@ def test_the_bridge_refuses_any_difference(tmp_path: Path, oracle_cfg: object, d
     elif defect == "sha":
         files[0] = {**files[0], "sha256": "0" * 64}
     else:
-        man["ruxml_data_hash"] = "x|y"
+        man["ruxml_sidecars"]["walk"]["data_hash"] = "x|y"
     with pytest.raises(BridgeError):
-        check_bridge(side, man)
+        check_bridge(side, man, subtree="walk")
 
 
 @pytest.mark.skipif(os.name == "nt", reason="symlinks")
