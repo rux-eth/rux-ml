@@ -20,11 +20,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+import polars as pl
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    import polars as pl
+    from numpy.typing import NDArray
 
 _PAIRS = (("train", "val"), ("train", "test"), ("val", "test"))
 
@@ -36,16 +37,25 @@ class LeakageError(ValueError):
         super().__init__(f"leakage: {detail} — refused")
 
 
+def _within(
+    later: NDArray[Any], weights: NDArray[Any] | None, ref: NDArray[Any], window: int
+) -> int:
+    """Rows (or their summed ``weights``) of ``later`` stamped within ``window`` of the
+    nearest stamp in ``ref`` (sorted, unique)."""
+    if not later.size or not ref.size:
+        return 0
+    i = np.searchsorted(ref, later)
+    left = np.abs(later - ref[np.clip(i - 1, 0, ref.size - 1)])
+    right = np.abs(ref[np.clip(i, 0, ref.size - 1)] - later)
+    hit = np.minimum(left, right) <= window
+    return int(hit.sum()) if weights is None else int(weights[hit].sum())
+
+
 def _violations(later: pl.DataFrame, fitted: list[pl.DataFrame], col: str, window: int) -> int:
     stamps = [f[col].to_numpy() for f in fitted if f.height]
     if not later.height or not stamps:
         return 0
-    ref = np.unique(np.concatenate(stamps))
-    s = later[col].to_numpy()
-    i = np.searchsorted(ref, s)
-    left = np.abs(s - ref[np.clip(i - 1, 0, ref.size - 1)])
-    right = np.abs(ref[np.clip(i, 0, ref.size - 1)] - s)
-    return int((np.minimum(left, right) <= window).sum())
+    return _within(later[col].to_numpy(), None, np.unique(np.concatenate(stamps)), window)
 
 
 def leakage_audit(
@@ -68,6 +78,46 @@ def leakage_audit(
     groups: dict[str, int] | None = None
     if group_column is not None:
         sets = {k: set(splits[k][group_column].unique().to_list()) for k in splits}
+        groups = {f"{a}&{b}": len(sets[a] & sets[b]) for a, b in _PAIRS}
+    return {
+        "time_column": time_column,
+        "window": window,
+        "stamp_violations": stamps,
+        "group_column": group_column,
+        "group_overlap": groups,
+    }
+
+
+def leakage_audit_counts(
+    parts: Mapping[str, pl.DataFrame],
+    *,
+    time_column: str | None,
+    group_column: str | None,
+    window: int | None,
+    weight: str = "rows",
+) -> dict[str, Any]:
+    """:func:`leakage_audit` from row counts (PR-054): each partition as a tally of
+    ``(time_column, group_column, weight)`` — the per-day batch fit never holds its
+    partitions — giving the same record as the audit of the partitions' rows."""
+    live = {k: v.filter(pl.col(weight) > 0) for k, v in parts.items()}
+    stamps: dict[str, int] | None = None
+    if time_column is not None and window is not None:
+
+        def fitted(names: tuple[str, ...]) -> NDArray[Any]:
+            arrays = [live[k][time_column].to_numpy() for k in names if live[k].height]
+            return np.unique(np.concatenate(arrays)) if arrays else np.empty(0, dtype=np.int64)
+
+        def count(later: str, names: tuple[str, ...]) -> int:
+            p = live[later]
+            return _within(p[time_column].to_numpy(), p[weight].to_numpy(), fitted(names), window)
+
+        stamps = {
+            "val_vs_train": count("val", ("train",)),
+            "test_vs_fitted": count("test", ("train", "val")),
+        }
+    groups: dict[str, int] | None = None
+    if group_column is not None:
+        sets = {k: set(live[k][group_column].unique().to_list()) for k in live}
         groups = {f"{a}&{b}": len(sets[a] & sets[b]) for a, b in _PAIRS}
     return {
         "time_column": time_column,

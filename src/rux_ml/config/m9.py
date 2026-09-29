@@ -51,6 +51,13 @@ class M9Config(StrictModel):
     # every row. A listed column absent from the set refuses the split.
     row_filter_non_null: list[str] = Field(default_factory=list)
 
+    # PR-054 (program PR-027 A4, operator ruling 2026-09-28): the row's identity for the
+    # row-random regime. A row's partition is a keyed hash of these columns (splitmix64
+    # over the integer-encoded keys, seeded by the split seed — ``rux_ml.data.partitions``),
+    # not a shuffle of the frame, so it is reproducible from the row alone. Required when
+    # ``data.split_kind == "random"``; a null / NaN key refuses the split.
+    row_key_columns: list[str] = Field(default_factory=list)
+
     # PR-042: h_max, in ``data.time_column`` units (epoch ms) = the label's REACH — the
     # latest price any label of a row stamped t reads, t + h_max (program PR-024 A3:
     # entry latency + the order's resting horizon + the longest markout horizon).
@@ -80,7 +87,7 @@ class M9Config(StrictModel):
             raise ValueError(msg)
         return self
 
-    @field_validator("diagnostic_columns", "row_filter_non_null")
+    @field_validator("diagnostic_columns", "row_filter_non_null", "row_key_columns")
     @classmethod
     def _distinct_non_empty(cls, v: list[str], info: ValidationInfo) -> list[str]:
         if any(not c for c in v):

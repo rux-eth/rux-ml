@@ -22,7 +22,7 @@ silently drop them rather than rejecting valid trials.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -30,6 +30,8 @@ from rux_ml._internal.git import git_sha
 from rux_ml.config import cfg_hash, layer_cfg_hash
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     import optuna
 
     from rux_ml._internal.env import EnvironmentVersions
@@ -85,6 +87,13 @@ class TrialAttrs(BaseModel):
     # Optional: filled in conditionally (today) or by later PRs.
     best_iteration: int | None = None  # PR-006 writes when early stopping fires
 
+    # PR-054 (program PR-027 A11): what the XGBoost booster ran with, read back from its
+    # saved config — ``nthread`` (0 = the OpenMP default) and ``device``. pin_threads'
+    # OMP_NUM_THREADS does not bound a fit whose ``n_jobs`` is set, so the environment
+    # block alone does not say how many threads fitted the model. None off XGBoost.
+    booster_nthread: int | None = None
+    booster_device: str | None = None
+
     # PR-013: GPU-only — populated when `nvidia-smi` is available. CPU dev
     # hosts (e.g., Mac) genuinely don't have these so they stay Optional.
     gpu_model: str | None = None
@@ -112,6 +121,7 @@ class TrialAttrs(BaseModel):
         bag: SeedBag,
         versions: EnvironmentVersions,
         best_iteration: int | None = None,
+        booster: Mapping[str, Any] | None = None,
     ) -> TrialAttrs:
         """Construct a ``TrialAttrs`` from a resolved config + data hashes +
         the per-trial :class:`SeedBag` + the :class:`EnvironmentVersions`
@@ -121,6 +131,8 @@ class TrialAttrs(BaseModel):
         sweep objective (``tuning/objective.py``). ``peak_rss_mb`` is sourced
         from the PR-011 ``Watchdog`` wrapping the trial body; ``bag`` and
         ``versions`` come from PR-013's ``make_seed_bag`` and ``get_versions``.
+        ``booster`` (PR-054) is ``{"nthread", "device"}`` read from the fitted
+        XGBoost booster (``rux_ml.training.xgboost.batches.booster_threads_device``).
         """
         return cls(
             data_cfg_hash=layer_cfg_hash(cfg, "data"),
@@ -146,6 +158,8 @@ class TrialAttrs(BaseModel):
             cuda_runtime_version=versions.cuda_runtime_version,
             omp_threads=versions.omp_threads,
             peak_rss_mb=peak_rss_mb,
+            booster_nthread=None if booster is None else int(booster["nthread"]),
+            booster_device=None if booster is None else str(booster["device"]),
             best_iteration=best_iteration,
             gpu_model=versions.gpu_model,
             driver_version=versions.driver_version,

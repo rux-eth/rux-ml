@@ -32,6 +32,27 @@ from tests.conftest import (
     m9_nullable_features,
 )
 
+TRAIN, VAL = 0, 1  # rux_ml.data.partitions fold ids
+
+
+def _spy_fold_batches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[int, pd.DataFrame, np.ndarray]]:
+    """Record every (fold, X, y) batch the per-day batch fit hands XGBoost (PR-054)."""
+    from rux_ml.training.xgboost import batches  # noqa: PLC0415
+
+    seen: list[tuple[int, pd.DataFrame, np.ndarray]] = []
+    original = batches.fold_batch
+
+    def spy(source: object, index: int, plan: object, fold: int, *a: object) -> object:
+        x, y = original(source, index, plan, fold, *a)  # type: ignore[arg-type]
+        if fold in (TRAIN, VAL):
+            seen.append((fold, x, y))
+        return x, y
+
+    monkeypatch.setattr(batches, "fold_batch", spy)
+    return seen
+
 
 def _fold_meta(tmp: Path, problem: str) -> dict[str, Any]:
     storage = f"sqlite:///{tmp}/studies/studies.db"
@@ -126,21 +147,14 @@ def test_no_missing_target_reaches_the_xgboost_fit(
     )
     assert missing > 0  # the fixture carries rows without the target
 
-    seen: list[np.ndarray] = []
-    original_fit = XGBRegressor.fit
-
-    def spy(self: XGBRegressor, x: object, y: object, **kw: object) -> object:
-        seen.append(np.asarray(y, dtype=float))
-        for _, y_eval in kw.get("eval_set") or []:  # type: ignore[union-attr]
-            seen.append(np.asarray(y_eval, dtype=float))
-        return original_fit(self, x, y, **kw)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(XGBRegressor, "fit", spy)
+    # PR-054: XGBoost receives the partitions one day batch at a time (the DataIter's
+    # ``fold_batch``); the fitted (train) and early-stopping (val) targets are checked.
+    seen = _spy_fold_batches(monkeypatch)
     argv = m9_argv(tmp_path, c6_set, problem, *m9_gates_overrides(signed_m9_gates), "train")
     result = runner.invoke(app, argv, catch_exceptions=False)
     assert result.exit_code == 0, result.output
-    assert len(seen) == 2  # the fitted target and the eval-set target
-    assert not any(np.isnan(y).any() for y in seen)
+    assert {fold for fold, _, _ in seen} >= {TRAIN, VAL}  # the fitted and the eval-set target
+    assert not any(np.isnan(y).any() for _, _, y in seen)
     meta = _fold_meta(tmp_path, problem)
     assert meta["split_definition"]["row_filter_non_null"] == [target]
     assert meta["split_definition"]["row_filter_dropped"] == missing
@@ -177,21 +191,14 @@ def test_the_fit_sees_the_feat_columns_with_nulls_as_missing(
     assert nullable
     assert all(n > 0 for n in nulls)  # the fixture writes the schema's empties
 
-    seen: list[pd.DataFrame] = []
-    original_fit = XGBRegressor.fit
-
-    def spy(self: XGBRegressor, x: pd.DataFrame, y: object, **kw: object) -> object:
-        seen.append(x)
-        seen.extend(x_eval for x_eval, _ in kw.get("eval_set") or [])  # type: ignore[union-attr]
-        return original_fit(self, x, y, **kw)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(XGBRegressor, "fit", spy)
+    seen = _spy_fold_batches(monkeypatch)
     argv = m9_argv(tmp_path, c6_set, problem, *m9_gates_overrides(signed_m9_gates), "train")
     result = runner.invoke(app, argv, catch_exceptions=False)
     assert result.exit_code == 0, result.output
-    assert len(seen) == 2  # the fitted frame and the eval-set frame
+    # PR-054: the fitted frame and the eval-set frame are the day batches of train and val
+    frames = [pd.concat([x for f, x, _ in seen if f == fold]) for fold in (TRAIN, VAL)]
     numeric = ["p_bp", "q_usd", "h_ms", "side", *feats]
-    for x in seen:
+    for x in frames:
         assert list(x.columns) == [*numeric, "kind"]
         assert all(pd.api.types.is_numeric_dtype(x[c]) for c in numeric)
         assert isinstance(x["kind"].dtype, pd.CategoricalDtype)
