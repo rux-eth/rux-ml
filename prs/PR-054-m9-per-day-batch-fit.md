@@ -116,7 +116,26 @@ PR-053 (merged, `aec5464`).
 - [x] **A11.** With `n_jobs = 3` the trial records `booster_nthread = 3` and `booster_device = "cpu"`, which is also in `fold_meta.json` `booster`.
 - [x] **The plan is layout-invariant.** Day batches vs one frame give the same assignment, tally and record for each regime, with and without the prefix. The symbol plan equals `symbol_holdout_split`, and the time prefix equals `train_prefix`.
 - [x] Default suite **717 passed, 3 skipped** (680 + 37 new); `ruff check`; `ruff format --check` on the touched files (the one pre-existing `scripts/calibrate_pr025.py` untouched); `basedpyright src/` 0 errors.
-- [ ] **Desktop measurement** (program PR-027 R2's run, the fill fit at 39 and 156 days, GPU, in a 20 GiB scope): recorded below when run.
+- [x] **Desktop measurement** (2026-09-28, 20:24–20:26 CDT; 2 min 5 s under `~/rumpy-heavy.lock`, inside `timeout 1200`). Setup: branch @ `a6cb49d` in a detached worktree `~/projects/rux-ml-pr054-measure`, xgboost 3.2.0 with CUDA. Every step ran in `systemd-run --user --scope -p MemoryHigh=20G -p MemoryMax=20G -p MemorySwapMax=0` under `/usr/bin/time -v`, with `nvidia-smi` sampled every 0.5 s. It was the whole `rux-ml train` of `m9_fill_frac` (its time-block split, GPU), including the `data_hash` step.
+  - **Input.** The 156-day view `f6a544e240b5-83a175d4b812.s3-1777593600000` was **not on the desktop**, so each window is a hard-link day filter of the parent set `m9-training-v03/f6a544e240b5-83a175d4b812` `fill/`:
+    - the first 39 day files, 2025-11-26 → 2026-01-03;
+    - the first 156, 2025-11-26 → 2026-04-30, the view's window (`end_ms_exclusive` 1777593600000).
+
+  | | 39 days | 156 days |
+  |---|---|---|
+  | train / val / test rows | 16,442,392 / 3,368,500 / 3,574,100 | **65,183,552** / 13,814,732 / 14,011,016 |
+  | process peak RSS (`time -v`) | 5.48 GiB | **15.50 GiB** |
+  | scope `memory.peak` (incl. page cache) | 5.61 GiB | **15.87 GiB** (≤ 20 GiB; `oom_kill` 0, `high` 0, swap 0) |
+  | trial `peak_rss_mb` (watchdog, fit only) | 5,518 | 15,874 |
+  | GPU memory used (max) | 2,630 MiB | 13,087 MiB (≤ 20 GB) |
+  | whole-process wall | 27.9 s | **92.1 s** |
+  | plan / diagnostics / categories | 0.6 / 2.4 / 0.4 s | 2.2 / 6.0 / 1.7 s |
+  | train matrix / val matrix / boost | 12.3 / 1.6 / 2.2 s | 46.1 / 6.2 / 8.3 s |
+  | val predict / test predict | 0.9 / 0.8 s | 2.9 / 3.0 s |
+  | best iteration (of 100) / test Brier | 52 / 0.15977 | 99 / 0.15739 |
+
+  - The 39-day test Brier 0.15977 equals program PR-027 R2-c's GPU value at 39 days, and the 156-day train count equals its 65.18M.
+  - **GPU identity (3 days, time-block):** the batch fit against the in-memory sklearn fit on `cuda` gave the same val / test prediction sha256, 0 of 277,800 test rows differing, `best_iteration` 32 on both, and an equal val score. The peak was 3.4 GiB.
 
 ## Research backing
 
@@ -124,7 +143,16 @@ Program PR-027 §Findings Phase 3 Round 1 Q2 (the copy inventory; the XGBoost fl
 
 ## Notes — for the program lead
 
-- **Membership changes (A4 as ruled; also the time-block ties).** Row-random partitions differ from the shuffle's, and their sizes are the ratios in expectation (a 156-day fill set ≈ 93M rows: the deviation is ≈ 0.01 %). Time-block val / test gain the rows tied on the boundary stamps: fewer than one stamp's rows at each cut (≈ 3.9k fill rows at 163 coins × 24).
+- **Membership changes (A4 as ruled; also the time-block ties).** Row-random partitions differ from the shuffle's, and their sizes are the ratios in expectation. At ≈ 93M filtered fill rows one binomial standard deviation of the train share is ≈ 0.005 %. Time-block val / test gain the rows tied on the boundary stamps: fewer than one stamp's rows at each cut (≈ 3.9k fill rows at 163 coins × 24).
 - **Promote / tune** use `make_splits` on the whole frame: the same membership, but still the in-memory path. A 156-day `[m9]` promote re-fit would need the batch path too (not in R2's row).
 - **The PR-033 adapter's predictions** use every tree when early stopping ran (see the State Assessment). Nothing on the M9 path uses it; a one-line fix for a later PR.
-- **Wall.** The batch path re-reads the day files: the plan pass, the diagnostics pass, about two to three passes per `QuantileDMatrix`, and the predictions. The desktop measurement reports the per-stage seconds (`fold_meta.json` `ingest.seconds`).
+- **Wall.** The batch path re-reads the day files: the plan pass, the diagnostics pass, the passes per `QuantileDMatrix`, and the predictions.
+  - At 156 days the train matrix takes 46 s against 8 s of boosting (measured, above). The whole fit is ≈ 1.5 min, so 36 Stage 3 fits are ≈ 1 h at most on the GPU, inside the ≤ 4 h.
+  - Where the matrix time goes (the file reads, XGBoost's sketch, or the number of iterator passes) was **not instrumented**.
+- **Memory: inside the scope, the composition unattributed.** The 156-day peak is 15.5 GiB RSS, ≈ 4.1 GiB under the 20 GiB line.
+  - That is well above Phase 4's prediction (≈ the quantised index, 2–4 GB, plus one day's batch). The difference was **not attributed**: the run had no per-stage RSS. Candidates, all unverified:
+    - the retention of the Polars / Arrow allocators across the per-file collects (program PR-027 R2-b saw freed memory never return);
+    - XGBoost's host-side sketch and index for the GPU matrix;
+    - what the `data_hash` step leaves resident. The watchdog's fit-window peak equals the process peak, so the peak itself falls inside the fit.
+  - The other regimes' full-prefix train partitions are about the same size (row-random ≈ 70 % of 93.4M; symbol holdout ≈ 73 %), so ≈ 16 GiB is the expected peak for them too (best-guess, not measured).
+  - A per-stage RSS attribution is the next step if the headroom matters. It would need a second desktop run, outside this one.
