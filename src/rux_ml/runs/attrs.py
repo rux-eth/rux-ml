@@ -94,6 +94,11 @@ class TrialAttrs(BaseModel):
     booster_nthread: int | None = None
     booster_device: str | None = None
 
+    # PR-055 (program PR-027 A8 / Q7): the sha256 of the [m9] fit's out-of-sample export
+    # (``oos_rows.parquet``, an artifact of the trial; :mod:`rux_ml.runs.oos_export`).
+    # None for a fit that writes none (every fit off the per-day batch path).
+    oos_export_sha256: str | None = None
+
     # PR-013: GPU-only — populated when `nvidia-smi` is available. CPU dev
     # hosts (e.g., Mac) genuinely don't have these so they stay Optional.
     gpu_model: str | None = None
@@ -122,6 +127,7 @@ class TrialAttrs(BaseModel):
         versions: EnvironmentVersions,
         best_iteration: int | None = None,
         booster: Mapping[str, Any] | None = None,
+        oos_export_sha256: str | None = None,
     ) -> TrialAttrs:
         """Construct a ``TrialAttrs`` from a resolved config + data hashes +
         the per-trial :class:`SeedBag` + the :class:`EnvironmentVersions`
@@ -133,6 +139,7 @@ class TrialAttrs(BaseModel):
         ``versions`` come from PR-013's ``make_seed_bag`` and ``get_versions``.
         ``booster`` (PR-054) is ``{"nthread", "device"}`` read from the fitted
         XGBoost booster (``rux_ml.training.xgboost.batches.booster_threads_device``).
+        ``oos_export_sha256`` (PR-055) is the sha256 of the fit's out-of-sample export.
         """
         return cls(
             data_cfg_hash=layer_cfg_hash(cfg, "data"),
@@ -160,6 +167,7 @@ class TrialAttrs(BaseModel):
             peak_rss_mb=peak_rss_mb,
             booster_nthread=None if booster is None else int(booster["nthread"]),
             booster_device=None if booster is None else str(booster["device"]),
+            oos_export_sha256=oos_export_sha256,
             best_iteration=best_iteration,
             gpu_model=versions.gpu_model,
             driver_version=versions.driver_version,

@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
@@ -45,7 +46,7 @@ from rux_ml.training.xgboost.factory import make_xgboost_trainer
 from rux_ml.training.xgboost.ingest import DEFAULT_BYTES_PER_GB, select_ingest
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Sequence
 
     import pandas as pd
     from numpy.typing import NDArray
@@ -54,6 +55,21 @@ if TYPE_CHECKING:
     from rux_ml.data.partitions import Batches, PartitionPlan
 
 _FEATURE_BYTES = 4  # float32 per value, as XGBoost stores it
+
+# PR-055: what ``predict_fold`` hands a sink per batch — the key columns, the predictions
+# and the realized targets of one day file's rows of the partition.
+RowSink = Callable[[pl.DataFrame, "NDArray[np.float32]", "NDArray[np.float64]"], None]
+
+
+def uses_batch_fit(cfg: RuxMLConfig) -> bool:
+    """Whether a fit takes the per-day batch path: an ``[m9]`` XGBoost fit of a regression
+    target (every M9 target: Brier / MAE). ``rux-ml train`` (PR-054) and the ``promote``
+    re-fit (PR-055) both ask this, so a model is re-fitted on the path it was trained on."""
+    return (
+        cfg.m9 is not None
+        and isinstance(cfg.training, XGBoostTraining)
+        and task_for_metric(cfg.training.metric) == "regression"
+    )
 
 
 def _dedupe(columns: Sequence[str]) -> list[str]:
@@ -107,10 +123,23 @@ def fold_batch(
     """Batch ``index``'s rows of partition ``fold``: X as pandas (the spec's numeric
     columns as float32, then its categoricals on the fixed category list) and the target
     as float64 (null / NaN → NaN)."""
-    frame = batches.frame(
-        index, _dedupe([*plan.columns, *spec.numeric_columns, *spec.categorical_columns, target])
+    frame = fold_rows(
+        batches, index, plan, fold, [*spec.numeric_columns, *spec.categorical_columns, target]
     )
-    frame = frame.filter(pl.Series(plan.assign(frame) == fold))
+    return _xy(frame, spec, target, categories)
+
+
+def fold_rows(
+    batches: Batches, index: int, plan: PartitionPlan, fold: int, columns: Sequence[str]
+) -> pl.DataFrame:
+    """Batch ``index``'s rows of partition ``fold`` (the plan's columns and ``columns``)."""
+    frame = batches.frame(index, _dedupe([*plan.columns, *columns]))
+    return frame.filter(pl.Series(plan.assign(frame) == fold))
+
+
+def _xy(
+    frame: pl.DataFrame, spec: FeaturesSpec, target: str, categories: dict[str, list[str]]
+) -> tuple[pd.DataFrame, NDArray[np.float64]]:
     x = frame.select(
         [pl.col(c).cast(pl.Float32) for c in spec.numeric_columns]
         + [pl.col(c).cast(pl.String).cast(pl.Enum(categories[c])) for c in spec.categorical_columns]
@@ -267,15 +296,28 @@ def predict_fold(
     spec: FeaturesSpec,
     target: str,
     categories: dict[str, list[str]],
+    *,
+    keys: Sequence[str] = (),
+    sink: RowSink | None = None,
 ) -> tuple[NDArray[np.float32], NDArray[np.float64]]:
     """Predictions and realized targets for partition ``fold``, batch by batch, in the
-    batches' row order."""
+    batches' row order. With ``sink`` (PR-055, the out-of-sample export) each batch's
+    ``keys`` columns, predictions and realized targets are handed to it as they are made,
+    so the rows are written without ever being held whole."""
     preds: list[NDArray[np.float32]] = []
     realized: list[NDArray[np.float64]] = []
     for i, rows in enumerate(plan.batch_rows):
         if rows[fold]:
-            x, y = fold_batch(batches, i, plan, fold, spec, target, categories)
-            preds.append(_predict(fit, x))
+            if sink is None:
+                x, y = fold_batch(batches, i, plan, fold, spec, target, categories)
+                pred = _predict(fit, x)
+            else:
+                read = [*spec.numeric_columns, *spec.categorical_columns, target, *keys]
+                frame = fold_rows(batches, i, plan, fold, read)
+                x, y = _xy(frame, spec, target, categories)
+                pred = _predict(fit, x)
+                sink(frame.select(keys), pred, y)
+            preds.append(pred)
             realized.append(y)
     if not preds:
         return np.empty(0, dtype=np.float32), np.empty(0, dtype=np.float64)
