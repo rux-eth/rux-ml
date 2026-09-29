@@ -13,6 +13,10 @@ Wires:
   per the PR-013 determinism contract; the spec's `atol=1e-5/rtol=1e-4` is
   the conservative envelope across XGBoost minor versions, not the bit-exact
   floor.
+- The reference-platform gate :func:`require_reference_platform` (per
+  PR-057): the committed predictions are compared only on the platform
+  ``manifest.json`` records as ``reference_platform``; on any other platform
+  the in-process golden SKIPS with both platforms named (tolerances unchanged).
 
 Per ``docs/CONSTRAINTS.md`` Tolerance-Based Golden Tests Only: never
 ``np.testing.assert_array_equal`` against committed fixtures — XGBoost GPU
@@ -22,14 +26,15 @@ survive a CUDA / XGBoost minor upgrade.
 
 from __future__ import annotations
 
+import platform
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import pytest
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping
 
     from numpy.typing import NDArray
 
@@ -160,6 +165,50 @@ def assert_metric_within(
             f"procedure as `assert_predictions_close`."
         )
         raise AssertionError(msg)
+
+
+# ---------------------------------------------------------------------------
+# Reference platform (per PR-057)
+# ---------------------------------------------------------------------------
+
+
+def current_platform() -> dict[str, str]:
+    """This host's platform as ``manifest.json`` records it.
+
+    ``{"system": platform.system(), "machine": platform.machine()}``.
+    """
+    return {"system": platform.system(), "machine": platform.machine()}
+
+
+def require_reference_platform(manifest: Mapping[str, object], current: Mapping[str, str]) -> None:
+    """Skip the fixture comparison unless this host is the fixture's reference platform.
+
+    The committed predictions are comparable only on the platform that generated
+    them: at equal library versions a single-thread CPU fit gives different trees
+    on darwin-arm64 and linux-x86_64 (program PR-027 R4, 2026-09-28: 30 of 30
+    predictions off, max abs diff 0.1588). Off the reference platform the
+    comparison SKIPS with both platforms named; the tolerances are never
+    loosened. A manifest that names no reference platform FAILS: it predates the
+    rule and is regenerated on the reference platform, never compared blind.
+    """
+    recorded = manifest.get("reference_platform")
+    reference = cast("dict[str, object]", recorded) if isinstance(recorded, dict) else {}
+    ref_system, ref_machine = reference.get("system"), reference.get("machine")
+    if not isinstance(ref_system, str) or not isinstance(ref_machine, str):
+        msg = (
+            f"golden manifest records no reference_platform (system + machine), got "
+            f"{recorded!r}: the fixture predates PR-057. Regenerate it on the reference "
+            f"platform (`make regenerate-golden`; docs/CONVENTIONS.md, Regenerating "
+            f"golden fixtures) - a fixture of unknown platform is never compared."
+        )
+        raise AssertionError(msg)
+    if (ref_system, ref_machine) != (current["system"], current["machine"]):
+        pytest.skip(
+            f"golden_v1 predictions are compared only on the fixture's reference platform "
+            f"{ref_system}-{ref_machine}; this host is {current['system']}-{current['machine']}. "
+            f"A CPU fit's trees differ across platforms at equal library versions "
+            f"(docs/CONVENTIONS.md, Regenerating golden fixtures)."
+        )
 
 
 # ---------------------------------------------------------------------------

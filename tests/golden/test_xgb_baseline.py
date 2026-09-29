@@ -26,6 +26,14 @@ short version:
 3. Only after both check out, run ``make regenerate-golden`` and commit
    the refreshed fixtures with a manual diff of ``manifest.json``.
 
+**Reference platform (PR-057).** ``manifest.json`` records the platform the
+fixtures were generated on (``reference_platform``: ``platform.system()`` +
+``platform.machine()``). ``test_golden_xgb_baseline_in_process`` compares only
+there and SKIPS elsewhere with both platforms named: at equal library versions a
+single-thread CPU fit gives different trees on darwin-arm64 and linux-x86_64.
+``test_golden_load_model_matches_in_process`` compares a fit with itself and
+runs everywhere.
+
 Per ``docs/CONSTRAINTS.md`` Tolerance-Based Golden Tests Only: no exact
 hashes, no ``assert_array_equal`` against fixtures.
 """
@@ -34,6 +42,7 @@ from __future__ import annotations
 
 import importlib.metadata as _metadata
 import json
+import platform
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -72,6 +81,8 @@ from .conftest import (
     GOLDEN_DIR,
     assert_metric_within,
     assert_predictions_close,
+    current_platform,
+    require_reference_platform,
 )
 
 if TYPE_CHECKING:
@@ -245,6 +256,7 @@ def _build_manifest(cfg: RuxMLConfig, data_path: Path) -> dict[str, object]:
             "skops": _metadata.version("skops"),
         },
         "cuda_runtime_version": versions.cuda_runtime_version,
+        "reference_platform": current_platform(),
         "tolerance": {
             "preds_atol": DEFAULT_ATOL,
             "preds_rtol": DEFAULT_RTOL,
@@ -294,6 +306,9 @@ def test_golden_xgb_baseline_in_process(
     See module docstring for the failure investigation procedure. Under
     ``--regenerate-golden``, this test instead rewrites the committed
     fixtures (preds.npy + metric.json + manifest.json + synthetic.parquet).
+    Compares only on the fixture's reference platform and SKIPS elsewhere
+    (PR-057, :func:`require_reference_platform`); the regeneration records the
+    platform it ran on.
     """
     synthetic_path = GOLDEN_DIR / "synthetic.parquet"
 
@@ -301,6 +316,11 @@ def test_golden_xgb_baseline_in_process(
         # Bootstrap path: regenerate the parquet first so the cfg can load it.
         GOLDEN_DIR.mkdir(parents=True, exist_ok=True)
         _build_synthetic_dataset().write_parquet(synthetic_path)
+    else:
+        # PR-057: compare only on the fixture's reference platform (skip, naming
+        # both platforms, anywhere else) - checked before the fit.
+        manifest = json.loads((GOLDEN_DIR / "manifest.json").read_text())
+        require_reference_platform(manifest, current_platform())
 
     cfg = _golden_cfg(synthetic_path, tmp_path)
     preds, auc = _fit_predict_in_process(cfg)
@@ -383,3 +403,16 @@ def test_golden_load_model_matches_in_process(
     roundtrip_preds = cast("NDArray[np.float64]", booster.predict(dmatrix)).astype(np.float64)
 
     assert_predictions_close(roundtrip_preds, in_process_preds)
+
+
+def test_golden_manifest_records_its_reference_platform(tmp_path: Path) -> None:
+    """A regeneration's manifest names the platform it ran on (PR-057).
+
+    That platform is the fixture's reference platform.
+    """
+    synthetic_path = GOLDEN_DIR / "synthetic.parquet"
+    manifest = _build_manifest(_golden_cfg(synthetic_path, tmp_path), synthetic_path)
+    assert manifest["reference_platform"] == {
+        "system": platform.system(),
+        "machine": platform.machine(),
+    }
