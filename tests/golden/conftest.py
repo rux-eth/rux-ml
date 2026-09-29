@@ -229,6 +229,6 @@ def golden_synthetic_path() -> Iterator[Path]:
     assert parquet_path.exists(), (
         f"missing committed golden input at {parquet_path}; "
         f"if you're bootstrapping the fixtures, run "
-        f"`uv run pytest -m golden --regenerate-golden`"
+        f"`make regenerate-golden` on the reference platform"
     )
     yield parquet_path
