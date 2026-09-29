@@ -67,7 +67,7 @@ Manifest review:
 - `root_cfg_hash` goes from `cd75bc2c…` to `c5ba8632…`. This is code drift since 2026-05-16, not the platform: the Mac computes `c5ba8632…` today too.
 - AUC goes from 0.9511 to 0.9422.
 
-Per the brief the build stopped here. The regenerated files are left uncommitted in the desktop worktree `~/projects/rux-ml-pr057-regen`, waiting for the lead's call.
+Per the brief the build stopped here for the lead's call. **Resolved (2026-09-29):** the lead approved accepting the desktop's data: the difference is ≤ 8.9e-16, it does not change the fit, and the desktop is the reference. The four files were committed from the desktop at `4e1de63`.
 
 ### Synthesis / Gate
 
@@ -97,8 +97,9 @@ None changed. The rule lives in `docs/CONVENTIONS.md` §Regenerating golden fixt
 - [x] The manifest test failed first (`KeyError: 'reference_platform'`) and passes.
 - [x] `tests/golden/test_regenerate_target.py` failed first (`unrecognized arguments: --regenerate-golden`) and passes.
 - [x] Mac: the default suite is green.
-- [ ] **STOPPED:** the desktop regeneration changed `synthetic.parquet` (see Research findings). The fixtures are not committed. Until they are, `test_golden_xgb_baseline_in_process` fails on every platform, because the committed manifest names no platform and the gate fails closed.
-- [ ] Desktop: the golden suite passes in full. Mac: the in-process golden skips with its reason and the rest pass.
+- [x] `make regenerate-golden` on the desktop at `1460b2b` rewrote the four files. `synthetic.parquet` differs at ≤ 8.9e-16 on the float columns and was accepted by the lead (see Research findings). The manifest diff was reviewed and committed at `4e1de63`.
+- [x] Desktop at `4e1de63`: `make test-golden` passed 15 of 15 (the 7 original tests and the 8 new ones).
+- [x] Mac at `4e1de63`: the golden suite passed 14 and skipped 1. `test_golden_xgb_baseline_in_process` skipped with the reason "compared only on the fixture's reference platform Linux-x86_64; this host is Darwin-arm64". The default suite passed 731 with 3 skipped.
 
 ## Research backing
 
@@ -108,3 +109,4 @@ Program PR-027 build step R4 (Q8, 2026-09-28) and the operator's decision of 202
 
 - The Mac (darwin-arm64) no longer compares the in-process golden, so a training-stack regression that shows only in predictions is caught on the desktop. The registry round-trip golden, and every other test, still run on the Mac.
 - A regeneration after a library upgrade follows the same three steps, on the desktop.
+- **Known limitation (non-blocking):** a model fitted with `colsample_bytree` < 1 differs between darwin-arm64 and linux-x86_64 from the same seed, and the per-trial record (`TrialAttrs`) does not store the platform. Training runs only on the desktop, so v0.3 is unaffected.
