@@ -39,6 +39,7 @@ from rux_ml._internal.seeds import SeedBag, make_seed_bag_from_hex
 from rux_ml.config import RuxMLConfig
 from rux_ml.data import check_feature_labels, load_parquet, make_splits, materialize
 from rux_ml.data.bridge import HarnessManifestError, harness_manifest_ref, harness_view_path
+from rux_ml.data.partitions import TRAIN, SourceBatches, plan_partitions
 from rux_ml.features import cardinalities_from, make_features
 from rux_ml.registry.bundle import save_bundle
 from rux_ml.registry.champion import write_champion
@@ -52,6 +53,12 @@ from rux_ml.registry.paths import champion_path, format_version_id, version_dir
 from rux_ml.runs import TrialAttrs, load_run
 from rux_ml.runs.provenance import data_hashes
 from rux_ml.training import make_trainer
+from rux_ml.training.xgboost.batches import (
+    category_levels,
+    fit_batches,
+    fold_rows,
+    uses_batch_fit,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -130,12 +137,18 @@ def _refit(cfg: RuxMLConfig, *, bag: SeedBag) -> tuple[Pipeline, xgb.Booster]:
     promotion re-fit would use different seeds than the trial's evaluation,
     so the registered bundle would not match the metrics recorded in
     ``user_attrs`` — silent reproducibility breakage.
+
+    PR-055 (program PR-027 R3; the operator's ruling of 2026-09-28): an ``[m9]`` re-fit
+    takes the per-day batch path ``rux-ml train`` fitted the trial on (PR-054) —
+    :func:`_refit_batches` — never the whole source in memory.
     """
     if cfg.data.source_path is None or cfg.data.target_column is None:
         msg = "promote requires data.source_path and data.target_column"
         raise ValueError(msg)
 
     check_feature_labels(cfg)  # PR-043: a label is never a feature
+    if uses_batch_fit(cfg):
+        return _refit_batches(cfg, bag=bag)
     df = materialize(load_parquet(cfg.data.source_path, oracle=cfg.data.oracle))
     splits = make_splits(cfg, df, seed=bag.split_seed)
     x_train = splits["train"].drop(cfg.data.target_column)
@@ -161,6 +174,41 @@ def _refit(cfg: RuxMLConfig, *, bag: SeedBag) -> tuple[Pipeline, xgb.Booster]:
         trainer.get_booster(),  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
     )
     return pipeline, booster
+
+
+def _refit_batches(cfg: RuxMLConfig, *, bag: SeedBag) -> tuple[Pipeline, xgb.Booster]:
+    """The ``[m9]`` re-fit from per-day batches (PR-055; PR-054's fit).
+
+    The same partition rule and seeds as the trial (``plan_partitions`` with the bag's
+    ``split_seed``; ``fit_batches`` with its ``xgb_seed``), so the booster predicts
+    bit-identically to the in-memory re-fit's (``tests/cli/test_m9_promote_batches.py``).
+    The host holds XGBoost's quantised matrices plus one day file's rows, never a
+    partition: at 156 days the in-memory re-fit exceeds the 20 GiB scope the batch fit
+    runs inside.
+
+    The bundle's feature pipeline is fitted on the first day file's train rows. On this
+    path it is stateless — every categorical is at or below
+    ``features.categorical_low_card_threshold`` (``category_levels`` refuses one above
+    it), so the router passes every column through and fitting records only the input's
+    column names — hence one batch fits the pipeline the whole partition fits.
+    """
+    source_path, target = cfg.data.source_path, cfg.data.target_column
+    assert cfg.m9 is not None and source_path is not None and target is not None
+    source = SourceBatches(
+        source_path, oracle=cfg.data.oracle, row_filter=cfg.m9.row_filter_non_null
+    )
+    plan = plan_partitions(cfg, source, seed=bag.split_seed)
+    categories = category_levels(source, plan, cfg.features)
+    fit = fit_batches(cfg, source, plan, target, seed=bag.xgb_seed, categories=categories)
+
+    columns = [c for c in source.columns() if c != target]  # the in-memory x_train's
+    first = next(i for i, rows in enumerate(plan.batch_rows) if rows[TRAIN])
+    frame = fold_rows(source, first, plan, TRAIN, [*columns, target])
+    x_first = frame.select(columns)
+    cards = cardinalities_from(x_first, cfg.features.spec.categorical_columns)
+    pipeline = make_features(cfg.features, cardinalities=cards if cards else None)
+    pipeline.fit(x_first, frame[target].to_numpy())  # pyright: ignore[reportUnknownMemberType]
+    return pipeline, fit.booster
 
 
 def _library_versions() -> LibraryVersions:

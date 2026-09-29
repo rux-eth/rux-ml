@@ -23,6 +23,7 @@ import numpy as np
 import optuna
 import polars as pl
 import typer
+from optuna.artifacts import upload_artifact
 
 from rux_ml._internal.env import EnvironmentVersions, get_versions, pin_threads
 from rux_ml._internal.memory import MemoryPressureError, Watchdog
@@ -55,6 +56,7 @@ from rux_ml.runs import (
     one_off_run,
     upload_diagnostics,
 )
+from rux_ml.runs.oos_export import OOS_EXPORT_FILENAME, OosExportWriter
 from rux_ml.training import (
     XGBoostNativeAdapter,
     compute_score,
@@ -64,7 +66,6 @@ from rux_ml.training import (
     select_ingest,
 )
 from rux_ml.training.honesty import signed_error_honesty
-from rux_ml.training.metrics import task_for_metric
 from rux_ml.training.xgboost.batches import (
     BatchFit,
     Scored,
@@ -72,6 +73,7 @@ from rux_ml.training.xgboost.batches import (
     category_levels,
     fit_batches,
     predict_fold,
+    uses_batch_fit,
 )
 
 
@@ -216,6 +218,7 @@ def _fit_and_score(
     target_col: str,
     bag: SeedBag,
     gates: M9Gates | None = None,
+    export_dir: Path | None = None,
 ) -> tuple[float, int | None, float, int, dict[str, Any]]:
     """Fit + score one baseline using PR-013-derived seeds for split + trainer.
 
@@ -234,15 +237,12 @@ def _fit_and_score(
     the temporal path is deterministic and ignores the seed, so the same
     reproducibility contract holds.
     """
-    if (
-        cfg.m9 is not None
-        and isinstance(cfg.training, XGBoostTraining)
-        and task_for_metric(cfg.training.metric) == "regression"
-    ):
+    if uses_batch_fit(cfg):
         # PR-054 (program PR-027 A1): an [m9] XGBoost fit of a regression target (the M9
         # targets: Brier / MAE) never collects the whole source. An [m9] classification
         # fit (no M9 problem is one) keeps the in-memory path, on the same partition rule.
-        return _fit_and_score_batches(cfg, source_path, target_col, bag, gates)
+        # PR-055 (A8): with ``export_dir`` it writes the val / test rows' export there.
+        return _fit_and_score_batches(cfg, source_path, target_col, bag, gates, export_dir)
     df = materialize(load_parquet(source_path, oracle=cfg.data.oracle))
     splits = make_splits(cfg, df, seed=bag.split_seed)
     fold_extras: dict[str, Any] = {
@@ -344,9 +344,11 @@ def _oos_record_batches(
     target_col: str,
     categories: dict[str, list[str]],
     gates: M9Gates | None,
+    writer: OosExportWriter | None = None,
 ) -> dict[str, Any]:
     """:func:`_oos_record` for the per-day batch fit: the test partition predicted batch
-    by batch, then scored exactly as the in-memory record scores it."""
+    by batch (and handed to the PR-055 export ``writer``), then scored exactly as the
+    in-memory record scores it."""
     out: dict[str, Any] = {"partition": "test", "n_rows": plan.rows(TEST)}
     if gates is not None:
         out["gates_sha256"] = gates.sha256
@@ -354,8 +356,9 @@ def _oos_record_batches(
     if not out["n_rows"]:
         return out
     preds, realized = predict_fold(
-        fit, source, plan, TEST, cfg.features.spec, target_col, categories
-    )
+        fit, source, plan, TEST, cfg.features.spec, target_col, categories,
+        **_export_sink(cfg, writer, "test"),
+    )  # fmt: skip
     keep = ~np.isnan(realized)
     out["n_scored"] = int(keep.sum())
     if keep.any():
@@ -374,12 +377,28 @@ def _oos_record_batches(
     return out
 
 
+def _export_sink(
+    cfg: RuxMLConfig, writer: OosExportWriter | None, partition: str
+) -> dict[str, Any]:
+    """``predict_fold``'s ``keys`` / ``sink`` for the PR-055 export (none without one)."""
+    if writer is None:
+        return {}
+    assert cfg.m9 is not None
+    return {"keys": list(cfg.m9.row_key_columns), "sink": writer.sink(partition)}
+
+
+def _export_sha256(fold_extras: dict[str, Any]) -> str | None:
+    export = cast("dict[str, Any] | None", fold_extras.get("oos_export"))
+    return None if export is None else str(export["sha256"])
+
+
 def _fit_and_score_batches(
     cfg: RuxMLConfig,
     source_path: Path,
     target_col: str,
     bag: SeedBag,
     gates: M9Gates | None,
+    export_dir: Path | None = None,
 ) -> tuple[float, int | None, float, int, dict[str, Any]]:
     """PR-054 (program PR-027 A1 / A3): an ``[m9]`` XGBoost fit from per-day batches.
 
@@ -390,6 +409,11 @@ def _fit_and_score_batches(
     (:mod:`rux_ml.training.xgboost.batches`); val and test are predicted batch by batch.
     No step collects the source, a partition, or the diagnostic columns whole. Returns
     what :func:`_fit_and_score` returns, with ``booster`` (A11) and ``ingest`` added.
+
+    PR-055 (program PR-027 A8 / Q7): with ``export_dir``, the val and test predictions
+    are streamed, with their rows' ``[m9] row_key_columns`` and realized targets, into
+    ``export_dir / oos_rows.parquet`` (:mod:`rux_ml.runs.oos_export`) as they are made;
+    its record is ``fold_extras["oos_export"]``.
     """
     m9 = cfg.m9
     assert m9 is not None
@@ -416,6 +440,17 @@ def _fit_and_score_batches(
         "split_definition": split_record(cfg, plan, rows_before_filter=source.rows_before_filter()),
         "leakage": _leakage_verdict(cfg, audit),
     }
+    writer: OosExportWriter | None = None
+    if export_dir is not None:  # refused before the fit, not after it
+        try:
+            writer = OosExportWriter(
+                export_dir / OOS_EXPORT_FILENAME,
+                key_columns=m9.row_key_columns,
+                target_column=target_col,
+                split_definition=fold_extras["split_definition"],
+            )
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
     start = time.perf_counter()
     categories = category_levels(source, plan, cfg.features)
     seconds["categories"] = time.perf_counter() - start
@@ -426,13 +461,21 @@ def _fit_and_score_batches(
     fit_start = time.perf_counter()
     fit = fit_batches(cfg, source, plan, target_col, seed=bag.xgb_seed, categories=categories)
     start = time.perf_counter()
-    val_pred, val_y = predict_fold(fit, source, plan, VAL, spec, target_col, categories)
+    val_pred, val_y = predict_fold(
+        fit, source, plan, VAL, spec, target_col, categories, **_export_sink(cfg, writer, "val")
+    )
     score = compute_score(cfg.training.metric, cast("Any", Scored()), val_pred, val_y)
     seconds["val_predict"] = time.perf_counter() - start
     fit_seconds = time.perf_counter() - fit_start
     start = time.perf_counter()
-    fold_extras["oos"] = _oos_record_batches(cfg, fit, source, plan, target_col, categories, gates)
+    fold_extras["oos"] = _oos_record_batches(
+        cfg, fit, source, plan, target_col, categories, gates, writer
+    )
     seconds["test_predict"] = time.perf_counter() - start
+    if writer is not None:
+        start = time.perf_counter()
+        fold_extras["oos_export"] = writer.close()
+        seconds["oos_export_close"] = time.perf_counter() - start
     fold_extras["booster"] = booster_threads_device(fit.booster)
     fold_extras["ingest"] = {
         "path": "native_per_day_batches",
@@ -453,6 +496,7 @@ def _record_attrs(
     best_iteration: int | None,
     trial: optuna.Trial,
     booster: dict[str, Any] | None = None,
+    oos_export_sha256: str | None = None,
 ) -> None:
     TrialAttrs.from_cfg(
         cfg,
@@ -463,6 +507,7 @@ def _record_attrs(
         versions=versions,
         best_iteration=best_iteration,
         booster=booster,
+        oos_export_sha256=oos_export_sha256,
     ).record(trial)
 
 
@@ -485,12 +530,16 @@ def run_command(ctx: typer.Context) -> None:
     hashes = data_hashes(source_path, oracle=cfg.data.oracle)
     versions = get_versions(cfg.memory)
 
-    with one_off_run(
-        cfg,
-        problem=opts.problem,
-        study=opts.study,
-        direction=optuna_direction(cfg.training.metric),
-    ) as run:
+    with (
+        one_off_run(
+            cfg,
+            problem=opts.problem,
+            study=opts.study,
+            direction=optuna_direction(cfg.training.metric),
+        ) as run,
+        # PR-055: the [m9] fit's out-of-sample export is written here, then uploaded.
+        tempfile.TemporaryDirectory(prefix="rux_ml_oos_") as export_tmp,
+    ):
         # PR-013: derive per-trial bag using the one-off trial's number
         # (typically 0 in a fresh study; non-zero when --study targets an
         # existing study and one_off_run appends a new trial). The bag is
@@ -504,7 +553,7 @@ def run_command(ctx: typer.Context) -> None:
         ) as wd:
             try:
                 score, best_iter, fit_seconds, train_row_count, fold_extras = _fit_and_score(
-                    cfg, source_path, target_col, bag, gates
+                    cfg, source_path, target_col, bag, gates, export_dir=Path(export_tmp)
                 )
             except MemoryPressureError:
                 _record_attrs(
@@ -527,6 +576,8 @@ def run_command(ctx: typer.Context) -> None:
             best_iteration=best_iter,
             trial=run.trial,
             booster=fold_extras.get("booster"),  # PR-054 (program PR-027 A11)
+            # PR-055 (program PR-027 A8): the out-of-sample export's sha256
+            oos_export_sha256=_export_sha256(fold_extras),
         )
         if wd.tripped:
             # Threshold crossed during the fit even though the fit completed —
@@ -537,6 +588,15 @@ def run_command(ctx: typer.Context) -> None:
         # no try/except guard (mirrors tuning/objective.py site). Single-fold
         # semantics (n_folds=1) for the one-off baseline.
         artifact_store = make_artifact_store(cfg, study_name=run.study.study_name)
+        export = fold_extras.get("oos_export")
+        if export is not None:
+            # PR-055: the export sits beside the trial's record, an artifact of the trial;
+            # fold_meta.json names it by artifact id (and sha256, also a user attribute).
+            export["artifact_id"] = upload_artifact(
+                artifact_store=artifact_store,
+                file_path=str(Path(export_tmp) / export["filename"]),
+                study_or_trial=run.trial,
+            )
         metrics_dict = build_metrics_dict(cfg.training.metric, [score], peak_rss_mb=wd.peak_mb)
         fold_meta: list[dict[str, Any]] = [
             {
