@@ -81,7 +81,18 @@ PR-054 (merged, `b1a3186`).
 - [x] **The promote re-fit is bit-identical** to the in-memory re-fit (the pre-PR `_refit` copied verbatim into the test) on the C6 fixture with `subsample` = `colsample_bytree` = 0.8, all three regimes: prediction sha256 through the scorer's route, `best_iteration`, rounds, the pipeline's input names; `materialize` patched to raise. Sensitivity: another trial's seeds give other predictions.
 - [x] **Promote end to end** on `m9_fill_frac` through the CLI with `materialize` refused: the bundle saves, with PR-051's harness manifest. PR-050 / PR-051 refusal tests unchanged and green.
 - [x] Default suite **730 passed, 3 skipped** (717 + 13 new); `ruff check`; `ruff format --check src tests`; `basedpyright src/` 0 errors.
-- [ ] **Desktop measurement** of the promote re-fit's peak at 156 days (below, when run).
+- [x] **Desktop measurement** (2026-09-28, 21:43:33–21:46:29 CDT; 2 min 56 s under `~/rumpy-heavy.lock`, inside `timeout 1200`). Setup: branch @ `010ac19` in a detached worktree `~/projects/rux-ml-pr055-measure`, xgboost 3.2.0 with CUDA, Polars 1.40.1, pyarrow 24.0.0. Each step ran in `systemd-run --user --scope -p MemoryHigh=20G -p MemoryMax=20G -p MemorySwapMax=0` under `/usr/bin/time -v`, `nvidia-smi` sampled every 0.5 s. Input: the 156-day view `f6a544e240b5-83a175d4b812.s3-1777593600000` `fill/` (156 day files, now on the desktop), `m9_fill_frac`, its time-block split, GPU. Step 1 is the whole `rux-ml train` (it writes the export); step 2 the whole `rux-ml registry promote` of that trial (its `data_hash` + harness manifest checks, then the batch re-fit, then the bundle).
+
+  | | `train` (writes the export) | `registry promote` (the batch re-fit) |
+  |---|---|---|
+  | process peak RSS (`time -v`) | 15.51 GiB (16,260,092 kB) | **18.20 GiB** (19,083,432 kB) |
+  | scope `memory.peak` (incl. page cache) | 16.72 GiB | **18.53 GiB** (≤ 20 GiB; `high` 0, `max` 0, `oom_kill` 0, swap 0) |
+  | whole-process wall | 96.4 s | **79.0 s** |
+  | GPU memory used (max) | 13,060 MiB | 13,068 MiB |
+  | result | test Brier 0.157391 (= PR-054's 0.15739), best iteration 99 | bundle `v_2026_09_29_ba094a` (model.ubj 496,162 B) |
+
+  - **The export at scale:** 13,814,732 val + 14,011,016 test rows (= the split record), **83,173,828 bytes (79.3 MiB, ≈ 3.0 B/row)**, sha256 `58a9787e…c410`. Streaming it cost val / test predict 3.8 / 4.3 s against PR-054's 2.9 / 3.0 s; closing + hashing 0.04 s. The train RSS peak equals PR-054's 15.50 GiB: the export adds none.
+  - **The promote peak is 2.7 GiB above train's and unattributed** (no per-stage RSS). Read, not measured: `registry promote` never calls `pin_threads` (`train` / `tune` / `solve` do), so its Polars pool and OpenMP run unpinned — a candidate, not a finding.
 
 ## Research backing
 
@@ -90,5 +101,7 @@ Program PR-027 §Findings Phase 3 Q7 (the proposed interface), Phase 4 A8, the b
 ## Notes — for the program lead
 
 - **H2's read path:** find the trial's `fold_meta.json` `oos_export`, read `<artifacts_root>/<study>/<artifact_id>`, check its sha256 against `oos_export_sha256`, build the train mask by the rule above on the same view, fit the floor, score it on the `partition == "test"` rows. `realized` NaN rows are outside the model's test score.
-- **Size (best-guess until measured):** ≈ 28M val + test rows for the 156-day fill fit.
+- **Size (measured):** 27.8M val + test rows for the 156-day fill fit in 79.3 MiB, not Q7's ≈ 0.7 GB best-guess.
+- **Promote headroom is thin:** 18.53 GiB of the 20 GiB scope at time-block, 1.47 GiB left. The symbol-holdout train partition is ≈ 73 % of the filtered rows against time-block's ≈ 70 %, so its re-fit is the tightest case. That case was not measured. If the headroom matters, a per-stage RSS attribution comes next. The first candidate is the unpinned promote above; it is pre-existing, and this PR does not change it.
+- **Promote vs trial at scale is unverified.** The bit-identity here is batch re-fit vs in-memory re-fit, in one process with the same threads. Whether the promoted booster reproduces the trial's predictions at 156 days was not checked. The two runs used different thread pinning, so this is open. The export makes a cheap check possible (R4 candidate): predict the export's test rows with the bundle and compare to `prediction`.
 - **Tune** keeps the in-memory path and writes no export (the Stage 3 fits are `rux-ml train` runs).
