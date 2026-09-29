@@ -2,10 +2,10 @@
   "fixture_version": "golden_v1",
   "master_entropy": 42,
   "entropy_hex": "4323988864d84a1fdff6ed7da001c6a4",
-  "data_hash": "11f180647b92238316a2f614d1366322998f09d6c64825211a758f9c51fa71bd|98f8c686f027ab27769990c4bef553fd1bedc733fe5ae42f47df27e87fad994f",
-  "data_bytes_hash": "11f180647b92238316a2f614d1366322998f09d6c64825211a758f9c51fa71bd",
-  "data_logical_hash": "98f8c686f027ab27769990c4bef553fd1bedc733fe5ae42f47df27e87fad994f",
-  "root_cfg_hash": "cd75bc2ceb6d3f1fb9bcf31d90479c7548d395febceebb65707933831e7a7e1d",
+  "data_hash": "20ae5203066c6335538274ad83ed054585af8382d4113407ca4239e747606b86|64a492714827bcd8ebdcb4be6a92f3a35eb176a03854e1dd646abfe8ed2dc971",
+  "data_bytes_hash": "20ae5203066c6335538274ad83ed054585af8382d4113407ca4239e747606b86",
+  "data_logical_hash": "64a492714827bcd8ebdcb4be6a92f3a35eb176a03854e1dd646abfe8ed2dc971",
+  "root_cfg_hash": "c5ba8632bfbf1ff5c1a86a2ff18ca98dca69238932e4087a1f2c7cdf35f775ff",
   "library_versions": {
     "xgboost": "3.2.0",
     "scikit_learn": "1.8.0",
@@ -13,7 +13,11 @@
     "polars": "1.40.1",
     "skops": "0.14.0"
   },
-  "cuda_runtime_version": "unknown",
+  "cuda_runtime_version": "12.9",
+  "reference_platform": {
+    "system": "Linux",
+    "machine": "x86_64"
+  },
   "tolerance": {
     "preds_atol": 1e-05,
     "preds_rtol": 0.0001,
@@ -24,5 +28,5 @@
     "numeric_columns": 3,
     "categorical_levels": 3
   },
-  "created_at": "2026-05-16T18:27:16.234819+00:00"
+  "created_at": "2026-09-29T13:01:56.027824+00:00"
 }

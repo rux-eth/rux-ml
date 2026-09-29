@@ -40,7 +40,7 @@ test-golden:
 	uv run pytest -m golden
 
 regenerate-golden:
-	uv run pytest -m golden --regenerate-golden
+	uv run pytest tests/golden -m golden --regenerate-golden
 
 docker-build:
 	DOCKER_BUILDKIT=1 docker build -t rux-ml:local .
