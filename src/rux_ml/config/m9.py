@@ -20,6 +20,10 @@ from pydantic import Field, ValidationInfo, field_validator, model_validator
 
 from rux_ml.config._strict_model import StrictModel
 
+# PR-058 (program PR-027 A7): the form of the prediction an honesty verdict tests —
+# the prediction as fitted, or max(0, prediction), the cost the program's EV deducts.
+HonestyForm = Literal["signed", "clipped_at_zero"]
+
 
 class M9GatesConfig(StrictModel):
     """Where the operator-signed M9 keys live and who must have signed them (PR-044).
@@ -72,6 +76,22 @@ class M9Config(StrictModel):
     signed_error_honesty: bool = False
     gates: M9GatesConfig | None = None
 
+    # PR-058 (program PR-027 A7, operator-approved 2026-09-28: "Markout is tested as the
+    # EV deducts it, max(0, m) < r"): the form of the prediction the honesty VERDICT
+    # tests. "signed" = the prediction as fitted (PR-044); "clipped_at_zero" =
+    # max(0, prediction). The record reports both forms whichever decides; this key names
+    # the verdict's. A form other than "signed" without the test is refused.
+    honesty_verdict_form: HonestyForm = "signed"
+
+    # PR-058 (program PR-027 A7: "a signed calibration bias per (p, Q, h) bucket
+    # reported"): mean(prediction) - mean(realized) on the test rows, overall and per
+    # bucket = each distinct value tuple of ``calibration_bucket_columns``, reported beside
+    # the score and never gated. No bucket columns = the overall bias alone; listing them
+    # without ``calibration_bias`` is refused. The repo's buckets are row keys, so the fit's
+    # export (PR-055) re-derives every bucket.
+    calibration_bias: bool = False
+    calibration_bucket_columns: list[str] = Field(default_factory=list)
+
     # PR-046 (program D43): the learning-curve report. The nested prefixes (as
     # fractions of the train window), the OOS value it follows — a dotted path into
     # a fit's ``fold_meta.json`` ``oos`` record, e.g. "score" — and whether lower or
@@ -87,7 +107,22 @@ class M9Config(StrictModel):
             raise ValueError(msg)
         return self
 
-    @field_validator("diagnostic_columns", "row_filter_non_null", "row_key_columns")
+    @model_validator(mode="after")
+    def _a7_settings_do_something(self) -> M9Config:
+        if self.honesty_verdict_form != "signed" and not self.signed_error_honesty:
+            msg = (
+                f"m9.honesty_verdict_form = {self.honesty_verdict_form!r} needs "
+                "m9.signed_error_honesty = true (the test whose verdict it names)"
+            )
+            raise ValueError(msg)
+        if self.calibration_bucket_columns and not self.calibration_bias:
+            msg = "m9.calibration_bucket_columns needs m9.calibration_bias = true"
+            raise ValueError(msg)
+        return self
+
+    @field_validator(
+        "diagnostic_columns", "row_filter_non_null", "row_key_columns", "calibration_bucket_columns"
+    )
     @classmethod
     def _distinct_non_empty(cls, v: list[str], info: ValidationInfo) -> list[str]:
         if any(not c for c in v):

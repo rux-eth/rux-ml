@@ -109,6 +109,10 @@ metric = "mae"
 h_max_ms = 28801000
 # PR-044 (program D45 #3): MAE in bp with the signed-error honesty test on the held-out partition.
 signed_error_honesty = true
+# PR-058 (program PR-027 A7, :690-691, operator-approved 2026-09-28): "Markout is tested
+# as the EV deducts it, max(0, m) < r" — the verdict tests the prediction clipped at zero;
+# the signed form (PR-044's) is reported beside it.
+honesty_verdict_form = "clipped_at_zero"
 # The other labels of THIS problem's subtree (fill/), summarised per fold beside every
 # run and never trained on (D45 #3: "the others diagnostics"). PR-048: the names are the
 # harness schema's (spec/m9_training_schema.json v2, program PR-024 B-4) — a label of the

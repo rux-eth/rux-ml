@@ -323,3 +323,48 @@ def test_nullable_features_are_listed_and_fed_to_a_nan_native_family(problem: st
     assert isinstance(cfg.training, XGBoostTraining)
     assert "missing" not in cfg.training.model_kwargs
     assert math.isnan(make_trainer(cfg.training).get_params()["missing"])
+
+
+# ---------- PR-058 (program PR-027 A7): the honesty forms each problem carries ----------
+
+
+@pytest.mark.parametrize(
+    ("problem", "form", "buckets"),
+    [
+        ("m9_fill_frac", None, ["p_bp", "q_usd", "h_ms"]),
+        ("m9_markout_bp", "clipped_at_zero", []),
+        ("m9_walk_bp", "signed", []),
+    ],
+)
+def test_repo_problems_carry_the_a7_honesty_forms(
+    problem: str, form: str | None, buckets: list[str]
+) -> None:
+    """Program PR-027 A7 (:690-691, operator-approved 2026-09-28): fill is gated on Brier with
+    a signed calibration bias per (p, Q, h) bucket reported; markout is tested as the EV
+    deducts it, max(0, m); the walk keeps PR-044's signed form (A7 names no clip for it)."""
+    cfg = _load(problem)
+    assert cfg.m9 is not None
+    if form is None:
+        assert cfg.m9.signed_error_honesty is False
+    else:
+        assert cfg.m9.signed_error_honesty is True and cfg.m9.honesty_verdict_form == form
+    assert cfg.m9.calibration_bias is bool(buckets)
+    assert cfg.m9.calibration_bucket_columns == buckets
+    # every bucket column is a row key, so the fit's own export re-derives the record
+    assert set(buckets) <= set(cfg.m9.row_key_columns)
+
+
+def test_m9_config_refuses_a_dead_or_unknown_a7_setting() -> None:
+    from pydantic import ValidationError  # noqa: PLC0415
+
+    from rux_ml.config.m9 import M9Config  # noqa: PLC0415
+
+    with pytest.raises(ValidationError, match="calibration_bias"):
+        M9Config(calibration_bucket_columns=["p_bp"])
+    with pytest.raises(ValidationError, match="signed_error_honesty"):
+        M9Config(honesty_verdict_form="clipped_at_zero")
+    with pytest.raises(ValidationError, match="distinct"):
+        M9Config(calibration_bias=True, calibration_bucket_columns=["p_bp", "p_bp"])
+    with pytest.raises(ValidationError, match="honesty_verdict_form"):
+        M9Config(honesty_verdict_form="clipped")  # type: ignore[arg-type]
+    assert M9Config().honesty_verdict_form == "signed" and M9Config().calibration_bias is False
