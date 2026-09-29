@@ -108,6 +108,9 @@ metric = "mae"
 h_max_ms = 28801000
 # PR-044 (program D45 #3): MAE in bp with the signed-error honesty test on the held-out partition.
 signed_error_honesty = true
+# PR-058: A7 names the clip for the markout only; the walk's verdict keeps PR-044's signed
+# form (both forms are reported).
+honesty_verdict_form = "signed"
 # The other labels of THIS problem's subtree (walk/), summarised per fold beside every
 # run and never trained on (D45 #3: "the others diagnostics"). PR-048: the names are the
 # harness schema's (spec/m9_training_schema.json v2, program PR-024 B-4) — a label of the

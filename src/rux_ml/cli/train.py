@@ -65,7 +65,7 @@ from rux_ml.training import (
     optuna_direction,
     select_ingest,
 )
-from rux_ml.training.honesty import signed_error_honesty
+from rux_ml.training.honesty import CalibrationBias, signed_error_honesty
 from rux_ml.training.xgboost.batches import (
     BatchFit,
     Scored,
@@ -201,15 +201,39 @@ def _oos_record(
     if keep.any():
         out["metric"] = cfg.training.metric
         out["score"] = compute_score(cfg.training.metric, model, x_pd[keep], realized[keep])
-    if cfg.m9 is not None and cfg.m9.signed_error_honesty:
-        assert gates is not None  # M9Config validator: honesty requires [m9.gates]
-        out["honesty"] = signed_error_honesty(
-            model.predict(x_pd),
-            realized,
-            no_underdeduct_frac_min=gates.no_underdeduct_frac_min,
-            overdeduct_max_rel=gates.overdeduct_max_rel,
-        )
+    calibration = _calibration(cfg)
+    honesty = cfg.m9 is not None and cfg.m9.signed_error_honesty
+    if not honesty and calibration is None:
+        return out
+    preds = model.predict(x_pd)
+    if honesty:
+        out["honesty"] = _honesty(cfg, gates, preds, realized)
+    if calibration is not None:
+        calibration.add(test, preds, realized)
+        out["calibration"] = calibration.record()
     return out
+
+
+def _honesty(cfg: RuxMLConfig, gates: M9Gates | None, preds: Any, realized: Any) -> dict[str, Any]:
+    """PR-044 / PR-058: the honesty test at the signed thresholds, in both forms, the verdict
+    in the problem's ``[m9] honesty_verdict_form`` (program PR-027 A7)."""
+    assert cfg.m9 is not None
+    assert gates is not None  # M9Config validator: honesty requires [m9.gates]
+    return signed_error_honesty(
+        preds,
+        realized,
+        no_underdeduct_frac_min=gates.no_underdeduct_frac_min,
+        overdeduct_max_rel=gates.overdeduct_max_rel,
+        verdict_form=cfg.m9.honesty_verdict_form,
+    )
+
+
+def _calibration(cfg: RuxMLConfig) -> CalibrationBias | None:
+    """PR-058 (program PR-027 A7): the accumulator of an ``[m9] calibration_bias`` problem's
+    test record, or ``None``."""
+    if cfg.m9 is None or not cfg.m9.calibration_bias:
+        return None
+    return CalibrationBias(cfg.m9.calibration_bucket_columns)
 
 
 def _fit_and_score(
@@ -355,9 +379,10 @@ def _oos_record_batches(
         out["gates_path"] = gates.path
     if not out["n_rows"]:
         return out
+    calibration = _calibration(cfg)
     preds, realized = predict_fold(
         fit, source, plan, TEST, cfg.features.spec, target_col, categories,
-        **_export_sink(cfg, writer, "test"),
+        **_test_sinks(cfg, writer, calibration),
     )  # fmt: skip
     keep = ~np.isnan(realized)
     out["n_scored"] = int(keep.sum())
@@ -367,14 +392,33 @@ def _oos_record_batches(
             cfg.training.metric, cast("Any", Scored()), preds[keep], realized[keep]
         )
     if cfg.m9 is not None and cfg.m9.signed_error_honesty:
-        assert gates is not None  # M9Config validator: honesty requires [m9.gates]
-        out["honesty"] = signed_error_honesty(
-            preds,
-            realized,
-            no_underdeduct_frac_min=gates.no_underdeduct_frac_min,
-            overdeduct_max_rel=gates.overdeduct_max_rel,
-        )
+        out["honesty"] = _honesty(cfg, gates, preds, realized)
+    if calibration is not None:
+        if not calibration.bucket_columns:  # no bucket: the sink was not needed
+            calibration.add(None, preds, realized)
+        out["calibration"] = calibration.record()
     return out
+
+
+def _test_sinks(
+    cfg: RuxMLConfig, writer: OosExportWriter | None, calibration: CalibrationBias | None
+) -> dict[str, Any]:
+    """``predict_fold``'s ``keys`` / ``sink`` for the test partition: the PR-055 export and
+    the PR-058 calibration buckets, each handed its own columns of the one read, so the
+    export's rows are the same with or without the buckets."""
+    export = _export_sink(cfg, writer, "test")
+    if calibration is None or not calibration.bucket_columns:
+        return export
+    add, cols = calibration.add, calibration.bucket_columns
+    if not export:
+        return {"keys": list(cols), "sink": add}
+    keys, write = list(export["keys"]), export["sink"]
+
+    def sink(frame: pl.DataFrame, pred: Any, y: Any) -> None:
+        write(frame.select(keys), pred, y)
+        add(frame, pred, y)
+
+    return {"keys": list(dict.fromkeys([*keys, *cols])), "sink": sink}
 
 
 def _export_sink(

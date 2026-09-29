@@ -110,6 +110,13 @@ model_kwargs = { objective = "reg:logistic" }  # a fraction in [0, 1] fits as XG
 h_max_ms = 28801000
 # PR-044 (program D45 #3): the fill fraction is scored by Brier alone.
 signed_error_honesty = false
+# PR-058 (program PR-027 A7, :690, operator-approved 2026-09-28): "fill is gated on Brier,
+# with a signed calibration bias per (p, Q, h) bucket reported" — the record carries
+# mean(prediction) - mean(realized) on the test rows, overall and per bucket, never gated.
+# A bucket = one (p_bp, q_usd, h_ms) cell of the order grid as the rows carry it, no
+# binning (program PR-027 P2 grouped the same cells) — LEAN for the program lead.
+calibration_bias = true
+calibration_bucket_columns = ["p_bp", "q_usd", "h_ms"]
 # The other labels of THIS problem's subtree (fill/), summarised per fold beside every
 # run and never trained on (D45 #3: "the others diagnostics"). PR-048: the names are the
 # harness schema's (spec/m9_training_schema.json v2, program PR-024 B-4) — a label of the
