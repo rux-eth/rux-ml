@@ -297,6 +297,10 @@ def test_train_runs_end_to_end_gpu(runner: CliRunner, train_workdir: Path) -> No
 
 # ---------- PR-041: the other labels ride as diagnostics ----------
 
+# PR-054 (program PR-027 A4): an [m9] row-random split is a keyed hash of the row's keys;
+# the synthetic set has no key column, and its two continuous features identify a row.
+_KEYS = 'row_key_columns = ["x1", "x2"]\n'
+
 
 def test_train_records_label_diagnostics_in_fold_meta(
     runner: CliRunner, train_workdir: Path
@@ -307,7 +311,7 @@ def test_train_records_label_diagnostics_in_fold_meta(
     df = df.with_columns((pl.col("x1") * 2.0).alias("y__other"))
     df.write_parquet(src)
     config = train_workdir / "base.toml"
-    config.write_text(config.read_text() + '\n[m9]\ndiagnostic_columns = ["y__other"]\n')
+    config.write_text(config.read_text() + '\n[m9]\ndiagnostic_columns = ["y__other"]\n' + _KEYS)
 
     result = runner.invoke(app, _argv(train_workdir, "train"), catch_exceptions=False)
     assert result.exit_code == 0, result.stderr or result.stdout
@@ -326,7 +330,10 @@ def test_train_records_label_diagnostics_in_fold_meta(
     assert set(diag["train"]) == {"y__other"}
     stats = diag["train"]["y__other"]
     assert set(stats) == {"n", "null_count", "mean", "std", "min", "max"}
-    assert stats["n"] + diag["val"]["y__other"]["n"] == int(200 * 0.85)
+    # PR-054: row-random membership is the keyed hash — sizes are the ratios in expectation
+    rows = entry["split_definition"]["rows"]
+    assert stats["n"] + diag["val"]["y__other"]["n"] == rows["train"] + rows["val"]
+    assert sum(rows.values()) == 200
     assert stats["min"] <= stats["mean"] <= stats["max"]
 
 
@@ -334,7 +341,7 @@ def test_train_refuses_a_diagnostic_column_missing_from_the_set(
     runner: CliRunner, train_workdir: Path
 ) -> None:
     config = train_workdir / "base.toml"
-    config.write_text(config.read_text() + '\n[m9]\ndiagnostic_columns = ["y__absent"]\n')
+    config.write_text(config.read_text() + '\n[m9]\ndiagnostic_columns = ["y__absent"]\n' + _KEYS)
     result = runner.invoke(app, _argv(train_workdir, "train"))
     assert result.exit_code == 2, result.stdout
     assert "y__absent" in (result.stderr or result.stdout)
@@ -386,7 +393,7 @@ def test_row_filter_keeps_null_targets_out_of_the_xgboost_fit(
     df = df.with_columns(pl.when(null_rows).then(None).otherwise(pl.col("y")).alias("y"))
     df.drop("i").write_parquet(src)
     config = train_workdir / "base.toml"
-    config.write_text(config.read_text() + '\n[m9]\nrow_filter_non_null = ["y"]\n')
+    config.write_text(config.read_text() + '\n[m9]\nrow_filter_non_null = ["y"]\n' + _KEYS)
 
     seen: list[np.ndarray] = []
     original_fit = XGBClassifier.fit
@@ -402,8 +409,10 @@ def test_row_filter_keeps_null_targets_out_of_the_xgboost_fit(
     assert result.exit_code == 0, result.stderr or result.stdout
     assert len(seen) == 2  # the fitted target and the eval-set target
     assert not any(np.isnan(y).any() for y in seen)
-    # 160 kept rows: train int(160 * 0.7) = 112, val int(160 * 0.15) = 24
-    assert [y.size for y in seen] == [112, 24]
+    # 160 kept rows; PR-054: the keyed-hash membership sizes the partitions in expectation
+    rows = _fold_meta(train_workdir)["split_definition"]["rows"]
+    assert [y.size for y in seen] == [rows["train"], rows["val"]]
+    assert sum(rows.values()) == 160
 
 
 # ---------- PR-042: the split definition is recorded with every one-off fit ----------

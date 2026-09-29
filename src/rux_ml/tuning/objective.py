@@ -70,6 +70,7 @@ from rux_ml.training import (
     make_trainer,
     select_ingest,
 )
+from rux_ml.training.xgboost.batches import booster_threads_device
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -257,14 +258,16 @@ def _fold_scores(
         fold_score = compute_score(cfg.training.metric, trainer, x_te_pd, y_te.to_numpy())
         fit_seconds = time.perf_counter() - fold_start
         scores.append(fold_score)
-        fold_meta.append(
-            {
-                "fold_idx": fold_idx,
-                "row_count": int(x_tr_t.height),
-                "fit_seconds": float(fit_seconds),
-                "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
-            }
-        )
+        meta: dict[str, Any] = {
+            "fold_idx": fold_idx,
+            "row_count": int(x_tr_t.height),
+            "fit_seconds": float(fit_seconds),
+            "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
+        }
+        get_booster = getattr(trainer, "get_booster", None)
+        if callable(get_booster):  # PR-054 (program PR-027 A11): what the booster ran with
+            meta["booster"] = booster_threads_device(cast("Any", get_booster()))
+        fold_meta.append(meta)
 
         # Feed WilcoxonPruner: report per-fold scores; check if the trial should prune.
         trial.report(fold_score, step=fold_idx)
@@ -280,8 +283,10 @@ def _record_attrs(
     peak_rss_mb: float,
     bag: SeedBag,
     versions: EnvironmentVersions,
+    booster: dict[str, Any] | None = None,
 ) -> None:
-    """Record the per-trial provenance triple including PR-013's seed + version block."""
+    """Record the per-trial provenance triple including PR-013's seed + version block
+    (and, PR-054, the last fold's booster ``nthread`` / ``device``)."""
     TrialAttrs.from_cfg(
         trial_cfg,
         hashes,
@@ -289,6 +294,7 @@ def _record_attrs(
         peak_rss_mb=peak_rss_mb,
         bag=bag,
         versions=versions,
+        booster=booster,
     ).record(trial)
 
 
@@ -355,6 +361,9 @@ def build_objective(base_cfg: RuxMLConfig) -> Callable[[optuna.Trial], float]:
             threshold_gb=trial_cfg.memory.watchdog_threshold_gb,
             sample_hz=trial_cfg.memory.watchdog_sample_hz,
         ) as wd:
+            fold_meta: list[
+                dict[str, Any]
+            ] = []  # PR-054: ``finally`` reads the last fold's booster
             try:
                 scores, fold_meta = _fold_scores(
                     trial_cfg, x_substrate, y_substrate, splitter, groups, trial, bag
@@ -362,7 +371,15 @@ def build_objective(base_cfg: RuxMLConfig) -> Callable[[optuna.Trial], float]:
             except MemoryPressureError:
                 raise optuna.TrialPruned from None
             finally:
-                _record_attrs(trial, trial_cfg, hashes, wd.peak_mb, bag, versions)
+                _record_attrs(
+                    trial,
+                    trial_cfg,
+                    hashes,
+                    wd.peak_mb,
+                    bag,
+                    versions,
+                    booster=fold_meta[-1].get("booster") if fold_meta else None,
+                )
 
         if wd.tripped:
             raise optuna.TrialPruned

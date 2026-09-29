@@ -31,7 +31,21 @@ from rux_ml.cli._shared import get_options, refuse_oracle_source
 from rux_ml.config import RuxMLConfig, XGBoostTraining
 from rux_ml.config.m9_gates import M9Gates, M9GatesError, load_m9_gates
 from rux_ml.data import load_parquet, make_splits, materialize, split_definition
-from rux_ml.data.leakage import LeakageError, assert_regime_clean, leakage_audit
+from rux_ml.data.leakage import (
+    LeakageError,
+    assert_regime_clean,
+    leakage_audit,
+    leakage_audit_counts,
+)
+from rux_ml.data.partitions import (
+    TEST,
+    VAL,
+    PartitionPlan,
+    SourceBatches,
+    diagnostics_by_batches,
+    plan_partitions,
+    split_record,
+)
 from rux_ml.features import cardinalities_from, make_features
 from rux_ml.runs import (
     TrialAttrs,
@@ -50,6 +64,15 @@ from rux_ml.training import (
     select_ingest,
 )
 from rux_ml.training.honesty import signed_error_honesty
+from rux_ml.training.metrics import task_for_metric
+from rux_ml.training.xgboost.batches import (
+    BatchFit,
+    Scored,
+    booster_threads_device,
+    category_levels,
+    fit_batches,
+    predict_fold,
+)
 
 
 def _require(cfg: RuxMLConfig) -> tuple[Path, str]:
@@ -105,6 +128,20 @@ def _label_diagnostics(
     return out
 
 
+def _leakage_window(cfg: RuxMLConfig) -> int | None:
+    window = cfg.m9.h_max_ms if cfg.m9 is not None else None
+    return cfg.data.split_embargo if window is None else window
+
+
+def _leakage_verdict(cfg: RuxMLConfig, audit: dict[str, Any]) -> dict[str, Any]:
+    if cfg.m9 is not None:
+        try:
+            assert_regime_clean(cfg.data.split_kind, audit)
+        except LeakageError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+    return audit
+
+
 def _leakage(cfg: RuxMLConfig, splits: dict[str, pl.DataFrame]) -> dict[str, Any]:
     """PR-045: audit the split (program C9's leakage tests) and, for an ``[m9]`` fit,
     refuse a regime whose separation the audit does not find (exit 2).
@@ -113,21 +150,13 @@ def _leakage(cfg: RuxMLConfig, splits: dict[str, pl.DataFrame]) -> dict[str, Any
     else the split embargo; every fit records the audit, only ``[m9]`` fits enforce it (a
     legacy ``time_ordered`` problem with no embargo promises no stamp separation).
     """
-    window = cfg.m9.h_max_ms if cfg.m9 is not None else None
-    if window is None:
-        window = cfg.data.split_embargo
     audit = leakage_audit(
         splits,
         time_column=cfg.data.time_column,
         group_column=cfg.data.group_column,
-        window=window,
+        window=_leakage_window(cfg),
     )
-    if cfg.m9 is not None:
-        try:
-            assert_regime_clean(cfg.data.split_kind, audit)
-        except LeakageError as exc:
-            raise typer.BadParameter(str(exc)) from exc
-    return audit
+    return _leakage_verdict(cfg, audit)
 
 
 def _m9_gates(cfg: RuxMLConfig) -> M9Gates | None:
@@ -205,13 +234,22 @@ def _fit_and_score(
     the temporal path is deterministic and ignores the seed, so the same
     reproducibility contract holds.
     """
+    if (
+        cfg.m9 is not None
+        and isinstance(cfg.training, XGBoostTraining)
+        and task_for_metric(cfg.training.metric) == "regression"
+    ):
+        # PR-054 (program PR-027 A1): an [m9] XGBoost fit of a regression target (the M9
+        # targets: Brier / MAE) never collects the whole source. An [m9] classification
+        # fit (no M9 problem is one) keeps the in-memory path, on the same partition rule.
+        return _fit_and_score_batches(cfg, source_path, target_col, bag, gates)
     df = materialize(load_parquet(source_path, oracle=cfg.data.oracle))
     splits = make_splits(cfg, df, seed=bag.split_seed)
     fold_extras: dict[str, Any] = {
         "diagnostics": (
             _label_diagnostics(splits, cfg.m9.diagnostic_columns) if cfg.m9 is not None else {}
         ),
-        "split_definition": split_definition(cfg, df, splits),
+        "split_definition": split_definition(cfg, df, splits, seed=bag.split_seed),
         "leakage": _leakage(cfg, splits),
     }
     x_train, y_train = _strip_target(splits["train"], target_col)
@@ -258,6 +296,8 @@ def _fit_and_score(
         score = compute_score(cfg.training.metric, adapter, x_val_t.to_pandas(), y_val.to_numpy())
         fit_seconds = time.perf_counter() - fit_start
         best_iter = adapter.best_iteration
+        if adapter.booster is not None:  # PR-054 (A11)
+            fold_extras["booster"] = booster_threads_device(adapter.booster)
         if cfg.m9 is not None:
             fold_extras["oos"] = _oos_record(
                 cfg, adapter, pipeline, splits["test"], target_col, gates
@@ -282,6 +322,9 @@ def _fit_and_score(
     score = compute_score(cfg.training.metric, trainer, x_val_pd, y_val.to_numpy())
     fit_seconds = time.perf_counter() - fit_start
     best_iter = getattr(trainer, "best_iteration", None)
+    get_booster = getattr(trainer, "get_booster", None)
+    if callable(get_booster):  # PR-054 (program PR-027 A11): XGBoost's sklearn wrapper
+        fold_extras["booster"] = booster_threads_device(cast("Any", get_booster()))
     if cfg.m9 is not None:
         fold_extras["oos"] = _oos_record(cfg, trainer, pipeline, splits["test"], target_col, gates)
     return (
@@ -293,6 +336,113 @@ def _fit_and_score(
     )
 
 
+def _oos_record_batches(
+    cfg: RuxMLConfig,
+    fit: BatchFit,
+    source: SourceBatches,
+    plan: PartitionPlan,
+    target_col: str,
+    categories: dict[str, list[str]],
+    gates: M9Gates | None,
+) -> dict[str, Any]:
+    """:func:`_oos_record` for the per-day batch fit: the test partition predicted batch
+    by batch, then scored exactly as the in-memory record scores it."""
+    out: dict[str, Any] = {"partition": "test", "n_rows": plan.rows(TEST)}
+    if gates is not None:
+        out["gates_sha256"] = gates.sha256
+        out["gates_path"] = gates.path
+    if not out["n_rows"]:
+        return out
+    preds, realized = predict_fold(
+        fit, source, plan, TEST, cfg.features.spec, target_col, categories
+    )
+    keep = ~np.isnan(realized)
+    out["n_scored"] = int(keep.sum())
+    if keep.any():
+        out["metric"] = cfg.training.metric
+        out["score"] = compute_score(
+            cfg.training.metric, cast("Any", Scored()), preds[keep], realized[keep]
+        )
+    if cfg.m9 is not None and cfg.m9.signed_error_honesty:
+        assert gates is not None  # M9Config validator: honesty requires [m9.gates]
+        out["honesty"] = signed_error_honesty(
+            preds,
+            realized,
+            no_underdeduct_frac_min=gates.no_underdeduct_frac_min,
+            overdeduct_max_rel=gates.overdeduct_max_rel,
+        )
+    return out
+
+
+def _fit_and_score_batches(
+    cfg: RuxMLConfig,
+    source_path: Path,
+    target_col: str,
+    bag: SeedBag,
+    gates: M9Gates | None,
+) -> tuple[float, int | None, float, int, dict[str, Any]]:
+    """PR-054 (program PR-027 A1 / A3): an ``[m9]`` XGBoost fit from per-day batches.
+
+    The partition plan (:mod:`rux_ml.data.partitions`) reads the key columns batch by
+    batch; the label diagnostics are summarised by their own pass (A3); the split record
+    and the leakage audit come from the plan's tally; XGBoost's quantised matrices are
+    built from one day file's partition rows at a time
+    (:mod:`rux_ml.training.xgboost.batches`); val and test are predicted batch by batch.
+    No step collects the source, a partition, or the diagnostic columns whole. Returns
+    what :func:`_fit_and_score` returns, with ``booster`` (A11) and ``ingest`` added.
+    """
+    m9 = cfg.m9
+    assert m9 is not None
+    spec = cfg.features.spec
+    seconds: dict[str, float] = {}
+    start = time.perf_counter()
+    source = SourceBatches(source_path, oracle=cfg.data.oracle, row_filter=m9.row_filter_non_null)
+    plan = plan_partitions(cfg, source, seed=bag.split_seed)
+    seconds["plan"] = time.perf_counter() - start
+    start = time.perf_counter()
+    try:
+        diagnostics = diagnostics_by_batches(source, plan, m9.diagnostic_columns)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    seconds["diagnostics"] = time.perf_counter() - start
+    audit = leakage_audit_counts(
+        plan.parts(),
+        time_column=cfg.data.time_column,
+        group_column=cfg.data.group_column,
+        window=_leakage_window(cfg),
+    )
+    fold_extras: dict[str, Any] = {
+        "diagnostics": diagnostics,
+        "split_definition": split_record(cfg, plan, rows_before_filter=source.rows_before_filter()),
+        "leakage": _leakage_verdict(cfg, audit),
+    }
+    start = time.perf_counter()
+    categories = category_levels(source, plan, cfg.features)
+    seconds["categories"] = time.perf_counter() - start
+    typer.echo(
+        f"  ingest path: QuantileDMatrix (native API, per-day batches: {source.n_batches} files)",
+        err=True,
+    )
+    fit_start = time.perf_counter()
+    fit = fit_batches(cfg, source, plan, target_col, seed=bag.xgb_seed, categories=categories)
+    start = time.perf_counter()
+    val_pred, val_y = predict_fold(fit, source, plan, VAL, spec, target_col, categories)
+    score = compute_score(cfg.training.metric, cast("Any", Scored()), val_pred, val_y)
+    seconds["val_predict"] = time.perf_counter() - start
+    fit_seconds = time.perf_counter() - fit_start
+    start = time.perf_counter()
+    fold_extras["oos"] = _oos_record_batches(cfg, fit, source, plan, target_col, categories, gates)
+    seconds["test_predict"] = time.perf_counter() - start
+    fold_extras["booster"] = booster_threads_device(fit.booster)
+    fold_extras["ingest"] = {
+        "path": "native_per_day_batches",
+        "dmatrix": "QuantileDMatrix",
+        "batches": source.n_batches,
+        "seconds": {**seconds, **fit.seconds},
+    }
+    return score, fit.best_iteration, float(fit_seconds), fit.train_rows, fold_extras
+
+
 def _record_attrs(
     cfg: RuxMLConfig,
     hashes: dict[str, str],
@@ -302,6 +452,7 @@ def _record_attrs(
     peak_rss_mb: float,
     best_iteration: int | None,
     trial: optuna.Trial,
+    booster: dict[str, Any] | None = None,
 ) -> None:
     TrialAttrs.from_cfg(
         cfg,
@@ -311,6 +462,7 @@ def _record_attrs(
         bag=bag,
         versions=versions,
         best_iteration=best_iteration,
+        booster=booster,
     ).record(trial)
 
 
@@ -374,6 +526,7 @@ def run_command(ctx: typer.Context) -> None:
             peak_rss_mb=wd.peak_mb,
             best_iteration=best_iter,
             trial=run.trial,
+            booster=fold_extras.get("booster"),  # PR-054 (program PR-027 A11)
         )
         if wd.tripped:
             # Threshold crossed during the fit even though the fit completed —

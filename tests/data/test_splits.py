@@ -211,7 +211,8 @@ def test_make_splits_drops_rows_where_a_filter_column_is_null_or_nan(split_kind:
     embargo = {"split_embargo": 1} if split_kind == "time_ordered" else {}
     cfg = RuxMLConfig(
         data=DataConfig(target_column="y", split_kind=split_kind, time_column="t", **embargo),  # type: ignore[arg-type]
-        m9=M9Config(row_filter_non_null=["y"], h_max_ms=1),
+        # PR-054: an [m9] row-random split is keyed by the row's identity (here ``t``)
+        m9=M9Config(row_filter_non_null=["y"], h_max_ms=1, row_key_columns=["t"]),
     )
     parts = make_splits(cfg, _nullable_target_frame(), seed=7)
     kept = pl.concat(list(parts.values()))

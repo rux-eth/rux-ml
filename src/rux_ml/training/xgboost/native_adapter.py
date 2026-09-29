@@ -243,6 +243,11 @@ class XGBoostNativeAdapter:
         return p
 
     @property
+    def booster(self) -> xgb.Booster | None:
+        """The fitted native booster (``None`` before :meth:`fit`)."""
+        return self._booster
+
+    @property
     def best_iteration(self) -> int | None:
         """Native booster's ``best_iteration`` after early stopping (else ``None``)."""
         if self._booster is None:

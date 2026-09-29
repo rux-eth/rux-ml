@@ -23,31 +23,29 @@ path picks one via ``cfg.data.split_kind``.
 
 from __future__ import annotations
 
-import hashlib
 import math
 from typing import TYPE_CHECKING, cast
 
 import polars as pl
+
+from rux_ml.data.partitions import (
+    FOLDS,
+    FrameBatches,
+    non_null_predicate,
+    plan_partitions,
+    split_record,
+    unit_interval,
+    validate_ratios,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from rux_ml.config import RuxMLConfig
 
-_TOL = 1e-6
-
-
-def _validate_ratios(ratios: Mapping[str, float]) -> None:
-    if set(ratios) != {"train", "val", "test"}:
-        msg = f"split ratios keys must be exactly train/val/test, got {sorted(ratios)}"
-        raise ValueError(msg)
-    if any(v < 0 for v in ratios.values()):
-        msg = f"split ratios must be non-negative, got {dict(ratios)}"
-        raise ValueError(msg)
-    total = sum(ratios.values())
-    if not math.isclose(total, 1.0, abs_tol=_TOL):
-        msg = f"split ratios must sum to 1.0, got {total:.6f} from {dict(ratios)}"
-        raise ValueError(msg)
+# PR-054: shared with the [m9] partition plan (``rux_ml.data.partitions``).
+_validate_ratios = validate_ratios
+_unit_interval = unit_interval
 
 
 def train_val_test_split(
@@ -156,23 +154,7 @@ def filter_non_null(df: pl.DataFrame, columns: list[str]) -> pl.DataFrame:
     A listed column absent from ``df`` raises ``ValueError`` — a predicate on a
     column the set does not carry would otherwise pass every row silently.
     """
-    missing = [c for c in columns if c not in df.columns]
-    if missing:
-        msg = f"m9.row_filter_non_null {missing} not in the training set columns {df.columns}"
-        raise ValueError(msg)
-    keep = [
-        pl.col(c).is_not_null() & pl.col(c).is_not_nan()
-        if df.schema[c].is_float()
-        else pl.col(c).is_not_null()
-        for c in columns
-    ]
-    return df.filter(keep)
-
-
-def _unit_interval(seed: int, group: object) -> float:
-    """The group's fixed point in [0, 1): sha256 of ``"<seed>:<group>"``, first 8 bytes."""
-    digest = hashlib.sha256(f"{seed}:{group}".encode()).digest()
-    return int.from_bytes(digest[:8], "big") / 2**64
+    return df.filter(non_null_predicate(df.schema, columns))
 
 
 def symbol_holdout_split(
@@ -232,9 +214,20 @@ def make_splits(cfg: RuxMLConfig, df: pl.DataFrame, *, seed: int) -> dict[str, p
 
     ``[m9] row_filter_non_null`` (program PR-024 A9) is applied first, so every
     consumer of the split — train, tune, promote, score — sees the same rows.
+
+    PR-054 (program PR-027 A1 / A4): an ``[m9]`` split is the partition rule of
+    :mod:`rux_ml.data.partitions` applied to the whole frame as one batch — the rule
+    the per-day batch fit applies file by file — so every consumer gets the same
+    rows: time-block cuts as stamp predicates (boundary ties to the later partition),
+    row-random by the keyed hash of ``[m9] row_key_columns`` (not a shuffle), the
+    symbol holdout and the train prefix unchanged. Rows keep the frame's order.
     """
     if cfg.m9 is not None and cfg.m9.row_filter_non_null:
         df = filter_non_null(df, cfg.m9.row_filter_non_null)
+    if cfg.m9 is not None:
+        plan = plan_partitions(cfg, FrameBatches([df]), seed=seed)
+        fold = plan.assign(df)
+        return {k: df.filter(pl.Series(fold == i)) for i, k in enumerate(FOLDS)}
     parts = _make_regime_splits(cfg, df, seed=seed)
     frac = cfg.data.train_prefix_frac
     if frac is not None:
@@ -292,14 +285,29 @@ def train_prefix(train: pl.DataFrame, *, time_column: str, frac: float) -> pl.Da
 
 
 def split_definition(
-    cfg: RuxMLConfig, df: pl.DataFrame, splits: Mapping[str, pl.DataFrame]
+    cfg: RuxMLConfig,
+    df: pl.DataFrame,
+    splits: Mapping[str, pl.DataFrame],
+    *,
+    seed: int | None = None,
 ) -> dict[str, object]:
     """The one-off split as a record (PR-042; program C9 "the fold definitions").
 
     ``symbol_holdout``: the group column, the seed and the sorted groups per
     partition. ``time_ordered``: the time column, the embargo and the rows the
     embargo purged. Every kind: the rows per partition.
+
+    PR-054: an ``[m9]`` split is recorded by :func:`rux_ml.data.partitions.split_record`
+    from the partition plan (``seed``, the split seed, keys a row-random plan) — the
+    record the per-day batch fit writes — which adds the membership rule: the stamp
+    cuts, the keyed hash, the prefix's last stamp.
     """
+    if cfg.m9 is not None:
+        rf = cfg.m9.row_filter_non_null
+        plan = plan_partitions(
+            cfg, FrameBatches([filter_non_null(df, rf) if rf else df]), seed=seed
+        )
+        return split_record(cfg, plan, rows_before_filter=df.height)
     rows = {k: splits[k].height for k in ("train", "val", "test")}
     out = _regime_definition(cfg, df, splits, rows)
     if cfg.data.train_prefix_frac is not None:
