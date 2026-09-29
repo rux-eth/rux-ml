@@ -7,6 +7,7 @@ from typing import Annotated
 
 import typer
 
+from rux_ml._internal.env import pin_threads
 from rux_ml.cli._shared import get_options
 from rux_ml.config import RuxMLConfig
 from rux_ml.registry.champion import read_champion
@@ -41,6 +42,9 @@ def promote(
 ) -> None:
     """Promote a trial to a new registry version + atomically rewrite champion.json."""
     cfg = _load_cfg(ctx)
+    # PR-056: pin OMP/BLAS/POLARS env vars before the re-fit, as train / tune / solve do
+    # (PR-011) — unpinned, the re-fit's Polars pool and OpenMP ran at the host's CPU count.
+    pin_threads(cfg.memory)
     try:
         version = do_promote(cfg, problem=problem, study_name=study, trial_number=trial)
     except (FileNotFoundError, KeyError, ValueError) as exc:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -257,3 +258,49 @@ def test_registry_promote_refuses_a_refit_on_other_data_exit_2(
     assert "data_hash" in result.output
     assert "refused" in result.output
     assert not (workdir / "registry" / "churn_v1").exists()
+
+
+_THREAD_ENV = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "POLARS_MAX_THREADS")
+
+
+def test_registry_promote_pins_threads_like_train(
+    runner: CliRunner,
+    registry_workdir: tuple[Path, str, int],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PR-056: ``registry promote`` pins the thread pools from ``[memory]`` before the
+    re-fit, as ``train`` / ``tune`` / ``solve`` do (PR-011's ``pin_threads``). Unpinned,
+    the promote re-fit ran its Polars pool and OpenMP at the host's CPU count."""
+    workdir, study_name, trial_number = registry_workdir
+    for name in _THREAD_ENV:
+        monkeypatch.setenv(name, "7")  # an inherited shell value the pin must overwrite
+    seen: dict[str, object] = {}
+
+    def spy(cfg: RuxMLConfig, *, problem: str, study_name: str, trial_number: int) -> str:
+        seen["env"] = {name: os.environ.get(name) for name in _THREAD_ENV}
+        seen["memory"] = cfg.memory
+        return "v_spy"
+
+    monkeypatch.setattr("rux_ml.cli.registry.do_promote", spy)
+    result = runner.invoke(
+        app,
+        _argv(
+            workdir,
+            "registry",
+            "promote",
+            "--problem",
+            "churn_v1",
+            "--study",
+            study_name,
+            "--trial",
+            str(trial_number),
+        ),
+    )
+    assert result.exit_code == 0, result.stderr or result.stdout
+    memory = seen["memory"]
+    assert seen["env"] == {
+        "OMP_NUM_THREADS": str(memory.omp_threads),  # pyright: ignore[reportAttributeAccessIssue]
+        "OPENBLAS_NUM_THREADS": str(memory.openblas_threads),  # pyright: ignore[reportAttributeAccessIssue]
+        "MKL_NUM_THREADS": str(memory.mkl_threads),  # pyright: ignore[reportAttributeAccessIssue]
+        "POLARS_MAX_THREADS": str(memory.polars_threads),  # pyright: ignore[reportAttributeAccessIssue]
+    }
