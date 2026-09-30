@@ -32,14 +32,19 @@ it directly via ``from rux_ml.registry.promote import promote``.
 from __future__ import annotations
 
 import importlib.metadata as _metadata
+import json
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+
+from optuna.artifacts import download_artifact
 
 from rux_ml._internal.hashing import sha256_canonical
 from rux_ml._internal.seeds import SeedBag, make_seed_bag_from_hex
 from rux_ml.config import RuxMLConfig
 from rux_ml.data import check_feature_labels, load_parquet, make_splits, materialize
 from rux_ml.data.bridge import HarnessManifestError, harness_manifest_ref, harness_view_path
-from rux_ml.data.partitions import TRAIN, SourceBatches, plan_partitions
+from rux_ml.data.partitions import TRAIN, VAL, SourceBatches, plan_partitions
 from rux_ml.features import cardinalities_from, make_features
 from rux_ml.registry.bundle import save_bundle
 from rux_ml.registry.champion import write_champion
@@ -47,13 +52,16 @@ from rux_ml.registry.manifest import (
     HarnessManifestRef,
     LibraryVersions,
     ModelManifest,
+    OosRecord,
     PromotedFrom,
+    RefitRecord,
 )
 from rux_ml.registry.paths import champion_path, format_version_id, version_dir
-from rux_ml.runs import TrialAttrs, load_run
-from rux_ml.runs.provenance import data_hashes
+from rux_ml.runs import TrialAttrs, list_trial_artifacts, load_run, make_artifact_store
+from rux_ml.runs.provenance import data_hashes_and_files
 from rux_ml.training import make_trainer
 from rux_ml.training.xgboost.batches import (
+    booster_threads_device,
     category_levels,
     fit_batches,
     fold_rows,
@@ -61,7 +69,7 @@ from rux_ml.training.xgboost.batches import (
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Sequence
 
     import polars as pl
     import xgboost as xgb
@@ -80,6 +88,24 @@ class PromoteDataHashError(ValueError):
         super().__init__(
             f"promote: the re-fit data_hash {refit} (data.source_path={source}) != the "
             f"data_hash trial {study}#{trial_number} recorded, {recorded} — refused"
+        )
+
+
+class PromoteFileSetError(ValueError):
+    """The batch re-fit's loader would open other files than the data hash covered
+    (PR-059; program PR-028a Q6, PR-040's successor (ii) on the batch path).
+
+    A ``ValueError``, so ``rux-ml registry promote`` exits 2 like every other refusal.
+    """
+
+    def __init__(self, *, source: Path, opened: Sequence[Path], hashed: Sequence[Path]) -> None:
+        only_opened = sorted(str(f) for f in set(opened) - set(hashed))
+        only_hashed = sorted(str(f) for f in set(hashed) - set(opened))
+        order = "" if only_opened or only_hashed else " (the same files in another order)"
+        super().__init__(
+            f"promote: the re-fit's loader opens {only_opened} that the data hash does not "
+            f"cover, and the hash covers {only_hashed} that the loader does not open"
+            f"{order} (data.source_path={source}) — refused"
         )
 
 
@@ -122,8 +148,40 @@ def _apply_trial_params(base_cfg: RuxMLConfig, params: dict[str, Any]) -> RuxMLC
     return RuxMLConfig.model_validate(merged)
 
 
-def _refit(cfg: RuxMLConfig, *, bag: SeedBag) -> tuple[Pipeline, xgb.Booster]:
-    """Final-fit reproduction of the trial's pipeline + booster.
+def _best_and_range(booster: xgb.Booster) -> tuple[int | None, tuple[int, int]]:
+    """The in-memory fit's served range, as ``XGBModel._get_iteration_range`` takes it (the
+    rule PR-054's ``fit_batches`` records for the batch fit)."""
+    try:
+        best = int(booster.best_iteration)
+    except AttributeError:
+        return None, (0, 0)
+    return best, (0, best + 1)
+
+
+def _refit_record(
+    booster: xgb.Booster,
+    *,
+    train_rows: int,
+    val_rows: int,
+    best_iteration: int | None,
+    iteration_range: tuple[int, int],
+) -> RefitRecord:
+    threads = booster_threads_device(booster)
+    return RefitRecord(
+        train_rows=train_rows,
+        val_rows=val_rows,
+        best_iteration=best_iteration,
+        iteration_range=iteration_range,
+        device=str(threads["device"]),
+        nthread=int(threads["nthread"]),
+    )
+
+
+def _refit(
+    cfg: RuxMLConfig, *, bag: SeedBag, hashed_files: Sequence[Path]
+) -> tuple[Pipeline, xgb.Booster, RefitRecord]:
+    """Final-fit reproduction of the trial's pipeline + booster, with how it was fitted
+    (PR-059: the rows, the served iteration range, the device / nthread).
 
     Uses the train fold for fitting and the val fold for XGBoost-internal
     early stopping (matches ``cli/train.py``'s 1-trial fit shape). The test
@@ -140,7 +198,9 @@ def _refit(cfg: RuxMLConfig, *, bag: SeedBag) -> tuple[Pipeline, xgb.Booster]:
 
     PR-055 (program PR-027 R3; the operator's ruling of 2026-09-28): an ``[m9]`` re-fit
     takes the per-day batch path ``rux-ml train`` fitted the trial on (PR-054) —
-    :func:`_refit_batches` — never the whole source in memory.
+    :func:`_refit_batches` — never the whole source in memory. ``hashed_files`` is the
+    list the data hash covered; the batch loader must open exactly it (PR-059, Q6). The
+    in-memory path reads through ``load_parquet``, whose files the bridge certifies.
     """
     if cfg.data.source_path is None or cfg.data.target_column is None:
         msg = "promote requires data.source_path and data.target_column"
@@ -148,7 +208,7 @@ def _refit(cfg: RuxMLConfig, *, bag: SeedBag) -> tuple[Pipeline, xgb.Booster]:
 
     check_feature_labels(cfg)  # PR-043: a label is never a feature
     if uses_batch_fit(cfg):
-        return _refit_batches(cfg, bag=bag)
+        return _refit_batches(cfg, bag=bag, hashed_files=hashed_files)
     df = materialize(load_parquet(cfg.data.source_path, oracle=cfg.data.oracle))
     splits = make_splits(cfg, df, seed=bag.split_seed)
     x_train = splits["train"].drop(cfg.data.target_column)
@@ -173,10 +233,20 @@ def _refit(cfg: RuxMLConfig, *, bag: SeedBag) -> tuple[Pipeline, xgb.Booster]:
         "xgb.Booster",
         trainer.get_booster(),  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
     )
-    return pipeline, booster
+    best, iteration_range = _best_and_range(booster)
+    record = _refit_record(
+        booster,
+        train_rows=splits["train"].height,
+        val_rows=splits["val"].height,
+        best_iteration=best,
+        iteration_range=iteration_range,
+    )
+    return pipeline, booster, record
 
 
-def _refit_batches(cfg: RuxMLConfig, *, bag: SeedBag) -> tuple[Pipeline, xgb.Booster]:
+def _refit_batches(
+    cfg: RuxMLConfig, *, bag: SeedBag, hashed_files: Sequence[Path]
+) -> tuple[Pipeline, xgb.Booster, RefitRecord]:
     """The ``[m9]`` re-fit from per-day batches (PR-055; PR-054's fit).
 
     The same partition rule and seeds as the trial (``plan_partitions`` with the bag's
@@ -197,6 +267,8 @@ def _refit_batches(cfg: RuxMLConfig, *, bag: SeedBag) -> tuple[Pipeline, xgb.Boo
     source = SourceBatches(
         source_path, oracle=cfg.data.oracle, row_filter=cfg.m9.row_filter_non_null
     )
+    if source.files != list(hashed_files):  # PR-059 (Q6): the loader opens the hashed files
+        raise PromoteFileSetError(source=source_path, opened=source.files, hashed=hashed_files)
     plan = plan_partitions(cfg, source, seed=bag.split_seed)
     categories = category_levels(source, plan, cfg.features)
     fit = fit_batches(cfg, source, plan, target, seed=bag.xgb_seed, categories=categories)
@@ -208,7 +280,14 @@ def _refit_batches(cfg: RuxMLConfig, *, bag: SeedBag) -> tuple[Pipeline, xgb.Boo
     cards = cardinalities_from(x_first, cfg.features.spec.categorical_columns)
     pipeline = make_features(cfg.features, cardinalities=cards if cards else None)
     pipeline.fit(x_first, frame[target].to_numpy())  # pyright: ignore[reportUnknownMemberType]
-    return pipeline, fit.booster
+    record = _refit_record(
+        fit.booster,
+        train_rows=fit.train_rows,
+        val_rows=plan.rows(VAL),
+        best_iteration=fit.best_iteration,
+        iteration_range=fit.iteration_range,
+    )
+    return pipeline, fit.booster, record
 
 
 def _library_versions() -> LibraryVersions:
@@ -231,12 +310,13 @@ def _feature_list_hash(cfg: RuxMLConfig) -> str:
 
 def _refit_data_hashes(
     cfg: RuxMLConfig, attrs: TrialAttrs, *, study_name: str, trial_number: int
-) -> dict[str, str]:
-    """The re-fit source's data hashes, refused unless ``data_hash`` equals the trial's."""
+) -> tuple[dict[str, str], list[Path]]:
+    """The re-fit source's data hashes and the files they covered, refused unless
+    ``data_hash`` equals the trial's."""
     if cfg.data.source_path is None:
         msg = "promote requires data.source_path"
         raise ValueError(msg)
-    hashes = data_hashes(cfg.data.source_path, oracle=cfg.data.oracle)
+    hashes, files = data_hashes_and_files(cfg.data.source_path, oracle=cfg.data.oracle)
     if hashes["data_hash"] != attrs.data_hash:
         raise PromoteDataHashError(
             study=study_name,
@@ -245,7 +325,40 @@ def _refit_data_hashes(
             refit=hashes["data_hash"],
             source=cfg.data.source_path,
         )
-    return hashes
+    return hashes, files
+
+
+def trial_oos_record(fold_meta: list[dict[str, Any]]) -> OosRecord | None:
+    """The trial's out-of-sample record from its ``fold_meta.json`` entries (PR-059): the
+    one entry's ``oos``, ``None`` when no entry has one (every fit off the ``[m9]`` path),
+    refused when several do (which one the model is promoted on would be a guess)."""
+    records = [entry["oos"] for entry in fold_meta if "oos" in entry]
+    if not records:
+        return None
+    if len(records) > 1:
+        msg = f"the trial's fold_meta.json has more than one oos record ({len(records)})"
+        raise ValueError(msg)
+    return OosRecord.model_validate(records[0])
+
+
+def _trial_fold_meta(cfg: RuxMLConfig, study_name: str, trial_number: int) -> list[dict[str, Any]]:
+    """The trial's ``fold_meta.json`` artifact (PR-034), or ``[]`` for a trial with none."""
+    storage = cfg.runs.storage_url
+    ids = [
+        m.artifact_id
+        for m in list_trial_artifacts(storage, study_name, trial_number)
+        if m.filename == "fold_meta.json"
+    ]
+    if not ids:
+        return []
+    if len(ids) > 1:
+        msg = f"trial {study_name}#{trial_number} has {len(ids)} fold_meta.json artifacts"
+        raise ValueError(msg)
+    store = make_artifact_store(cfg, study_name=study_name)
+    with tempfile.TemporaryDirectory(prefix="rux_ml_promote_") as tmp:
+        out = Path(tmp) / "fold_meta.json"
+        download_artifact(artifact_store=store, artifact_id=ids[0], file_path=str(out))
+        return cast("list[dict[str, Any]]", json.loads(out.read_text()))
 
 
 def _harness_manifest(cfg: RuxMLConfig, hashes: dict[str, str]) -> HarnessManifestRef | None:
@@ -283,6 +396,8 @@ def _build_manifest(
     attrs: TrialAttrs,
     hashes: dict[str, str],
     harness: HarnessManifestRef | None,
+    refit: RefitRecord,
+    oos: OosRecord | None,
     *,
     problem: str,
     version: str,
@@ -316,6 +431,9 @@ def _build_manifest(
         data_bytes_hash=hashes["data_bytes_hash"],
         data_logical_hash=hashes["data_logical_hash"],
         harness_manifest=harness,
+        refit=refit,
+        oos_export_sha256=attrs.oos_export_sha256,
+        oos=oos,
         library_versions=_library_versions(),
         feature_list_hash=_feature_list_hash(cfg),
         created_at=now_iso(),
@@ -367,15 +485,19 @@ def promote(
     trial_cfg = _apply_trial_params(base_cfg, run.params)
 
     # 3b. PR-050: the re-fit reads the data the trial recorded, or promote refuses.
-    hashes = _refit_data_hashes(trial_cfg, attrs, study_name=study_name, trial_number=trial_number)
+    hashes, hashed_files = _refit_data_hashes(
+        trial_cfg, attrs, study_name=study_name, trial_number=trial_number
+    )
     # 3c. PR-051: the harness set's manifest id, checked against the set, before the re-fit.
     harness = _harness_manifest(trial_cfg, hashes)
+    # 3d. PR-059: the trial's TEST record, read before the re-fit (a refusal costs no fit).
+    oos = trial_oos_record(_trial_fold_meta(trial_cfg, study_name, trial_number))
 
     # 4. Re-fit pipeline + booster — PR-013 reconstructs the original trial's
     # SeedBag from its recorded ``entropy_hex`` so the promoted bundle uses
     # the SAME split + xgb_seed the trial reported metrics for.
     bag = make_seed_bag_from_hex(attrs.entropy_hex)
-    pipeline, booster = _refit(trial_cfg, bag=bag)
+    pipeline, booster, refit = _refit(trial_cfg, bag=bag, hashed_files=hashed_files)
 
     # 5. Compose manifest.
     metric_value = run.value if run.value is not None else 0.0
@@ -385,6 +507,8 @@ def promote(
         attrs,
         hashes,
         harness,
+        refit,
+        oos,
         problem=problem,
         version=version,
         study_name=study_name,

@@ -108,9 +108,12 @@ metric = "mae"
 h_max_ms = 28801000
 # PR-044 (program D45 #3): MAE in bp with the signed-error honesty test on the held-out partition.
 signed_error_honesty = true
-# PR-058: A7 names the clip for the markout only; the walk's verdict keeps PR-044's signed
-# form (both forms are reported).
-honesty_verdict_form = "signed"
+# PR-059 (the operator's ruling of 2026-09-30, program docs/0.3/RESEARCH-m9-walk-underdeduct.md
+# decision 3: "whatever is most honest"): the verdict is computed on the value the cost path
+# deducts. The harness M9 contract refuses a walk <= 0, so the served walk is the prediction
+# lifted to a positive floor (program PR-028b); clipped_at_zero is rux-ml's nearest form.
+# The raw signed verdict is still reported beside it, under oos.honesty.forms.signed.
+honesty_verdict_form = "clipped_at_zero"
 # The other labels of THIS problem's subtree (walk/), summarised per fold beside every
 # run and never trained on (D45 #3: "the others diagnostics"). PR-048: the names are the
 # harness schema's (spec/m9_training_schema.json v2, program PR-024 B-4) — a label of the

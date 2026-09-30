@@ -333,7 +333,7 @@ def test_nullable_features_are_listed_and_fed_to_a_nan_native_family(problem: st
     [
         ("m9_fill_frac", None, ["p_bp", "q_usd", "h_ms"]),
         ("m9_markout_bp", "clipped_at_zero", []),
-        ("m9_walk_bp", "signed", []),
+        ("m9_walk_bp", "clipped_at_zero", []),
     ],
 )
 def test_repo_problems_carry_the_a7_honesty_forms(
@@ -341,7 +341,9 @@ def test_repo_problems_carry_the_a7_honesty_forms(
 ) -> None:
     """Program PR-027 A7 (:690-691, operator-approved 2026-09-28): fill is gated on Brier with
     a signed calibration bias per (p, Q, h) bucket reported; markout is tested as the EV
-    deducts it, max(0, m); the walk keeps PR-044's signed form (A7 names no clip for it)."""
+    deducts it, max(0, m). PR-059 (the operator's ruling of 2026-09-30, program
+    RESEARCH-m9-walk-underdeduct decision 3): the walk's verdict is on the value the cost
+    path deducts, so it takes the clipped form too; the signed form is still reported."""
     cfg = _load(problem)
     assert cfg.m9 is not None
     if form is None:

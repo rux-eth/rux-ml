@@ -24,7 +24,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from rux_ml.data import compute_data_hash
+from rux_ml.data.versioning import compute_data_hash_and_files
 
 if TYPE_CHECKING:
     from rux_ml.config import RuxMLConfig
@@ -82,9 +82,18 @@ def data_hashes(source_path: Path, *, oracle: OracleQuarantineConfig | None) -> 
         derivation) so promoted runs can cross-reference snapshots by the same
         identifier (per ``docs/ARCHITECTURE.md`` "Reproducibility Architecture").
     """
-    composite = compute_data_hash(source_path, oracle=oracle)
-    return {
+    return data_hashes_and_files(source_path, oracle=oracle)[0]
+
+
+def data_hashes_and_files(
+    source_path: Path, *, oracle: OracleQuarantineConfig | None
+) -> tuple[dict[str, str], list[Path]]:
+    """:func:`data_hashes` plus the file list the hash covered (PR-059; program PR-028a Q6):
+    promote's batch re-fit refuses a loader whose files are not this list."""
+    composite, files = compute_data_hash_and_files(source_path, oracle=oracle)
+    hashes = {
         "data_bytes_hash": composite["bytes_hash"],
         "data_logical_hash": composite["logical_hash"],
         "data_hash": f"{composite['bytes_hash']}|{composite['logical_hash']}",
     }
+    return hashes, files
