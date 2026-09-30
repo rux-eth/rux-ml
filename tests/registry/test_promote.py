@@ -401,3 +401,35 @@ def test_registry_inference_deps_separation() -> None:
         f"stdout:\n{result.stdout}"
     )
     assert "OK" in result.stdout
+
+
+def test_promote_records_the_in_memory_refit(
+    synth_workdir: tuple[Path, RuxMLConfig],
+    seed_bag: SeedBag,
+    env_versions: EnvironmentVersions,
+) -> None:
+    """PR-059 on the in-memory path: the re-fit's rows are its own split's, the served range
+    is the loaded booster's best iteration + 1 (or every tree), the device is the fit's; a
+    trial with no fold_meta.json ``oos`` record promotes with ``oos`` / its sha256 None."""
+    from rux_ml.data import load_parquet, make_splits, materialize  # noqa: PLC0415
+    from rux_ml.registry.bundle import load_bundle  # noqa: PLC0415
+
+    _tmp_path, cfg = synth_workdir
+    assert cfg.data.source_path is not None
+    study_name, trial_number = _populate_trial(cfg, seed_bag, env_versions)
+    version = promote(cfg, problem="churn_v1", study_name=study_name, trial_number=trial_number)
+    _, booster, manifest = load_bundle(version_dir(cfg.registry.root, "churn_v1", version))
+
+    splits = make_splits(
+        cfg, materialize(load_parquet(cfg.data.source_path, oracle=cfg.data.oracle)),
+        seed=seed_bag.split_seed,
+    )  # fmt: skip
+    refit = manifest.refit
+    assert refit is not None
+    assert (refit.train_rows, refit.val_rows) == (splits["train"].height, splits["val"].height)
+    best = booster.attr("best_iteration")
+    want = (0, 0) if best is None else (0, int(best) + 1)
+    assert refit.iteration_range == want
+    assert refit.best_iteration == (None if best is None else int(best))
+    assert refit.device == "cpu"
+    assert manifest.oos is None and manifest.oos_export_sha256 is None

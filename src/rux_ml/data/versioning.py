@@ -155,16 +155,26 @@ def compute_data_hash(path: Path, *, oracle: OracleQuarantineConfig | None) -> d
     Runs the oracle quarantine (PR-040) first; it only raises, so hash inputs
     are unchanged for any source it lets through.
     """
+    return compute_data_hash_and_files(path, oracle=oracle)[0]
+
+
+def compute_data_hash_and_files(
+    path: Path, *, oracle: OracleQuarantineConfig | None
+) -> tuple[dict[str, Any], list[Path]]:
+    """:func:`compute_data_hash` plus the file list the hash covered, in hash order (PR-059;
+    program PR-028a Q6): the list a reader compares its own against, never a second
+    enumeration of the source."""
     check_oracle_quarantine(path, oracle)
     files = iter_parquet_files(path)
     bytes_h = _bytes_hash(files)
     logical_h, row_count, schema_map = _logical_hash(files)
-    return {
+    composite = {
         "bytes_hash": bytes_h,
         "logical_hash": logical_h,
         "row_count": row_count,
         "schema": schema_map,
     }
+    return composite, list(files)
 
 
 # ---------- CAS + manifest ----------

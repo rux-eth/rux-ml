@@ -28,6 +28,7 @@ from rux_ml.features import cardinalities_from, make_features
 from rux_ml.registry import promote as promote_module
 from rux_ml.registry.bundle import load_bundle
 from rux_ml.registry.paths import version_dir
+from rux_ml.runs.provenance import data_hashes_and_files
 from rux_ml.training import make_trainer
 from tests.cli.conftest import m9_argv
 from tests.cli.test_m9_batches import STUDIES, TARGET, _cfg  # pyright: ignore[reportPrivateUsage]
@@ -92,7 +93,8 @@ def test_the_batch_refit_predicts_bit_identically_to_the_in_memory_refit(
     want = _bundle_predictions(want_pipeline, want_booster, frame)
 
     monkeypatch.setattr(promote_module, "materialize", _refuse)
-    got_pipeline, got_booster = promote_module._refit(cfg, bag=bag)  # pyright: ignore[reportPrivateUsage]
+    _, hashed = data_hashes_and_files(cfg.data.source_path, oracle=cfg.data.oracle)  # PR-059: Q6
+    got_pipeline, got_booster, _ = promote_module._refit(cfg, bag=bag, hashed_files=hashed)  # pyright: ignore[reportPrivateUsage]
 
     assert _bundle_predictions(got_pipeline, got_booster, frame) == want
     assert got_booster.best_iteration == want_booster.best_iteration
