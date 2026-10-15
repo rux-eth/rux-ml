@@ -109,6 +109,25 @@ class PromoteFileSetError(ValueError):
         )
 
 
+class PromoteValLessError(ValueError):
+    """PR-060: a val-less trial (``data.split_ratios.val = 0``) has no promote re-fit yet.
+
+    The in-memory re-fit fits against val (``eval_set``); a val-less trial was fitted with no
+    val partition and no early stopping, so re-fitting it here would fail inside XGBoost
+    rather than reproduce the trial. The val-less re-fit is a rux-ml follow-up (program
+    PR-084 opens it only if a cell passes). A ``ValueError``, so ``rux-ml registry promote``
+    exits 2 like every other refusal.
+    """
+
+    def __init__(self) -> None:
+        msg = (
+            "promote refuses a val-less trial (data.split_ratios.val = 0, PR-060): the "
+            "in-memory re-fit fits against a val partition the trial does not have; the "
+            "val-less re-fit is not built"
+        )
+        super().__init__(msg)
+
+
 def _unflatten(flat: dict[str, Any]) -> dict[str, Any]:
     """Convert ``{'a.b': 1}`` to ``{'a': {'b': 1}}``."""
     nested: dict[str, Any] = {}
@@ -209,6 +228,8 @@ def _refit(
     check_feature_labels(cfg)  # PR-043: a label is never a feature
     if uses_batch_fit(cfg):
         return _refit_batches(cfg, bag=bag, hashed_files=hashed_files)
+    if cfg.data.split_ratios.get("val") == 0:  # PR-060: before any read
+        raise PromoteValLessError
     df = materialize(load_parquet(cfg.data.source_path, oracle=cfg.data.oracle))
     splits = make_splits(cfg, df, seed=bag.split_seed)
     x_train = splits["train"].drop(cfg.data.target_column)
