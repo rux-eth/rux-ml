@@ -112,14 +112,15 @@ def _logical_hash(files: list[Path]) -> tuple[str, int, dict[str, str]]:
         at += rows
         del part
     row_h.sort()
-    digest = hashlib.sha256(memoryview(row_h).cast("B")).hexdigest()
+    digest = hashlib.sha256(memoryview(row_h.astype("<u8", copy=False)).cast("B")).hexdigest()
     row_count = len(row_h)
     del row_h
     return digest, row_count, schema_map
 
 
 def _logical_hash_whole_source(files: list[Path]) -> tuple[str, int, dict[str, str]]:  # pyright: ignore[reportUnusedFunction]  -- the reference: tests + scripts only
-    """The pre-PR-053 ``_logical_hash``, kept verbatim as the reference. Not on any runtime path.
+    """The pre-PR-053 ``_logical_hash``, kept as the reference: verbatim except for PR-061's
+    explicit little-endian cast of the hashed u64s. Not on any runtime path.
 
     Only the equality tests and ``scripts/check_logical_hash_per_file.py`` call it. That script is
     the real-set check of program PR-027 A2. This path loads the whole source into one scan and
@@ -141,7 +142,7 @@ def _logical_hash_whole_source(files: list[Path]) -> tuple[str, int, dict[str, s
         lf.select(pl.struct(cols).hash(seed=0).alias("_h")).sort("_h").collect(engine="streaming")
     )
     arr = row_h["_h"].to_numpy()
-    digest = hashlib.sha256(arr.tobytes()).hexdigest()
+    digest = hashlib.sha256(arr.astype("<u8", copy=False).tobytes()).hexdigest()
     row_count = int(row_h.height)
     return digest, row_count, schema_map
 
