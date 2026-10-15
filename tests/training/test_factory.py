@@ -155,3 +155,40 @@ def test_brier_early_stops_on_xgboost_rmse() -> None:
     cfg = XGBoostTraining(metric="brier")
     assert _xgb_kwargs(cfg, seed=None)["eval_metric"] == "rmse"
     assert isinstance(make_trainer(cfg), XGBRegressor)
+
+
+def test_early_stopping_rounds_zero_is_off_at_the_installed_xgboost() -> None:
+    """PR-060 (program PR-082 lean 3): ``early_stopping_rounds = 0`` through rux-ml's own
+    factory boosts every round although an ``eval_set`` is given — the probe cells' "no
+    validation-driven early stopping" rests on it. Behaviour, not a version string: the
+    floor ``xgboost>=3.1`` admits versions this gate was not read on. The control (2)
+    proves the data does stop a fit early, so the check is not vacuous."""
+    import xgboost  # noqa: PLC0415
+
+    rng = np.random.default_rng(0)
+    x, x_val = rng.normal(size=(200, 5)), rng.normal(size=(200, 5))
+    y, y_val = (rng.random(200) > 0.5).astype(int), (rng.random(200) > 0.5).astype(int)
+    n_estimators = 40
+
+    def fit(rounds: int) -> XGBClassifier:
+        cfg = XGBoostTraining(
+            device="cpu",
+            metric="logloss",
+            n_estimators=n_estimators,
+            max_depth=6,
+            learning_rate=0.5,
+            early_stopping_rounds=rounds,
+        )
+        trainer = cast("XGBClassifier", make_trainer(cfg, seed=0))
+        trainer.fit(x, y, eval_set=[(x_val, y_val)], verbose=False)
+        return trainer
+
+    where = f"xgboost {xgboost.__version__}"
+    control = fit(2)  # noise labels: the val loss rises, so 2 stops the fit early
+    assert control.get_booster().num_boosted_rounds() < n_estimators, where
+    off = fit(0)
+    assert off.get_booster().num_boosted_rounds() == n_estimators, where
+    assert getattr(off, "best_iteration", None) is None, where
+    np.testing.assert_array_equal(
+        off.predict_proba(x_val), off.predict_proba(x_val, iteration_range=(0, n_estimators))
+    )
