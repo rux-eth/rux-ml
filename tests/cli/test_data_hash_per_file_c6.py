@@ -1,11 +1,21 @@
 """PR-053 on the harness-shaped set: the per-file logical hash equals the whole-source digest on
-``c6_set``'s ``fill/`` and ``walk/`` subtrees, through the paths ``train`` (``data_hashes``) and the
-bridge (``training_set_sidecar``, the value promote and ``data bridge`` compare) take."""
+c6's ``fill/`` and ``walk/`` subtrees, through the paths ``train`` (``data_hashes``) and the
+bridge (``training_set_sidecar``, the value promote and ``data bridge`` compare) take.
+
+PR-061: the pins read committed bytes, ``tests/fixtures/c6_pin/{fill,walk}/``, not the generated
+``c6_set``. ``_c6_day``'s gamma- and beta-fed columns differ at ULP level between machines: numpy's
+arm64 wheel fuses ``random_standard_gamma``'s ``1 + c*X`` into one FMA and the x86_64 wheel does
+not. The same bytes hash the same on both. The six files were drawn by ``_c6_day`` with the
+``c6_set`` loop (``default_rng(0)``) on a Mac (numpy 2.4.5 arm64, Polars 1.40.1). They are a
+record, not something to regenerate: only an FMA-contracting numpy build reproduces them.
+"""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import hashlib
+from pathlib import Path
 
+import numpy as np
 import polars as pl
 import pytest
 
@@ -15,10 +25,22 @@ from rux_ml.data.loaders import iter_parquet_files
 from rux_ml.runs import data_hashes
 from tests.conftest import repo_oracle_cfg
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
+C6_PIN = Path(__file__).resolve().parents[1] / "fixtures" / "c6_pin"
 PINNED_POLARS = "1.40.1"
+# Each committed file's sha256, checked under any Polars version (program PR-061 Phase 3,
+# pr061-p3/mac-hash.json): a change to the bytes fails here, before any digest is read.
+PINNED_FILES = {
+    "fill": {
+        "2026-02-16.parquet": "4a9f5b21d46eff2fb2111cfa08a7dae81cfe2af954f1a0cd888d521b7c6f04d3",
+        "2026-02-17.parquet": "0d0fcbc79af6315b89f65a9fed9246f031a2a41f5dc678e40f221055aa1b8005",
+        "2026-02-18.parquet": "c49c9b30a357e15c029cf6ce9e638cd60c8b3ef9d9930514a518552a4eb7765f",
+    },
+    "walk": {
+        "2026-02-16.parquet": "4cfddc6b59dce6d3955c361e1065969868f0ac652e5314caa7659d84a9bd94aa",
+        "2026-02-17.parquet": "3c0d2e3a23b59ba81493d09d17fc155c3955b3d42f43b3721501cebede104da9",
+        "2026-02-18.parquet": "48bc780cb309f6cf8ec6f8fb310297271aa23e0f75325fd2a715bfdc0024daf6",
+    },
+}
 # Computed by the pre-PR-053 code on dev @ 9e3f0c3 under Polars 1.40.1.
 PINNED_C6 = {
     "fill": "185d2b9cf3685f3544885bc30987fc67cddc137763bf06d61ebe472aced2d4d8",
@@ -27,8 +49,19 @@ PINNED_C6 = {
 
 
 @pytest.mark.parametrize("subtree", ["fill", "walk"])
-def test_the_c6_subtree_digest_is_unchanged_on_every_path(c6_set: Path, subtree: str) -> None:
-    source = c6_set / subtree
+def test_the_committed_c6_bytes_are_the_pinned_files(subtree: str) -> None:
+    source = C6_PIN / subtree
+    assert source.is_dir(), f"the committed c6 fixture is missing: {source}"
+    found = {
+        f.relative_to(source).as_posix(): hashlib.sha256(f.read_bytes()).hexdigest()
+        for f in iter_parquet_files(source)
+    }
+    assert found == PINNED_FILES[subtree]
+
+
+@pytest.mark.parametrize("subtree", ["fill", "walk"])
+def test_the_c6_subtree_digest_is_unchanged_on_every_path(subtree: str) -> None:
+    source = C6_PIN / subtree
     reference = versioning._logical_hash_whole_source(iter_parquet_files(source))
     assert versioning._logical_hash(iter_parquet_files(source)) == reference
     assert data_hashes(source, oracle=repo_oracle_cfg())["data_logical_hash"] == reference[0]
@@ -37,3 +70,24 @@ def test_the_c6_subtree_digest_is_unchanged_on_every_path(c6_set: Path, subtree:
     )
     if pl.__version__ == PINNED_POLARS:
         assert reference[0] == PINNED_C6[subtree]
+
+
+def test_the_whole_source_digest_hashes_little_endian_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PR-061: the reference digest hashes the sorted row hashes as little-endian u64 bytes on any
+    host. ``Series.to_numpy`` is made to hand back big-endian u64s with the same values, as on a
+    big-endian host; neither digest may move. The per-file path assigns into its own native array
+    by value, so it never saw the byte order; the whole-source path hashed the array's own bytes."""
+    files = iter_parquet_files(C6_PIN / "fill")
+    whole = versioning._logical_hash_whole_source(files)
+    per_file = versioning._logical_hash(files)
+    native = pl.Series.to_numpy
+
+    def big_endian(self: pl.Series, *args: object, **kwargs: object) -> np.ndarray:
+        out = native(self, *args, **kwargs)  # pyright: ignore[reportArgumentType]
+        return out.astype(">u8") if out.dtype == np.uint64 else out
+
+    monkeypatch.setattr(pl.Series, "to_numpy", big_endian)
+    assert versioning._logical_hash(files) == per_file
+    assert versioning._logical_hash_whole_source(files) == whole
