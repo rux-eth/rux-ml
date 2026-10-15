@@ -209,7 +209,7 @@ The OOS export section of `docs/ARCHITECTURE.md`, extended from the batch path t
   - `uv run --frozen --all-extras pytest -n 8` is **diffed against `dev`**, not reported as a bare count (the 2 c6 failures are pre-existing unless the digests PR landed first);
   - `gpu`-marked tests run for `device = cuda`.
 - [x] Docs in the same commit: CHANGELOG, the `oos_export.py` docstring, ARCHITECTURE, and the RESEARCH-BACKLOG row.
-- [ ] The program lead's merge to `dev`, before the v0.5 freeze tag.
+- [x] The program lead's merge to `dev`, before the v0.5 freeze tag — on the program operator's word ("merge pr-060", 2026-10-15 ≈ 16:35 CDT), via the GitHub PR into `dev`; before PR-061.
 
 ## Research backing
 
