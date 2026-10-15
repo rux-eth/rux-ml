@@ -1,6 +1,8 @@
 """The out-of-sample row export of an ``[m9]`` fit (PR-055; program PR-027 A8 / Q7).
 
-Every ``rux-ml train`` of an M9 problem (the per-day batch fit, PR-054) writes
+Every ``rux-ml train`` of an ``[m9]`` problem writes — on the per-day batch fit (PR-054, every
+M9 problem: a regression) and, since PR-060, on the in-memory fit (an ``[m9]`` classifier,
+e.g. the program's v0.5 probe cells) —
 ``oos_rows.parquet`` beside the trial's record — uploaded as an artifact of the trial into
 the study's artifact store, where ``metrics.json`` and ``fold_meta.json`` live — and records
 its sha256 in the trial record (``fold_meta.json`` ``oos_export`` and the trial user
@@ -9,18 +11,25 @@ consumes: the harness fits PR-026's floor on the model's **train** partition onl
 scores it on the **same** test rows the model was scored on.
 
 **Schema (version 1)** — one row per val / test row of the fit, val first, each partition in
-the batches' order (day files by name, then file order; the order carries no meaning):
+the batches' order (day files by name, then file order) on the batch fit and in the loaded
+frame's order on the in-memory fit (the order carries no meaning: join by key). A val-less
+fit (PR-060, ``data.split_ratios.val = 0``) exports test rows only:
 
 - ``partition`` (String): ``"val"`` or ``"test"``.
 - the ``[m9] row_key_columns``, in their configured order, with the source's dtypes (a
   Categorical / Enum key is written as String).
-- ``prediction`` (Float32): what the fit scored — ``XGBModel.predict``'s value up to the
-  best iteration (PR-054's ``predict_fold``).
+- ``prediction`` (Float32): what the fit scored. A regression: ``predict``'s value up to
+  the best iteration (PR-054's ``predict_fold``; an in-memory regression's ``predict()``).
+  PR-060, a binary classifier: P(class 1) = ``predict_proba[:, 1]`` — the probabilities its
+  logloss / AUC scored — and the file's metadata names it (``prediction``, below). Float32
+  may round a probability to exactly 0.0 or 1.0; the export does not clip.
 - ``realized`` (Float64): the target column cast to float64, null → NaN (NaN rows are
   outside the test score, as in ``fold_meta.json`` ``oos``).
 
 The file's key-value metadata ``rux_ml.oos_export`` repeats the schema version, the key and
-target columns and the fit's ``split_definition``, so the file is self-describing.
+target columns and the fit's ``split_definition``, so the file is self-describing. PR-060: a
+probability export adds ``prediction = "predict_proba[:, 1]"`` there (and in its record); a
+regression export's metadata — and so its bytes — are schema v1's, unchanged.
 
 **The train mask (the harness's rule).** A row of the same view is in the fit's train
 partition iff (1) it passes ``split_definition.row_filter_non_null`` (every listed column
@@ -56,6 +65,8 @@ OOS_EXPORT_METADATA_KEY = "rux_ml.oos_export"
 PARTITION_COLUMN = "partition"
 PREDICTION_COLUMN = "prediction"
 REALIZED_COLUMN = "realized"
+# PR-060: the ``prediction`` metadata value of a binary classifier's export — P(class 1).
+PROBABILITY_PREDICTION = "predict_proba[:, 1]"
 PARTITIONS: tuple[str, str] = ("val", "test")
 _HASH_CHUNK_BYTES = 1 << 20
 
@@ -79,6 +90,7 @@ class OosExportWriter:
         key_columns: Sequence[str],
         target_column: str,
         split_definition: Mapping[str, Any],
+        prediction: str | None = None,
     ) -> None:
         keys = list(key_columns)
         if not keys:
@@ -95,18 +107,20 @@ class OosExportWriter:
         self.key_columns = keys
         self.target_column = target_column
         self.columns = [PARTITION_COLUMN, *keys, PREDICTION_COLUMN, REALIZED_COLUMN]
-        self._metadata = json.dumps(
-            {
-                "schema_version": OOS_EXPORT_SCHEMA_VERSION,
-                "columns": self.columns,
-                "key_columns": keys,
-                "target_column": target_column,
-                "partitions": list(PARTITIONS),
-                "split_definition": dict(split_definition),
-            },
-            sort_keys=True,
-            default=str,
-        )
+        # PR-060: what ``prediction`` holds, for a probability export only (None keeps a
+        # regression export's metadata — and bytes — schema v1's).
+        self.prediction = prediction
+        metadata: dict[str, Any] = {
+            "schema_version": OOS_EXPORT_SCHEMA_VERSION,
+            "columns": self.columns,
+            "key_columns": keys,
+            "target_column": target_column,
+            "partitions": list(PARTITIONS),
+            "split_definition": dict(split_definition),
+        }
+        if prediction is not None:
+            metadata["prediction"] = prediction
+        self._metadata = json.dumps(metadata, sort_keys=True, default=str)
         self.rows: dict[str, int] = dict.fromkeys(PARTITIONS, 0)
         self._writer: pq.ParquetWriter | None = None
         self._schema: pa.Schema | None = None
@@ -160,7 +174,7 @@ class OosExportWriter:
             msg = "the out-of-sample export has no rows: the fit had no val or test rows"
             raise ValueError(msg)
         self._writer.close()
-        return {
+        record: dict[str, Any] = {
             "filename": self.path.name,
             "schema_version": OOS_EXPORT_SCHEMA_VERSION,
             "sha256": file_sha256(self.path),
@@ -170,3 +184,6 @@ class OosExportWriter:
             "key_columns": self.key_columns,
             "target_column": self.target_column,
         }
+        if self.prediction is not None:  # PR-060: a probability export
+            record["prediction"] = self.prediction
+        return record

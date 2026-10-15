@@ -189,26 +189,26 @@ The OOS export section of `docs/ARCHITECTURE.md`, extended from the batch path t
 
 ## Verification criteria
 
-- [ ] The new tests fail on `09b9bd5`'s `src` and pass after.
-- [ ] **Export, end to end.** `rux-ml train` on a made-up classification `[m9]` table (CPU, no real data) writes `oos_rows.parquet` with `partition`, the row keys, `prediction` Float32 = `predict_proba[:, 1]` in [0, 1] and `realized` Float64 (NaN kept). Its sha256 is in fold_meta `oos_export` and in trial attr `oos_export_sha256`, and the file is uploaded. The exported p̂ equals the probabilities the logloss scored.
-- [ ] **Val-less, end to end.** With `split_ratios.val = 0.00` and `early_stopping_rounds = 0`, the trial completes. A spy on `fit` sees no `eval_set`. The told value, `metrics.json` and stdout all equal fold_meta `oos.score`. The marker is present. The train mask `stamp + embargo < val_first_stamp` (= `test_first_stamp`) marks train exactly.
-- [ ] **Named refusals, each before the fit:**
+- [x] The new tests fail on `09b9bd5`'s `src` and pass after.
+- [x] **Export, end to end.** `rux-ml train` on a made-up classification `[m9]` table (CPU, no real data) writes `oos_rows.parquet` with `partition`, the row keys, `prediction` Float32 = `predict_proba[:, 1]` in [0, 1] and `realized` Float64 (NaN kept). Its sha256 is in fold_meta `oos_export` and in trial attr `oos_export_sha256`, and the file is uploaded. The exported p̂ equals the probabilities the logloss scored.
+- [x] **Val-less, end to end.** With `split_ratios.val = 0.00` and `early_stopping_rounds = 0`, the trial completes. A spy on `fit` sees no `eval_set`. The told value, `metrics.json` and stdout all equal fold_meta `oos.score`. The marker is present. The train mask `stamp + embargo < val_first_stamp` (= `test_first_stamp`) marks train exactly.
+- [x] **Named refusals, each before the fit:**
   - val = 0 with `early_stopping_rounds ∉ {None, 0}`;
   - val = 0 without `[m9]`;
   - an `[m9]` in-memory fit with no `row_key_columns` (decision 2);
   - a more-than-two-class classifier (decision 4);
   - `n_scored = 0` in val-less mode;
   - promote on a val-less trial (decision 6 as ruled).
-- [ ] **Val > 0 unchanged.** `test_train_subcommand.py:396-414` still sees fit + `eval_set`. `predict_proba` is identical with and without `export_dir` (the C2 pin).
-- [ ] **Non-`[m9]` unchanged.** `tests/golden/test_xgb_baseline.py` passes, and `_fit_and_score` still returns the 5-tuple.
-- [ ] **M9 byte-for-byte.** A regression `[m9]` export's bytes / sha256 and every M9 config's `root_cfg_hash` are pinned unchanged. `test_m9_batches`' bit-identity test passes with its assertions unchanged.
-- [ ] **The pinning test** (decision 8) passes in the default CPU suite, with its non-vacuity control.
-- [ ] **Mac:** `uv run pytest`, `ruff check --no-cache .`, `ruff format --check src tests` and `basedpyright src/` are clean (synced `--all-extras`).
+- [x] **Val > 0 unchanged.** `test_train_subcommand.py:396-414` still sees fit + `eval_set`. `predict_proba` is identical with and without `export_dir` (the C2 pin).
+- [x] **Non-`[m9]` unchanged.** `tests/golden/test_xgb_baseline.py` passes, and `_fit_and_score` still returns the 5-tuple.
+- [x] **M9 byte-for-byte.** A regression `[m9]` export's bytes / sha256 and every M9 config's `root_cfg_hash` are pinned unchanged. `test_m9_batches`' bit-identity test passes with its assertions unchanged.
+- [x] **The pinning test** (decision 8) passes in the default CPU suite, with its non-vacuity control.
+- [x] **Mac:** `uv run pytest`, `ruff check --no-cache .`, `ruff format --check src tests` and `basedpyright src/` are clean (synced `--all-extras`).
 - [ ] **Desktop:**
   - `uv run --frozen python -c 'import xgboost'` reports 3.2.0 (= `uv.lock:1926`);
   - `uv run --frozen --all-extras pytest -n 8` is **diffed against `dev`**, not reported as a bare count (the 2 c6 failures are pre-existing unless the digests PR landed first);
   - `gpu`-marked tests run for `device = cuda`.
-- [ ] Docs in the same commit: CHANGELOG, the `oos_export.py` docstring, ARCHITECTURE, and the RESEARCH-BACKLOG row.
+- [x] Docs in the same commit: CHANGELOG, the `oos_export.py` docstring, ARCHITECTURE, and the RESEARCH-BACKLOG row.
 - [ ] The program lead's merge to `dev`, before the v0.5 freeze tag.
 
 ## Research backing
@@ -228,3 +228,15 @@ The OOS export section of `docs/ARCHITECTURE.md`, extended from the batch path t
 - **promote and GPU.** With early stopping off, `eval_set` should not change the trees, so a promote without `eval_set` would reproduce the trial's booster on CPU. This is library knowledge, not executed. GPU hist is near-deterministic only.
 - **Float32 at the edges.** P(class 1) can round to exactly 0.0 or 1.0. Whether any row does is not measured. The clip rule is the page's (program lean 10).
 - **Pre-existing, not this PR's:** the 2 c6 digest failures on the desktop. rux-ml `CLAUDE.md` still points at `docs/0.1`.
+
+### Build (2026-10-15)
+
+Built on branch `pr-060-inmemory-export` off `dev` @ `09b9bd5`, tests first (the tests commit precedes the code commit).
+
+- **Tests added.** `tests/cli/test_m9_inmemory_export.py` (11: the export end to end against an independent re-fit; the C2 pin — the val > 0 fit, val score, `best_iteration` and test record equal with and without `export_dir`, one `eval_set`; the val-less mode end to end on the sklearn and the native branch, incl. the harness train mask; five named refusals before the fit; promote's `PromoteValLessError` before any read; decision 4's regression branch — an in-memory `[m9]` CatBoost regression exports `predict()` under schema v1's metadata). All 11 fail on `09b9bd5`'s `src`. `tests/cli/test_m9_regression_route_pins.py` (14: the twelve M9 problem × regime configs stay on the batch path at their `09b9bd5` `root_cfg_hash`; a regression export written byte-for-byte as an independent schema v1 write; a batch fit's export metadata = schema v1's keys, no `told_partition`). `tests/training/test_factory.py::test_early_stopping_rounds_zero_is_off_at_the_installed_xgboost` (the control at 2 fires). These 15 pins pass on `09b9bd5` and after.
+- **Byte-for-byte, measured (Mac).** The batch export of each M9 problem under each regime (3 × 3, the synthetic c6 set, `tuning.entropy = 42`) has the same sha256 and test score at `09b9bd5`'s `src` and at this PR's. Without a fixed entropy the row-random exports differ run to run on either tree (the split seed derives from fresh entropy); that is not this PR.
+- **Resolved from the State Assessment.** (a) At `09b9bd5` a val = 0 in-memory fit raised first in the feature pipeline's `transform` of the empty val partition (scikit-learn: "Found array with 0 sample(s)"), not in `XGBClassifier.fit`; the val-less mode does not transform val. (b) Decision 3's open point: the val = 0 refusals (no `[m9]`; early stopping on) run in `run_command` after config load, before the trial row exists, and again at the top of the in-memory path; the class-count, the empty-test-target and the keyless refusals run at the top of the fit (after the trial row, before the fit), as the batch path's keyless refusal does. (c) Decision 7: the native branch takes the val-less mode through the shared helper (`_m9_record` + `eval_set=None`), not refused. (d) Decision 5(b)'s key: `prediction = "predict_proba[:, 1]"`.
+- **Test-side changes after the tests commit (both in the code commit).** (1) The two config-time refusal cases asserted "no study in storage" through Optuna, which raises on a database that was never created; they now assert the database file does not exist — the stronger statement. (2) The regression-branch test was added (it fails on `09b9bd5`'s `src` too): the first tests covered only the classifier.
+- **Found, pre-existing, not fixed (outside scope):** `rux-ml train` cannot fit a LightGBM model on the in-memory sklearn-wrapper path at `09b9bd5` — it passes `verbose=False` to `LGBMRegressor.fit`, which raises `TypeError` (LightGBM 4.x has no `verbose` fit keyword). The regression-branch test uses CatBoost for that reason. A rux-ml follow-up if LightGBM is ever trained through `rux-ml train`.
+- **Open:** the desktop run (`uv run --frozen --all-extras pytest -n 8` diffed against `dev`; the `gpu` tests); the program lead's merge to `dev` before the v0.5 freeze tag.
+

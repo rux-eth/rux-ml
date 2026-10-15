@@ -361,7 +361,7 @@ def test_the_route_refuses_by_name_before_the_fit(
     assert named in result.output, (case, result.output)
     if case.startswith("val_less_without") or case == "val_less_early_stopping_on":
         # refused at config, before the trial row exists
-        assert optuna.get_all_study_summaries(storage=_storage(tmp_path)) == []
+        assert not (tmp_path / "studies" / "studies.db").exists()
 
 
 def test_promote_refuses_a_val_less_trial_by_name(
@@ -383,3 +383,47 @@ def test_promote_refuses_a_val_less_trial_by_name(
         promote_mod._refit(cfg, bag=seed_bag, hashed_files=[])  # pyright: ignore[reportPrivateUsage]
     assert isinstance(info.value, ValueError)  # exit 2, like every promote refusal
     assert "split_ratios.val = 0" in str(info.value)
+
+
+def test_an_inmemory_m9_regression_exports_predict_under_schema_v1(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """Decision 4's regression branch: an ``[m9]`` regression off the batch path (a
+    non-XGBoost family: CatBoost here) exports ``predict()``, with schema v1's metadata (no
+    ``prediction`` key — that key marks a probability export)."""
+    pytest.importorskip("catboost")
+    # (LightGBM is not used: ``rux-ml train`` passes ``verbose`` to ``LGBMRegressor.fit``,
+    # which refuses it — pre-existing at 09b9bd5, outside this PR.)
+    config = _write(tmp_path)
+    config.write_text(
+        config.read_text()
+        .replace('kind = "xgboost"', 'kind = "catboost"')
+        .replace('metric = "logloss"', 'metric = "rmse"')
+        .replace("n_estimators = 16", "iterations = 16")
+        .replace("max_depth = 3", "depth = 3")
+    )
+    result = _train(runner, config)
+    assert result.exit_code == 0, result.output
+    study, trial = _trial(tmp_path)
+    meta = _fold_meta(tmp_path)
+    record = meta["oos_export"]
+    assert "prediction" not in record
+    assert "told_partition" not in meta
+    path = _artifact(tmp_path, study, record["filename"])
+    metadata = json.loads(pq.read_schema(path).metadata[b"rux_ml.oos_export"])
+    assert "prediction" not in metadata
+    export = pl.read_parquet(path)
+    (trainer, pipeline), splits = _refit(
+        config, make_seed_bag_from_hex(trial.user_attrs["entropy_hex"]), val_less=False
+    )
+    want = [
+        np.asarray(trainer.predict(pipeline.transform(splits[p].drop("y")).to_pandas()))
+        for p in ("val", "test")
+    ]
+    np.testing.assert_allclose(
+        export["prediction"].to_numpy(), np.concatenate(want).astype(np.float32), rtol=1e-6
+    )
+    assert (
+        export["partition"].to_list()
+        == ["val"] * splits["val"].height + ["test"] * splits["test"].height
+    )

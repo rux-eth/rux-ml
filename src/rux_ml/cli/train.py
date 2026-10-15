@@ -56,7 +56,12 @@ from rux_ml.runs import (
     one_off_run,
     upload_diagnostics,
 )
-from rux_ml.runs.oos_export import OOS_EXPORT_FILENAME, OosExportWriter
+from rux_ml.runs.oos_export import (
+    OOS_EXPORT_FILENAME,
+    PARTITIONS,
+    PROBABILITY_PREDICTION,
+    OosExportWriter,
+)
 from rux_ml.training import (
     XGBoostNativeAdapter,
     compute_score,
@@ -64,6 +69,7 @@ from rux_ml.training import (
     make_trainer,
     optuna_direction,
     select_ingest,
+    task_for_metric,
 )
 from rux_ml.training.honesty import CalibrationBias, signed_error_honesty
 from rux_ml.training.xgboost.batches import (
@@ -236,6 +242,130 @@ def _calibration(cfg: RuxMLConfig) -> CalibrationBias | None:
     return CalibrationBias(cfg.m9.calibration_bucket_columns)
 
 
+# PR-060: an [m9] in-memory classifier exports P(class 1), defined for two classes only.
+_BINARY = 2
+
+
+def _val_less(cfg: RuxMLConfig) -> bool:
+    """PR-060 (program PR-082 lean 2): whether the in-memory fit runs val-less.
+
+    The mode is the configured ``data.split_ratios.val == 0`` (no config field of its own,
+    so no config hash moves). The fit has no ``eval_set`` and no early stopping, and its
+    told value is the ``[m9]`` test record's score (``fold_meta.json``
+    ``told_partition = "test"``). Only an ``[m9]`` fit (the one with a test record) with
+    early stopping off (``training.early_stopping_rounds`` 0 or unset) may run it; any other
+    val = 0 fit is refused by name (exit 2). A per-day batch fit keeps its own refusal
+    (``fit_batches``), so the M9 regression route is untouched.
+    """
+    if cfg.data.split_ratios.get("val") != 0 or uses_batch_fit(cfg):
+        return False
+    if cfg.m9 is None:
+        msg = (
+            "data.split_ratios.val = 0 (the val-less mode) needs an [m9] problem: the told "
+            "value is the [m9] test record's score, and a fit without [m9] has none"
+        )
+        raise typer.BadParameter(msg)
+    rounds = cfg.training.early_stopping_rounds
+    if rounds not in (None, 0):
+        msg = (
+            "data.split_ratios.val = 0 (the val-less mode) needs "
+            f"training.early_stopping_rounds = 0 (off), got {rounds}: there is no val "
+            "partition to stop on"
+        )
+        raise typer.BadParameter(msg)
+    return True
+
+
+def _realized(frame: pl.DataFrame, target_col: str) -> pl.Series:
+    return frame[target_col].cast(pl.Float64).fill_nan(None).drop_nulls()
+
+
+def _in_memory_export(
+    cfg: RuxMLConfig,
+    splits: dict[str, pl.DataFrame],
+    target_col: str,
+    split_def: dict[str, Any],
+    export_dir: Path | None,
+    *,
+    val_less: bool,
+) -> OosExportWriter | None:
+    """PR-060: an in-memory ``[m9]`` fit's refusals before it fits, and its export writer.
+
+    A classifier exports P(class 1), so more than two classes is refused; a val-less fit
+    tells the test score, so a test partition with no realized target is refused; the
+    writer refuses a keyless ``[m9]`` fit (as on the batch path, PR-055). Each is exit 2,
+    before the fit. A regression (an ``[m9]`` fit of a non-XGBoost family) exports
+    ``predict()`` under schema v1's metadata.
+    """
+    if cfg.m9 is None:
+        return None
+    probability = task_for_metric(cfg.training.metric) == "classification"
+    if probability:
+        n = _realized(pl.concat([splits[k] for k in ("train", "val", "test")]), target_col)
+        if n.n_unique() > _BINARY:
+            msg = (
+                f"an [m9] in-memory classifier exports P(class 1); the target {target_col!r} "
+                f"has {n.n_unique()} classes — more than two classes are refused"
+            )
+            raise typer.BadParameter(msg)
+    if val_less and _realized(splits["test"], target_col).is_empty():
+        msg = (
+            "the val-less mode tells the test score, but the test partition has no row with "
+            f"a realized {target_col!r} (n_scored = 0)"
+        )
+        raise typer.BadParameter(msg)
+    if export_dir is None:
+        return None
+    try:
+        return OosExportWriter(
+            export_dir / OOS_EXPORT_FILENAME,
+            key_columns=cfg.m9.row_key_columns,
+            target_column=target_col,
+            split_definition=split_def,
+            prediction=PROBABILITY_PREDICTION if probability else None,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+def _m9_record(
+    cfg: RuxMLConfig,
+    model: Any,
+    pipeline: Any,
+    splits: dict[str, pl.DataFrame],
+    target_col: str,
+    gates: M9Gates | None,
+    writer: OosExportWriter | None,
+    fold_extras: dict[str, Any],
+    val_score: float | None,
+) -> float:
+    """After an in-memory fit: the ``[m9]`` test record (PR-044), the export (PR-060: val
+    rows, then test rows) and the told value — the val score, or in the val-less mode
+    (``val_score`` None) the test score, marked ``told_partition = "test"``."""
+    if cfg.m9 is None:
+        assert val_score is not None
+        return val_score
+    fold_extras["oos"] = _oos_record(cfg, model, pipeline, splits["test"], target_col, gates)
+    if writer is not None:
+        for partition in PARTITIONS:
+            frame = splits[partition]
+            if frame.height == 0:
+                continue
+            x, y = _strip_target(frame, target_col)
+            x_pd = cast("pl.DataFrame", pipeline.transform(x)).to_pandas()  # pyright: ignore[reportUnknownMemberType]
+            if writer.prediction is not None:  # P(class 1), what logloss / auc score
+                pred = np.asarray(model.predict_proba(x_pd))[:, 1]
+            else:
+                pred = np.asarray(model.predict(x_pd))
+            keys = frame.select(cfg.m9.row_key_columns)
+            writer.write(partition, keys, pred, y.cast(pl.Float64).to_numpy())
+        fold_extras["oos_export"] = writer.close()
+    if val_score is not None:
+        return val_score
+    fold_extras["told_partition"] = "test"
+    return float(fold_extras["oos"]["score"])
+
+
 def _fit_and_score(
     cfg: RuxMLConfig,
     source_path: Path,
@@ -260,12 +390,17 @@ def _fit_and_score(
     between random and temporal split per ``cfg.data.split_kind`` (PR-024);
     the temporal path is deterministic and ignores the seed, so the same
     reproducibility contract holds.
+
+    PR-060: an ``[m9]`` in-memory fit (a classifier) writes the PR-055 export with
+    ``export_dir`` and, with ``data.split_ratios.val = 0``, runs val-less
+    (:func:`_val_less`): no ``eval_set``, no early stopping, the test score told.
     """
     if uses_batch_fit(cfg):
         # PR-054 (program PR-027 A1): an [m9] XGBoost fit of a regression target (the M9
         # targets: Brier / MAE) never collects the whole source. An [m9] classification
         # fit (no M9 problem is one) keeps the in-memory path, on the same partition rule.
-        # PR-055 (A8): with ``export_dir`` it writes the val / test rows' export there.
+        # PR-055 (A8): with ``export_dir`` it writes the val / test rows' export there;
+        # PR-060: so does the in-memory path below.
         return _fit_and_score_batches(cfg, source_path, target_col, bag, gates, export_dir)
     df = materialize(load_parquet(source_path, oracle=cfg.data.oracle))
     splits = make_splits(cfg, df, seed=bag.split_seed)
@@ -276,6 +411,10 @@ def _fit_and_score(
         "split_definition": split_definition(cfg, df, splits, seed=bag.split_seed),
         "leakage": _leakage(cfg, splits),
     }
+    val_less = _val_less(cfg)  # PR-060
+    writer = _in_memory_export(
+        cfg, splits, target_col, fold_extras["split_definition"], export_dir, val_less=val_less
+    )  # refused before the fit, not after it
     x_train, y_train = _strip_target(splits["train"], target_col)
     x_val, y_val = _strip_target(splits["val"], target_col)
 
@@ -285,7 +424,9 @@ def _fit_and_score(
     # sklearn Pipeline.transform stubs return ``Unknown``; PR-005's terminal
     # ``to_polars`` step guarantees a Polars DataFrame at the boundary.
     x_train_t = cast("pl.DataFrame", pipeline.transform(x_train))  # pyright: ignore[reportUnknownMemberType]
-    x_val_t = cast("pl.DataFrame", pipeline.transform(x_val))  # pyright: ignore[reportUnknownMemberType]
+    x_val_t = (
+        None if val_less else cast("pl.DataFrame", pipeline.transform(x_val))  # pyright: ignore[reportUnknownMemberType]
+    )
 
     # Decision-rule classification: PR-006 logs the chosen DMatrix class so
     # operators see which path is in use. PR-033 wires the return value
@@ -314,18 +455,21 @@ def _fit_and_score(
         adapter.fit(
             x_train_t,
             y_train,
-            eval_set=[(x_val_t, y_val)],
+            eval_set=None if x_val_t is None else [(x_val_t, y_val)],  # PR-060: val-less
             verbose=False,
         )
-        score = compute_score(cfg.training.metric, adapter, x_val_t.to_pandas(), y_val.to_numpy())
+        val_score = (
+            None
+            if x_val_t is None
+            else compute_score(cfg.training.metric, adapter, x_val_t.to_pandas(), y_val.to_numpy())
+        )
         fit_seconds = time.perf_counter() - fit_start
         best_iter = adapter.best_iteration
         if adapter.booster is not None:  # PR-054 (A11)
             fold_extras["booster"] = booster_threads_device(adapter.booster)
-        if cfg.m9 is not None:
-            fold_extras["oos"] = _oos_record(
-                cfg, adapter, pipeline, splits["test"], target_col, gates
-            )
+        score = _m9_record(
+            cfg, adapter, pipeline, splits, target_col, gates, writer, fold_extras, val_score
+        )
         return (
             score,
             int(best_iter) if best_iter is not None else None,
@@ -336,21 +480,25 @@ def _fit_and_score(
 
     trainer = make_trainer(cfg.training, seed=bag.xgb_seed)
     x_train_pd = x_train_t.to_pandas()
-    x_val_pd = x_val_t.to_pandas()
-    trainer.fit(
-        x_train_pd,
-        y_train.to_numpy(),
-        eval_set=[(x_val_pd, y_val.to_numpy())],
-        verbose=False,
+    x_val_pd = None if x_val_t is None else x_val_t.to_pandas()
+    # PR-060: the val-less fit is given no eval_set (and early stopping is off)
+    eval_kw: dict[str, Any] = (
+        {} if x_val_pd is None else {"eval_set": [(x_val_pd, y_val.to_numpy())]}
     )
-    score = compute_score(cfg.training.metric, trainer, x_val_pd, y_val.to_numpy())
+    trainer.fit(x_train_pd, y_train.to_numpy(), **eval_kw, verbose=False)
+    val_score = (
+        None
+        if x_val_pd is None
+        else compute_score(cfg.training.metric, trainer, x_val_pd, y_val.to_numpy())
+    )
     fit_seconds = time.perf_counter() - fit_start
     best_iter = getattr(trainer, "best_iteration", None)
     get_booster = getattr(trainer, "get_booster", None)
     if callable(get_booster):  # PR-054 (program PR-027 A11): XGBoost's sklearn wrapper
         fold_extras["booster"] = booster_threads_device(cast("Any", get_booster()))
-    if cfg.m9 is not None:
-        fold_extras["oos"] = _oos_record(cfg, trainer, pipeline, splits["test"], target_col, gates)
+    score = _m9_record(
+        cfg, trainer, pipeline, splits, target_col, gates, writer, fold_extras, val_score
+    )
     return (
         score,
         int(best_iter) if best_iter is not None else None,
@@ -571,6 +719,7 @@ def run_command(ctx: typer.Context) -> None:
     source_path, target_col = _require(cfg)
     refuse_oracle_source(cfg)  # PR-040: before hashing or creating the trial row
     gates = _m9_gates(cfg)  # PR-044: the signed M9 keys, before the trial row too
+    _val_less(cfg)  # PR-060: the val-less mode's refusals, before the trial row too
     hashes = data_hashes(source_path, oracle=cfg.data.oracle)
     versions = get_versions(cfg.memory)
 
