@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+import numpy as np
 import polars as pl
 import pytest
 
@@ -69,3 +70,24 @@ def test_the_c6_subtree_digest_is_unchanged_on_every_path(subtree: str) -> None:
     )
     if pl.__version__ == PINNED_POLARS:
         assert reference[0] == PINNED_C6[subtree]
+
+
+def test_the_whole_source_digest_hashes_little_endian_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PR-061: the reference digest hashes the sorted row hashes as little-endian u64 bytes on any
+    host. ``Series.to_numpy`` is made to hand back big-endian u64s with the same values, as on a
+    big-endian host; neither digest may move. The per-file path assigns into its own native array
+    by value, so it never saw the byte order; the whole-source path hashed the array's own bytes."""
+    files = iter_parquet_files(C6_PIN / "fill")
+    whole = versioning._logical_hash_whole_source(files)
+    per_file = versioning._logical_hash(files)
+    native = pl.Series.to_numpy
+
+    def big_endian(self: pl.Series, *args: object, **kwargs: object) -> np.ndarray:
+        out = native(self, *args, **kwargs)  # pyright: ignore[reportArgumentType]
+        return out.astype(">u8") if out.dtype == np.uint64 else out
+
+    monkeypatch.setattr(pl.Series, "to_numpy", big_endian)
+    assert versioning._logical_hash(files) == per_file
+    assert versioning._logical_hash_whole_source(files) == whole
