@@ -132,6 +132,68 @@ _To be populated by `PROCEDURE-pr-research.md`. Do not begin implementation unti
 
 **Checker pass** (2026-10-16, started 13:52 CDT; Mac only, ≤ 12 tool calls, one Tier-A fetch of OpenBLAS `driver/others/memory.c`). Every code cite re-read on `82b1511`: all hold except three corrected in place (`training/factory.py:47` → `:55`; the cfg build `:708-713` → `:709-714`; the `CLAUDE.md:52` wording). Re-run in fresh interpreters on the worktree `.venv`: `trial_runner` alone loads none of the heavy modules; `rux_ml.config.memory` loads the seven; `rux_ml.cli` adds optuna + typer; Polars 3 (set after import) / 14 (query first) / 3 (trial-child order); two `libomp.dylib` at 3 in the trial-child order and in the OMP-at-start control (the `omp_touch` arm was not re-run). `git`: `config/` and `rux_ml/__init__.py` import nothing outside pydantic / typing / `rux_ml.config` at `5768b26` and at `a98349f^`, so the `:86` comment held until PR-017. The spawn path is the only Python child spawn (`isolation.py:123`; the other `subprocess` calls are tools). Added: the OpenBLAS OMP fallback (primary source) and the 65-thread attribution (best-guess). Corrected: probe 2's control set `OMP_NUM_THREADS` alone, so the spawn-env route matches it for libgomp only. The libgomp `env.c` constructor was not re-fetched.
 
+### Q1 measured (Linux, 2026-10-16)
+
+<!-- The Q1 desktop window on the gate's go (item 11, ≈ 14:05 CDT). Harness `scripts/measure_pr063_threads.py` (commit `7b537b2`), run from a fresh clone `~/pr063-build` at `7b537b2` with the locked env (`uv sync --locked --all-extras`), under `~/rumpy-heavy.lock` (mkdir) 15:12:39 – 15:13:10 CDT (31 s). Receipt: `prs/PR-063-q1-threads-20261016.json` (3 runs × 3 arms, interleaved, all rc 0). Desktop: Ubuntu 22.04, kernel 6.8.0-138, 32 logical CPUs (affinity 32), Python 3.12.13; numpy 2.4.5, scipy 1.17.1, scikit-learn 1.8.0, xgboost 3.2.0, polars 1.40.1, pyarrow 24.0.0, lightgbm 4.6.0, threadpoolctl 3.6.0. Each arm is a fresh interpreter with `OMP_NUM_THREADS` / `OPENBLAS_NUM_THREADS` / `MKL_NUM_THREADS` / `POLARS_MAX_THREADS` / `GOTO_NUM_THREADS` stripped from its env; the pinned values (24 / 1 / 1 / 24) come from `configs/base.toml` `[memory]` through `pin_threads` itself. -->
+
+**Arms.**
+- `cli_today`: `import rux_ml.cli`, then `pin_threads` (the in-process verbs' order).
+- `trial_child`: the order at `trial_runner.py:86-111` (config import → `pin_threads` → the post-pin imports), env unset at start. This is today's subprocess child.
+- `env_at_start`: the same order with the four values in the env at start. This is the condition Q2's spawn env produces.
+
+Each arm reads before any fit: `/proc/self/task` first, then `threadpool_info()`, then a 2 s idle window, then `pl.thread_pool_size()` (which builds Polars' pool), then `import lightgbm` and `threadpool_info()` again. An `import` audit hook records which import was in flight at each rise in the thread count.
+
+**Result** (the counts are identical in all 3 runs of each arm; ranges are given where a figure varied):
+
+| | `cli_today` | `trial_child` | `env_at_start` |
+|---|---|---|---|
+| **Threads before any fit** | **65** | **65** | **3** |
+| main thread | 1 | 1 | 1 |
+| numpy's OpenBLAS (`numpy.libs/libscipy_openblas64_`, 0.3.31.188.0, pthreads): pool / workers; rise at `numpy._core._multiarray_umath` | 32 / 31 | 32 / 31 | 1 / 0 |
+| scipy's OpenBLAS (`scipy.libs/libscipy_openblas`, 0.3.30, pthreads): pool / workers; rise at `scipy.special._ufuncs` | 32 / 31 | 32 / 31 | 1 / 0 |
+| libgomp (`scikit_learn.libs/libgomp-e985bcbb`, the only copy mapped): `omp_get_max_threads` / threads | 32 / 0 | 32 / 0 | 24 / 0 |
+| `jemalloc_bg_thd` (one at `pyarrow.lib`, one at the Polars runtime import) | 2 | 2 | 2 |
+| MKL mapped | no | no | no |
+| Polars `thread_pool_size()` | 24 | 24 | 24 |
+| Threads after Polars' pool is built (+24 `polars-N`, +3 `jemalloc_bg_thd`) | 92 | 92 | 30 |
+| `import lightgbm`: a second libgomp, `/usr/lib/x86_64-linux-gnu/libgomp.so.1`, at | 24 | 24 | 24 |
+| Threads after `import lightgbm` (no new threads) | 92 | 92 | 30 |
+| CPU used by non-main threads by the pre-fit read | 4.88 – 4.96 s | 4.92 – 4.96 s | 0 |
+| CPU used by non-main threads in the 2 s idle window | 0 | 0 | 0 |
+| VmRSS before any fit | 279.7 – 295.1 MiB | 248.9 – 249.4 MiB | 248.5 – 248.8 MiB |
+| VmSize before any fit | 5.26 – 5.28 GiB | 5.23 GiB | 2.81 GiB |
+| Import wall to the pre-fit read | 1.28 – 1.94 s | 0.63 – 0.64 s | 0.56 – 0.57 s |
+
+*Reading note:* the receipt's `import_rises` lists a 65 → 92 (or 3 → 30) rise labelled `rux_ml.tuning.study`. That rise is Polars' pool, built by the harness's own `pl.thread_pool_size()` call. The hook first saw it at `import lightgbm`'s first import event and labelled it with the last import started before that. The pre-fit count (65 / 3) was read before the call.
+
+**Against Phase 1's predictions:**
+- **Confirmed (proven):** libgomp at 32 today and 24 with the env at start.
+- **Confirmed (proven):** each OpenBLAS copy sizes to the CPU count today and to 1 with the env at start. There are two copies, numpy's and scipy's, both pthreads builds, so each spawns `n − 1` workers when it loads.
+- **Confirmed (proven) — the 65-thread attribution:** 1 main + 31 + 31 OpenBLAS workers + 2 `jemalloc_bg_thd` = 65. The best-guess label is retired.
+- **Confirmed on Linux:** Polars is at 24 on both paths. Its pool is built on first use, which comes after the pin.
+- **Refuted:** "LightGBM reuses the libgomp already loaded at 32." `import lightgbm` maps the system `libgomp.so.1` as a second copy. That copy reads the env when it loads, after the pin, so it is at 24 on every arm, and LightGBM's OpenMP honours the pin today on both paths. *This holds for the desktop's system libgomp; a container image would need its own check (not checked).*
+- **Confirms the lock:** MKL is not mapped.
+- **Not run:** an `OMP_NUM_THREADS`-alone arm. So PR-062's 48 is not reproduced here. The mechanism predicts 1 + 23 + 23 + 2 = 49. PR-062's unset figure was 64 against 65 here; the one-thread difference is not chased.
+
+**Q2 (the spawn env) — the OpenBLAS part is now measured.** The `env_at_start` arm reaches every pool that sizes at load:
+- libgomp 24;
+- both OpenBLAS copies 1 (0 workers);
+- Polars 24;
+- LightGBM's libgomp 24.
+
+The child holds 3 threads before any fit instead of 65. The child's own pin after the import reaches neither OpenBLAS copy nor libgomp: the `trial_child` arm equals `cli_today` on every pool.
+
+**Q3's revisit condition (is the in-process BLAS pool material?)** — answered by measure; nothing built:
+- **By thread count: yes.** Every in-process verb (`cli_today`) holds 62 OpenBLAS workers (2 × 31) before any fit, the same as today's trial child. Its `OPENBLAS_NUM_THREADS=1` reaches neither copy.
+- **By measured cost at idle: none shown.**
+  - The workers used 0 CPU in the 2 s idle window.
+  - RSS equals the pinned child's (≈ 249 MiB, in the trial-child order); the extra is ≈ 2.4 GiB of virtual address space only.
+  - At start-up the 62 workers used ≈ 4.9 s of CPU (≈ 80 ms each, their spin before sleeping). That ran on other cores: the import wall is 0.64 s vs 0.57 s.
+- **During a fit: not measured.** The open cost is a numpy / scipy BLAS call during a fit waking 31 workers that spin next to XGBoost's 24-thread team on 32 logical CPUs. Which in-process fit paths make such calls, and what that costs, is not known from Q1.
+- **So the condition fires on the count and not on any measured cost.** The checker's open point stands: whether "material" means the count (→ a re-exec, a Tier-2 PR of its own) or a measured overlap cost (→ measure first) is the operator's to rule. *Lean:* do not open a re-exec on the count alone. Instead, add a backlog item that measures a BLAS overlap on the in-process `train` path, beside Q5's stall-rate item. *Basis:* PR-062 already bounds the in-process XGBoost / CatBoost fits, and the pools sit idle at 0 CPU. *Confidence:* medium.
+
+**Spend:** one agent, ≤ 26 tool calls; one desktop window of 31 s under the lock; $0.
+
 ## Scope
 
 <!-- Draft scope from PR-062's options B / B-lite; to be fixed by this PR's Phase 2 – 4. -->

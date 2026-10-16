@@ -1,0 +1,1908 @@
+{
+ "affinity": 32,
+ "arms": [
+  "cli_today",
+  "trial_child",
+  "env_at_start"
+ ],
+ "config": "/home/rux/pr063-build/configs/base.toml",
+ "cpu_count": 32,
+ "git_sha": "7b537b2f227bcff11d1a2968771f1383853b3ac3",
+ "median_threads_pre_fit": {
+  "cli_today": 65,
+  "env_at_start": 3,
+  "trial_child": 65
+ },
+ "memory": {
+  "cache_host_ratio": null,
+  "mkl_threads": 1,
+  "omp_threads": 24,
+  "openblas_threads": 1,
+  "polars_threads": 24,
+  "watchdog_sample_hz": 1.0,
+  "watchdog_threshold_gb": 28.0
+ },
+ "pinned_env": {
+  "MKL_NUM_THREADS": "1",
+  "OMP_NUM_THREADS": "24",
+  "OPENBLAS_NUM_THREADS": "1",
+  "POLARS_MAX_THREADS": "24"
+ },
+ "pr": "PR-063",
+ "python": "3.12.13 (main, May 10 2026, 19:30:01) [Clang 22.1.3 ]",
+ "question": "Q1",
+ "results": [
+  {
+   "arm": "cli_today",
+   "data": {
+    "arm": "cli_today",
+    "attribution_pre_fit": {
+     "main": 1,
+     "openblas_workers": 62,
+     "residual": 2
+    },
+    "env_after_pin": {
+     "MKL_NUM_THREADS": "1",
+     "OMP_NUM_THREADS": "24",
+     "OPENBLAS_NUM_THREADS": "1",
+     "POLARS_MAX_THREADS": "24"
+    },
+    "env_at_child_start": {
+     "MKL_NUM_THREADS": null,
+     "OMP_NUM_THREADS": null,
+     "OPENBLAS_NUM_THREADS": null,
+     "POLARS_MAX_THREADS": null
+    },
+    "idle_cpu_ms_non_main": 0.0,
+    "idle_s": 2.0,
+    "import_rises": [
+     {
+      "during_import_of": "numpy._core._multiarray_umath",
+      "from": 1,
+      "to": 32
+     },
+     {
+      "during_import_of": "pyarrow.lib",
+      "from": 32,
+      "to": 33
+     },
+     {
+      "during_import_of": "_polars_runtime_32._polars_runtime",
+      "from": 33,
+      "to": 34
+     },
+     {
+      "during_import_of": "scipy.special._ufuncs",
+      "from": 34,
+      "to": 65
+     },
+     {
+      "during_import_of": "rux_ml.tuning.study",
+      "from": 65,
+      "to": 92
+     }
+    ],
+    "import_wall_s": 1.938,
+    "polars_thread_pool_size": 24,
+    "pool_libs_mapped_after_lightgbm": [
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+     "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0"
+    ],
+    "pool_libs_mapped_pre_fit": [
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so"
+    ],
+    "pools_after_lightgbm": [
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+      "internal_api": "openblas",
+      "num_threads": 32,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.31.188.0"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+      "internal_api": "openblas",
+      "num_threads": 32,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.30"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 32,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     },
+     {
+      "filepath": "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 24,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     }
+    ],
+    "pools_pre_fit": [
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+      "internal_api": "openblas",
+      "num_threads": 32,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.31.188.0"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+      "internal_api": "openblas",
+      "num_threads": 32,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.30"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 32,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     }
+    ],
+    "threads_after_idle": {
+     "comm": {
+      "jemalloc_bg_thd": 2,
+      "python": 63
+     },
+     "count": 65,
+     "cpu_ms_non_main": 4960.0
+    },
+    "threads_after_lightgbm": {
+     "comm": {
+      "jemalloc_bg_thd": 5,
+      "polars-0": 1,
+      "polars-1": 1,
+      "polars-10": 1,
+      "polars-11": 1,
+      "polars-12": 1,
+      "polars-13": 1,
+      "polars-14": 1,
+      "polars-15": 1,
+      "polars-16": 1,
+      "polars-17": 1,
+      "polars-18": 1,
+      "polars-19": 1,
+      "polars-2": 1,
+      "polars-20": 1,
+      "polars-21": 1,
+      "polars-22": 1,
+      "polars-23": 1,
+      "polars-3": 1,
+      "polars-4": 1,
+      "polars-5": 1,
+      "polars-6": 1,
+      "polars-7": 1,
+      "polars-8": 1,
+      "polars-9": 1,
+      "python": 63
+     },
+     "count": 92,
+     "cpu_ms_non_main": 4960.0
+    },
+    "threads_after_polars_init": {
+     "comm": {
+      "jemalloc_bg_thd": 5,
+      "polars-0": 1,
+      "polars-1": 1,
+      "polars-10": 1,
+      "polars-11": 1,
+      "polars-12": 1,
+      "polars-13": 1,
+      "polars-14": 1,
+      "polars-15": 1,
+      "polars-16": 1,
+      "polars-17": 1,
+      "polars-18": 1,
+      "polars-19": 1,
+      "polars-2": 1,
+      "polars-20": 1,
+      "polars-21": 1,
+      "polars-22": 1,
+      "polars-23": 1,
+      "polars-3": 1,
+      "polars-4": 1,
+      "polars-5": 1,
+      "polars-6": 1,
+      "polars-7": 1,
+      "polars-8": 1,
+      "polars-9": 1,
+      "python": 63
+     },
+     "count": 92,
+     "cpu_ms_non_main": 4960.0
+    },
+    "threads_pre_fit": {
+     "comm": {
+      "jemalloc_bg_thd": 2,
+      "python": 63
+     },
+     "count": 65,
+     "cpu_ms_non_main": 4960.0
+    },
+    "vm_rss": "302152 kB",
+    "vm_size": "5532016 kB"
+   },
+   "rc": 0,
+   "run": 0
+  },
+  {
+   "arm": "trial_child",
+   "data": {
+    "arm": "trial_child",
+    "attribution_pre_fit": {
+     "main": 1,
+     "openblas_workers": 62,
+     "residual": 2
+    },
+    "env_after_pin": {
+     "MKL_NUM_THREADS": "1",
+     "OMP_NUM_THREADS": "24",
+     "OPENBLAS_NUM_THREADS": "1",
+     "POLARS_MAX_THREADS": "24"
+    },
+    "env_at_child_start": {
+     "MKL_NUM_THREADS": null,
+     "OMP_NUM_THREADS": null,
+     "OPENBLAS_NUM_THREADS": null,
+     "POLARS_MAX_THREADS": null
+    },
+    "idle_cpu_ms_non_main": 0.0,
+    "idle_s": 2.0,
+    "import_rises": [
+     {
+      "during_import_of": "numpy._core._multiarray_umath",
+      "from": 1,
+      "to": 32
+     },
+     {
+      "during_import_of": "pyarrow.lib",
+      "from": 32,
+      "to": 33
+     },
+     {
+      "during_import_of": "scipy.special._ufuncs",
+      "from": 33,
+      "to": 64
+     },
+     {
+      "during_import_of": "_polars_runtime_32._polars_runtime",
+      "from": 64,
+      "to": 65
+     },
+     {
+      "during_import_of": "rux_ml.tuning.study",
+      "from": 65,
+      "to": 92
+     }
+    ],
+    "import_wall_s": 0.641,
+    "polars_thread_pool_size": 24,
+    "pool_libs_mapped_after_lightgbm": [
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+     "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0"
+    ],
+    "pool_libs_mapped_pre_fit": [
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so"
+    ],
+    "pools_after_lightgbm": [
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+      "internal_api": "openblas",
+      "num_threads": 32,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.31.188.0"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+      "internal_api": "openblas",
+      "num_threads": 32,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.30"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 32,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     },
+     {
+      "filepath": "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 24,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     }
+    ],
+    "pools_pre_fit": [
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+      "internal_api": "openblas",
+      "num_threads": 32,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.31.188.0"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+      "internal_api": "openblas",
+      "num_threads": 32,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.30"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 32,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     }
+    ],
+    "threads_after_idle": {
+     "comm": {
+      "jemalloc_bg_thd": 2,
+      "python": 63
+     },
+     "count": 65,
+     "cpu_ms_non_main": 4960.0
+    },
+    "threads_after_lightgbm": {
+     "comm": {
+      "jemalloc_bg_thd": 5,
+      "polars-0": 1,
+      "polars-1": 1,
+      "polars-10": 1,
+      "polars-11": 1,
+      "polars-12": 1,
+      "polars-13": 1,
+      "polars-14": 1,
+      "polars-15": 1,
+      "polars-16": 1,
+      "polars-17": 1,
+      "polars-18": 1,
+      "polars-19": 1,
+      "polars-2": 1,
+      "polars-20": 1,
+      "polars-21": 1,
+      "polars-22": 1,
+      "polars-23": 1,
+      "polars-3": 1,
+      "polars-4": 1,
+      "polars-5": 1,
+      "polars-6": 1,
+      "polars-7": 1,
+      "polars-8": 1,
+      "polars-9": 1,
+      "python": 63
+     },
+     "count": 92,
+     "cpu_ms_non_main": 4960.0
+    },
+    "threads_after_polars_init": {
+     "comm": {
+      "jemalloc_bg_thd": 5,
+      "polars-0": 1,
+      "polars-1": 1,
+      "polars-10": 1,
+      "polars-11": 1,
+      "polars-12": 1,
+      "polars-13": 1,
+      "polars-14": 1,
+      "polars-15": 1,
+      "polars-16": 1,
+      "polars-17": 1,
+      "polars-18": 1,
+      "polars-19": 1,
+      "polars-2": 1,
+      "polars-20": 1,
+      "polars-21": 1,
+      "polars-22": 1,
+      "polars-23": 1,
+      "polars-3": 1,
+      "polars-4": 1,
+      "polars-5": 1,
+      "polars-6": 1,
+      "polars-7": 1,
+      "polars-8": 1,
+      "polars-9": 1,
+      "python": 63
+     },
+     "count": 92,
+     "cpu_ms_non_main": 4960.0
+    },
+    "threads_pre_fit": {
+     "comm": {
+      "jemalloc_bg_thd": 2,
+      "python": 63
+     },
+     "count": 65,
+     "cpu_ms_non_main": 4960.0
+    },
+    "vm_rss": "254860 kB",
+    "vm_size": "5482036 kB"
+   },
+   "rc": 0,
+   "run": 0
+  },
+  {
+   "arm": "env_at_start",
+   "data": {
+    "arm": "env_at_start",
+    "attribution_pre_fit": {
+     "main": 1,
+     "openblas_workers": 0,
+     "residual": 2
+    },
+    "env_after_pin": {
+     "MKL_NUM_THREADS": "1",
+     "OMP_NUM_THREADS": "24",
+     "OPENBLAS_NUM_THREADS": "1",
+     "POLARS_MAX_THREADS": "24"
+    },
+    "env_at_child_start": {
+     "MKL_NUM_THREADS": "1",
+     "OMP_NUM_THREADS": "24",
+     "OPENBLAS_NUM_THREADS": "1",
+     "POLARS_MAX_THREADS": "24"
+    },
+    "idle_cpu_ms_non_main": 0.0,
+    "idle_s": 2.0,
+    "import_rises": [
+     {
+      "during_import_of": "pyarrow.lib",
+      "from": 1,
+      "to": 2
+     },
+     {
+      "during_import_of": "_polars_runtime_32._polars_runtime",
+      "from": 2,
+      "to": 3
+     },
+     {
+      "during_import_of": "rux_ml.tuning.study",
+      "from": 3,
+      "to": 30
+     }
+    ],
+    "import_wall_s": 0.565,
+    "polars_thread_pool_size": 24,
+    "pool_libs_mapped_after_lightgbm": [
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+     "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0"
+    ],
+    "pool_libs_mapped_pre_fit": [
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so"
+    ],
+    "pools_after_lightgbm": [
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+      "internal_api": "openblas",
+      "num_threads": 1,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.31.188.0"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+      "internal_api": "openblas",
+      "num_threads": 1,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.30"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 24,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     },
+     {
+      "filepath": "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 24,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     }
+    ],
+    "pools_pre_fit": [
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+      "internal_api": "openblas",
+      "num_threads": 1,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.31.188.0"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+      "internal_api": "openblas",
+      "num_threads": 1,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.30"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 24,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     }
+    ],
+    "threads_after_idle": {
+     "comm": {
+      "jemalloc_bg_thd": 2,
+      "python": 1
+     },
+     "count": 3,
+     "cpu_ms_non_main": 0.0
+    },
+    "threads_after_lightgbm": {
+     "comm": {
+      "jemalloc_bg_thd": 5,
+      "polars-0": 1,
+      "polars-1": 1,
+      "polars-10": 1,
+      "polars-11": 1,
+      "polars-12": 1,
+      "polars-13": 1,
+      "polars-14": 1,
+      "polars-15": 1,
+      "polars-16": 1,
+      "polars-17": 1,
+      "polars-18": 1,
+      "polars-19": 1,
+      "polars-2": 1,
+      "polars-20": 1,
+      "polars-21": 1,
+      "polars-22": 1,
+      "polars-23": 1,
+      "polars-3": 1,
+      "polars-4": 1,
+      "polars-5": 1,
+      "polars-6": 1,
+      "polars-7": 1,
+      "polars-8": 1,
+      "polars-9": 1,
+      "python": 1
+     },
+     "count": 30,
+     "cpu_ms_non_main": 0.0
+    },
+    "threads_after_polars_init": {
+     "comm": {
+      "jemalloc_bg_thd": 5,
+      "polars-0": 1,
+      "polars-1": 1,
+      "polars-10": 1,
+      "polars-11": 1,
+      "polars-12": 1,
+      "polars-13": 1,
+      "polars-14": 1,
+      "polars-15": 1,
+      "polars-16": 1,
+      "polars-17": 1,
+      "polars-18": 1,
+      "polars-19": 1,
+      "polars-2": 1,
+      "polars-20": 1,
+      "polars-21": 1,
+      "polars-22": 1,
+      "polars-23": 1,
+      "polars-3": 1,
+      "polars-4": 1,
+      "polars-5": 1,
+      "polars-6": 1,
+      "polars-7": 1,
+      "polars-8": 1,
+      "polars-9": 1,
+      "python": 1
+     },
+     "count": 30,
+     "cpu_ms_non_main": 0.0
+    },
+    "threads_pre_fit": {
+     "comm": {
+      "jemalloc_bg_thd": 2,
+      "python": 1
+     },
+     "count": 3,
+     "cpu_ms_non_main": 0.0
+    },
+    "vm_rss": "254740 kB",
+    "vm_size": "2942196 kB"
+   },
+   "rc": 0,
+   "run": 0
+  },
+  {
+   "arm": "cli_today",
+   "data": {
+    "arm": "cli_today",
+    "attribution_pre_fit": {
+     "main": 1,
+     "openblas_workers": 62,
+     "residual": 2
+    },
+    "env_after_pin": {
+     "MKL_NUM_THREADS": "1",
+     "OMP_NUM_THREADS": "24",
+     "OPENBLAS_NUM_THREADS": "1",
+     "POLARS_MAX_THREADS": "24"
+    },
+    "env_at_child_start": {
+     "MKL_NUM_THREADS": null,
+     "OMP_NUM_THREADS": null,
+     "OPENBLAS_NUM_THREADS": null,
+     "POLARS_MAX_THREADS": null
+    },
+    "idle_cpu_ms_non_main": 0.0,
+    "idle_s": 2.0,
+    "import_rises": [
+     {
+      "during_import_of": "numpy._core._multiarray_umath",
+      "from": 1,
+      "to": 32
+     },
+     {
+      "during_import_of": "pyarrow.lib",
+      "from": 32,
+      "to": 33
+     },
+     {
+      "during_import_of": "_polars_runtime_32._polars_runtime",
+      "from": 33,
+      "to": 34
+     },
+     {
+      "during_import_of": "scipy.special._ufuncs",
+      "from": 34,
+      "to": 65
+     },
+     {
+      "during_import_of": "rux_ml.tuning.study",
+      "from": 65,
+      "to": 92
+     }
+    ],
+    "import_wall_s": 1.281,
+    "polars_thread_pool_size": 24,
+    "pool_libs_mapped_after_lightgbm": [
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+     "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0"
+    ],
+    "pool_libs_mapped_pre_fit": [
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so"
+    ],
+    "pools_after_lightgbm": [
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+      "internal_api": "openblas",
+      "num_threads": 32,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.31.188.0"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+      "internal_api": "openblas",
+      "num_threads": 32,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.30"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 32,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     },
+     {
+      "filepath": "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 24,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     }
+    ],
+    "pools_pre_fit": [
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+      "internal_api": "openblas",
+      "num_threads": 32,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.31.188.0"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+      "internal_api": "openblas",
+      "num_threads": 32,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.30"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 32,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     }
+    ],
+    "threads_after_idle": {
+     "comm": {
+      "jemalloc_bg_thd": 2,
+      "python": 63
+     },
+     "count": 65,
+     "cpu_ms_non_main": 4880.0
+    },
+    "threads_after_lightgbm": {
+     "comm": {
+      "jemalloc_bg_thd": 5,
+      "polars-0": 1,
+      "polars-1": 1,
+      "polars-10": 1,
+      "polars-11": 1,
+      "polars-12": 1,
+      "polars-13": 1,
+      "polars-14": 1,
+      "polars-15": 1,
+      "polars-16": 1,
+      "polars-17": 1,
+      "polars-18": 1,
+      "polars-19": 1,
+      "polars-2": 1,
+      "polars-20": 1,
+      "polars-21": 1,
+      "polars-22": 1,
+      "polars-23": 1,
+      "polars-3": 1,
+      "polars-4": 1,
+      "polars-5": 1,
+      "polars-6": 1,
+      "polars-7": 1,
+      "polars-8": 1,
+      "polars-9": 1,
+      "python": 63
+     },
+     "count": 92,
+     "cpu_ms_non_main": 4880.0
+    },
+    "threads_after_polars_init": {
+     "comm": {
+      "jemalloc_bg_thd": 5,
+      "polars-0": 1,
+      "polars-1": 1,
+      "polars-10": 1,
+      "polars-11": 1,
+      "polars-12": 1,
+      "polars-13": 1,
+      "polars-14": 1,
+      "polars-15": 1,
+      "polars-16": 1,
+      "polars-17": 1,
+      "polars-18": 1,
+      "polars-19": 1,
+      "polars-2": 1,
+      "polars-20": 1,
+      "polars-21": 1,
+      "polars-22": 1,
+      "polars-23": 1,
+      "polars-3": 1,
+      "polars-4": 1,
+      "polars-5": 1,
+      "polars-6": 1,
+      "polars-7": 1,
+      "polars-8": 1,
+      "polars-9": 1,
+      "python": 63
+     },
+     "count": 92,
+     "cpu_ms_non_main": 4880.0
+    },
+    "threads_pre_fit": {
+     "comm": {
+      "jemalloc_bg_thd": 2,
+      "python": 63
+     },
+     "count": 65,
+     "cpu_ms_non_main": 4880.0
+    },
+    "vm_rss": "286784 kB",
+    "vm_size": "5517348 kB"
+   },
+   "rc": 0,
+   "run": 1
+  },
+  {
+   "arm": "trial_child",
+   "data": {
+    "arm": "trial_child",
+    "attribution_pre_fit": {
+     "main": 1,
+     "openblas_workers": 62,
+     "residual": 2
+    },
+    "env_after_pin": {
+     "MKL_NUM_THREADS": "1",
+     "OMP_NUM_THREADS": "24",
+     "OPENBLAS_NUM_THREADS": "1",
+     "POLARS_MAX_THREADS": "24"
+    },
+    "env_at_child_start": {
+     "MKL_NUM_THREADS": null,
+     "OMP_NUM_THREADS": null,
+     "OPENBLAS_NUM_THREADS": null,
+     "POLARS_MAX_THREADS": null
+    },
+    "idle_cpu_ms_non_main": 0.0,
+    "idle_s": 2.0,
+    "import_rises": [
+     {
+      "during_import_of": "numpy._core._multiarray_umath",
+      "from": 1,
+      "to": 32
+     },
+     {
+      "during_import_of": "pyarrow.lib",
+      "from": 32,
+      "to": 33
+     },
+     {
+      "during_import_of": "scipy.special._ufuncs",
+      "from": 33,
+      "to": 64
+     },
+     {
+      "during_import_of": "_polars_runtime_32._polars_runtime",
+      "from": 64,
+      "to": 65
+     },
+     {
+      "during_import_of": "rux_ml.tuning.study",
+      "from": 65,
+      "to": 92
+     }
+    ],
+    "import_wall_s": 0.634,
+    "polars_thread_pool_size": 24,
+    "pool_libs_mapped_after_lightgbm": [
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+     "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0"
+    ],
+    "pool_libs_mapped_pre_fit": [
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so"
+    ],
+    "pools_after_lightgbm": [
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+      "internal_api": "openblas",
+      "num_threads": 32,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.31.188.0"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+      "internal_api": "openblas",
+      "num_threads": 32,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.30"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 32,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     },
+     {
+      "filepath": "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 24,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     }
+    ],
+    "pools_pre_fit": [
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+      "internal_api": "openblas",
+      "num_threads": 32,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.31.188.0"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+      "internal_api": "openblas",
+      "num_threads": 32,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.30"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 32,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     }
+    ],
+    "threads_after_idle": {
+     "comm": {
+      "jemalloc_bg_thd": 2,
+      "python": 63
+     },
+     "count": 65,
+     "cpu_ms_non_main": 4960.0
+    },
+    "threads_after_lightgbm": {
+     "comm": {
+      "jemalloc_bg_thd": 5,
+      "polars-0": 1,
+      "polars-1": 1,
+      "polars-10": 1,
+      "polars-11": 1,
+      "polars-12": 1,
+      "polars-13": 1,
+      "polars-14": 1,
+      "polars-15": 1,
+      "polars-16": 1,
+      "polars-17": 1,
+      "polars-18": 1,
+      "polars-19": 1,
+      "polars-2": 1,
+      "polars-20": 1,
+      "polars-21": 1,
+      "polars-22": 1,
+      "polars-23": 1,
+      "polars-3": 1,
+      "polars-4": 1,
+      "polars-5": 1,
+      "polars-6": 1,
+      "polars-7": 1,
+      "polars-8": 1,
+      "polars-9": 1,
+      "python": 63
+     },
+     "count": 92,
+     "cpu_ms_non_main": 4960.0
+    },
+    "threads_after_polars_init": {
+     "comm": {
+      "jemalloc_bg_thd": 5,
+      "polars-0": 1,
+      "polars-1": 1,
+      "polars-10": 1,
+      "polars-11": 1,
+      "polars-12": 1,
+      "polars-13": 1,
+      "polars-14": 1,
+      "polars-15": 1,
+      "polars-16": 1,
+      "polars-17": 1,
+      "polars-18": 1,
+      "polars-19": 1,
+      "polars-2": 1,
+      "polars-20": 1,
+      "polars-21": 1,
+      "polars-22": 1,
+      "polars-23": 1,
+      "polars-3": 1,
+      "polars-4": 1,
+      "polars-5": 1,
+      "polars-6": 1,
+      "polars-7": 1,
+      "polars-8": 1,
+      "polars-9": 1,
+      "python": 63
+     },
+     "count": 92,
+     "cpu_ms_non_main": 4960.0
+    },
+    "threads_pre_fit": {
+     "comm": {
+      "jemalloc_bg_thd": 2,
+      "python": 63
+     },
+     "count": 65,
+     "cpu_ms_non_main": 4960.0
+    },
+    "vm_rss": "255324 kB",
+    "vm_size": "5482164 kB"
+   },
+   "rc": 0,
+   "run": 1
+  },
+  {
+   "arm": "env_at_start",
+   "data": {
+    "arm": "env_at_start",
+    "attribution_pre_fit": {
+     "main": 1,
+     "openblas_workers": 0,
+     "residual": 2
+    },
+    "env_after_pin": {
+     "MKL_NUM_THREADS": "1",
+     "OMP_NUM_THREADS": "24",
+     "OPENBLAS_NUM_THREADS": "1",
+     "POLARS_MAX_THREADS": "24"
+    },
+    "env_at_child_start": {
+     "MKL_NUM_THREADS": "1",
+     "OMP_NUM_THREADS": "24",
+     "OPENBLAS_NUM_THREADS": "1",
+     "POLARS_MAX_THREADS": "24"
+    },
+    "idle_cpu_ms_non_main": 0.0,
+    "idle_s": 2.0,
+    "import_rises": [
+     {
+      "during_import_of": "pyarrow.lib",
+      "from": 1,
+      "to": 2
+     },
+     {
+      "during_import_of": "_polars_runtime_32._polars_runtime",
+      "from": 2,
+      "to": 3
+     },
+     {
+      "during_import_of": "rux_ml.tuning.study",
+      "from": 3,
+      "to": 30
+     }
+    ],
+    "import_wall_s": 0.567,
+    "polars_thread_pool_size": 24,
+    "pool_libs_mapped_after_lightgbm": [
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+     "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0"
+    ],
+    "pool_libs_mapped_pre_fit": [
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so"
+    ],
+    "pools_after_lightgbm": [
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+      "internal_api": "openblas",
+      "num_threads": 1,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.31.188.0"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+      "internal_api": "openblas",
+      "num_threads": 1,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.30"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 24,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     },
+     {
+      "filepath": "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 24,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     }
+    ],
+    "pools_pre_fit": [
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+      "internal_api": "openblas",
+      "num_threads": 1,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.31.188.0"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+      "internal_api": "openblas",
+      "num_threads": 1,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.30"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 24,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     }
+    ],
+    "threads_after_idle": {
+     "comm": {
+      "jemalloc_bg_thd": 2,
+      "python": 1
+     },
+     "count": 3,
+     "cpu_ms_non_main": 0.0
+    },
+    "threads_after_lightgbm": {
+     "comm": {
+      "jemalloc_bg_thd": 5,
+      "polars-0": 1,
+      "polars-1": 1,
+      "polars-10": 1,
+      "polars-11": 1,
+      "polars-12": 1,
+      "polars-13": 1,
+      "polars-14": 1,
+      "polars-15": 1,
+      "polars-16": 1,
+      "polars-17": 1,
+      "polars-18": 1,
+      "polars-19": 1,
+      "polars-2": 1,
+      "polars-20": 1,
+      "polars-21": 1,
+      "polars-22": 1,
+      "polars-23": 1,
+      "polars-3": 1,
+      "polars-4": 1,
+      "polars-5": 1,
+      "polars-6": 1,
+      "polars-7": 1,
+      "polars-8": 1,
+      "polars-9": 1,
+      "python": 1
+     },
+     "count": 30,
+     "cpu_ms_non_main": 0.0
+    },
+    "threads_after_polars_init": {
+     "comm": {
+      "jemalloc_bg_thd": 5,
+      "polars-0": 1,
+      "polars-1": 1,
+      "polars-10": 1,
+      "polars-11": 1,
+      "polars-12": 1,
+      "polars-13": 1,
+      "polars-14": 1,
+      "polars-15": 1,
+      "polars-16": 1,
+      "polars-17": 1,
+      "polars-18": 1,
+      "polars-19": 1,
+      "polars-2": 1,
+      "polars-20": 1,
+      "polars-21": 1,
+      "polars-22": 1,
+      "polars-23": 1,
+      "polars-3": 1,
+      "polars-4": 1,
+      "polars-5": 1,
+      "polars-6": 1,
+      "polars-7": 1,
+      "polars-8": 1,
+      "polars-9": 1,
+      "python": 1
+     },
+     "count": 30,
+     "cpu_ms_non_main": 0.0
+    },
+    "threads_pre_fit": {
+     "comm": {
+      "jemalloc_bg_thd": 2,
+      "python": 1
+     },
+     "count": 3,
+     "cpu_ms_non_main": 0.0
+    },
+    "vm_rss": "254732 kB",
+    "vm_size": "2942204 kB"
+   },
+   "rc": 0,
+   "run": 1
+  },
+  {
+   "arm": "cli_today",
+   "data": {
+    "arm": "cli_today",
+    "attribution_pre_fit": {
+     "main": 1,
+     "openblas_workers": 62,
+     "residual": 2
+    },
+    "env_after_pin": {
+     "MKL_NUM_THREADS": "1",
+     "OMP_NUM_THREADS": "24",
+     "OPENBLAS_NUM_THREADS": "1",
+     "POLARS_MAX_THREADS": "24"
+    },
+    "env_at_child_start": {
+     "MKL_NUM_THREADS": null,
+     "OMP_NUM_THREADS": null,
+     "OPENBLAS_NUM_THREADS": null,
+     "POLARS_MAX_THREADS": null
+    },
+    "idle_cpu_ms_non_main": 0.0,
+    "idle_s": 2.0,
+    "import_rises": [
+     {
+      "during_import_of": "numpy._core._multiarray_umath",
+      "from": 1,
+      "to": 32
+     },
+     {
+      "during_import_of": "pyarrow.lib",
+      "from": 32,
+      "to": 33
+     },
+     {
+      "during_import_of": "_polars_runtime_32._polars_runtime",
+      "from": 33,
+      "to": 34
+     },
+     {
+      "during_import_of": "scipy.special._ufuncs",
+      "from": 34,
+      "to": 65
+     },
+     {
+      "during_import_of": "rux_ml.tuning.study",
+      "from": 65,
+      "to": 92
+     }
+    ],
+    "import_wall_s": 1.288,
+    "polars_thread_pool_size": 24,
+    "pool_libs_mapped_after_lightgbm": [
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+     "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0"
+    ],
+    "pool_libs_mapped_pre_fit": [
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so"
+    ],
+    "pools_after_lightgbm": [
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+      "internal_api": "openblas",
+      "num_threads": 32,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.31.188.0"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+      "internal_api": "openblas",
+      "num_threads": 32,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.30"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 32,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     },
+     {
+      "filepath": "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 24,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     }
+    ],
+    "pools_pre_fit": [
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+      "internal_api": "openblas",
+      "num_threads": 32,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.31.188.0"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+      "internal_api": "openblas",
+      "num_threads": 32,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.30"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 32,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     }
+    ],
+    "threads_after_idle": {
+     "comm": {
+      "jemalloc_bg_thd": 2,
+      "python": 63
+     },
+     "count": 65,
+     "cpu_ms_non_main": 4960.0
+    },
+    "threads_after_lightgbm": {
+     "comm": {
+      "jemalloc_bg_thd": 5,
+      "polars-0": 1,
+      "polars-1": 1,
+      "polars-10": 1,
+      "polars-11": 1,
+      "polars-12": 1,
+      "polars-13": 1,
+      "polars-14": 1,
+      "polars-15": 1,
+      "polars-16": 1,
+      "polars-17": 1,
+      "polars-18": 1,
+      "polars-19": 1,
+      "polars-2": 1,
+      "polars-20": 1,
+      "polars-21": 1,
+      "polars-22": 1,
+      "polars-23": 1,
+      "polars-3": 1,
+      "polars-4": 1,
+      "polars-5": 1,
+      "polars-6": 1,
+      "polars-7": 1,
+      "polars-8": 1,
+      "polars-9": 1,
+      "python": 63
+     },
+     "count": 92,
+     "cpu_ms_non_main": 4960.0
+    },
+    "threads_after_polars_init": {
+     "comm": {
+      "jemalloc_bg_thd": 5,
+      "polars-0": 1,
+      "polars-1": 1,
+      "polars-10": 1,
+      "polars-11": 1,
+      "polars-12": 1,
+      "polars-13": 1,
+      "polars-14": 1,
+      "polars-15": 1,
+      "polars-16": 1,
+      "polars-17": 1,
+      "polars-18": 1,
+      "polars-19": 1,
+      "polars-2": 1,
+      "polars-20": 1,
+      "polars-21": 1,
+      "polars-22": 1,
+      "polars-23": 1,
+      "polars-3": 1,
+      "polars-4": 1,
+      "polars-5": 1,
+      "polars-6": 1,
+      "polars-7": 1,
+      "polars-8": 1,
+      "polars-9": 1,
+      "python": 63
+     },
+     "count": 92,
+     "cpu_ms_non_main": 4960.0
+    },
+    "threads_pre_fit": {
+     "comm": {
+      "jemalloc_bg_thd": 2,
+      "python": 63
+     },
+     "count": 65,
+     "cpu_ms_non_main": 4960.0
+    },
+    "vm_rss": "286364 kB",
+    "vm_size": "5517396 kB"
+   },
+   "rc": 0,
+   "run": 2
+  },
+  {
+   "arm": "trial_child",
+   "data": {
+    "arm": "trial_child",
+    "attribution_pre_fit": {
+     "main": 1,
+     "openblas_workers": 62,
+     "residual": 2
+    },
+    "env_after_pin": {
+     "MKL_NUM_THREADS": "1",
+     "OMP_NUM_THREADS": "24",
+     "OPENBLAS_NUM_THREADS": "1",
+     "POLARS_MAX_THREADS": "24"
+    },
+    "env_at_child_start": {
+     "MKL_NUM_THREADS": null,
+     "OMP_NUM_THREADS": null,
+     "OPENBLAS_NUM_THREADS": null,
+     "POLARS_MAX_THREADS": null
+    },
+    "idle_cpu_ms_non_main": 0.0,
+    "idle_s": 2.0,
+    "import_rises": [
+     {
+      "during_import_of": "numpy._core._multiarray_umath",
+      "from": 1,
+      "to": 32
+     },
+     {
+      "during_import_of": "pyarrow.lib",
+      "from": 32,
+      "to": 33
+     },
+     {
+      "during_import_of": "scipy.special._ufuncs",
+      "from": 33,
+      "to": 64
+     },
+     {
+      "during_import_of": "_polars_runtime_32._polars_runtime",
+      "from": 64,
+      "to": 65
+     },
+     {
+      "during_import_of": "rux_ml.tuning.study",
+      "from": 65,
+      "to": 92
+     }
+    ],
+    "import_wall_s": 0.64,
+    "polars_thread_pool_size": 24,
+    "pool_libs_mapped_after_lightgbm": [
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+     "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0"
+    ],
+    "pool_libs_mapped_pre_fit": [
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so"
+    ],
+    "pools_after_lightgbm": [
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+      "internal_api": "openblas",
+      "num_threads": 32,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.31.188.0"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+      "internal_api": "openblas",
+      "num_threads": 32,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.30"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 32,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     },
+     {
+      "filepath": "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 24,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     }
+    ],
+    "pools_pre_fit": [
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+      "internal_api": "openblas",
+      "num_threads": 32,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.31.188.0"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+      "internal_api": "openblas",
+      "num_threads": 32,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.30"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 32,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     }
+    ],
+    "threads_after_idle": {
+     "comm": {
+      "jemalloc_bg_thd": 2,
+      "python": 63
+     },
+     "count": 65,
+     "cpu_ms_non_main": 4920.0
+    },
+    "threads_after_lightgbm": {
+     "comm": {
+      "jemalloc_bg_thd": 5,
+      "polars-0": 1,
+      "polars-1": 1,
+      "polars-10": 1,
+      "polars-11": 1,
+      "polars-12": 1,
+      "polars-13": 1,
+      "polars-14": 1,
+      "polars-15": 1,
+      "polars-16": 1,
+      "polars-17": 1,
+      "polars-18": 1,
+      "polars-19": 1,
+      "polars-2": 1,
+      "polars-20": 1,
+      "polars-21": 1,
+      "polars-22": 1,
+      "polars-23": 1,
+      "polars-3": 1,
+      "polars-4": 1,
+      "polars-5": 1,
+      "polars-6": 1,
+      "polars-7": 1,
+      "polars-8": 1,
+      "polars-9": 1,
+      "python": 63
+     },
+     "count": 92,
+     "cpu_ms_non_main": 4920.0
+    },
+    "threads_after_polars_init": {
+     "comm": {
+      "jemalloc_bg_thd": 5,
+      "polars-0": 1,
+      "polars-1": 1,
+      "polars-10": 1,
+      "polars-11": 1,
+      "polars-12": 1,
+      "polars-13": 1,
+      "polars-14": 1,
+      "polars-15": 1,
+      "polars-16": 1,
+      "polars-17": 1,
+      "polars-18": 1,
+      "polars-19": 1,
+      "polars-2": 1,
+      "polars-20": 1,
+      "polars-21": 1,
+      "polars-22": 1,
+      "polars-23": 1,
+      "polars-3": 1,
+      "polars-4": 1,
+      "polars-5": 1,
+      "polars-6": 1,
+      "polars-7": 1,
+      "polars-8": 1,
+      "polars-9": 1,
+      "python": 63
+     },
+     "count": 92,
+     "cpu_ms_non_main": 4920.0
+    },
+    "threads_pre_fit": {
+     "comm": {
+      "jemalloc_bg_thd": 2,
+      "python": 63
+     },
+     "count": 65,
+     "cpu_ms_non_main": 4920.0
+    },
+    "vm_rss": "255424 kB",
+    "vm_size": "5482176 kB"
+   },
+   "rc": 0,
+   "run": 2
+  },
+  {
+   "arm": "env_at_start",
+   "data": {
+    "arm": "env_at_start",
+    "attribution_pre_fit": {
+     "main": 1,
+     "openblas_workers": 0,
+     "residual": 2
+    },
+    "env_after_pin": {
+     "MKL_NUM_THREADS": "1",
+     "OMP_NUM_THREADS": "24",
+     "OPENBLAS_NUM_THREADS": "1",
+     "POLARS_MAX_THREADS": "24"
+    },
+    "env_at_child_start": {
+     "MKL_NUM_THREADS": "1",
+     "OMP_NUM_THREADS": "24",
+     "OPENBLAS_NUM_THREADS": "1",
+     "POLARS_MAX_THREADS": "24"
+    },
+    "idle_cpu_ms_non_main": 0.0,
+    "idle_s": 2.0,
+    "import_rises": [
+     {
+      "during_import_of": "pyarrow.lib",
+      "from": 1,
+      "to": 2
+     },
+     {
+      "during_import_of": "_polars_runtime_32._polars_runtime",
+      "from": 2,
+      "to": 3
+     },
+     {
+      "during_import_of": "rux_ml.tuning.study",
+      "from": 3,
+      "to": 30
+     }
+    ],
+    "import_wall_s": 0.56,
+    "polars_thread_pool_size": 24,
+    "pool_libs_mapped_after_lightgbm": [
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+     "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0"
+    ],
+    "pool_libs_mapped_pre_fit": [
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+     "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so"
+    ],
+    "pools_after_lightgbm": [
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+      "internal_api": "openblas",
+      "num_threads": 1,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.31.188.0"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+      "internal_api": "openblas",
+      "num_threads": 1,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.30"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 24,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     },
+     {
+      "filepath": "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 24,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     }
+    ],
+    "pools_pre_fit": [
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so",
+      "internal_api": "openblas",
+      "num_threads": 1,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.31.188.0"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scipy.libs/libscipy_openblas-6cdc3b4a.so",
+      "internal_api": "openblas",
+      "num_threads": 1,
+      "threading_layer": "pthreads",
+      "user_api": "blas",
+      "version": "0.3.30"
+     },
+     {
+      "filepath": "/home/rux/pr063-build/.venv/lib/python3.12/site-packages/scikit_learn.libs/libgomp-e985bcbb.so.1.0.0",
+      "internal_api": "openmp",
+      "num_threads": 24,
+      "threading_layer": null,
+      "user_api": "openmp",
+      "version": null
+     }
+    ],
+    "threads_after_idle": {
+     "comm": {
+      "jemalloc_bg_thd": 2,
+      "python": 1
+     },
+     "count": 3,
+     "cpu_ms_non_main": 0.0
+    },
+    "threads_after_lightgbm": {
+     "comm": {
+      "jemalloc_bg_thd": 5,
+      "polars-0": 1,
+      "polars-1": 1,
+      "polars-10": 1,
+      "polars-11": 1,
+      "polars-12": 1,
+      "polars-13": 1,
+      "polars-14": 1,
+      "polars-15": 1,
+      "polars-16": 1,
+      "polars-17": 1,
+      "polars-18": 1,
+      "polars-19": 1,
+      "polars-2": 1,
+      "polars-20": 1,
+      "polars-21": 1,
+      "polars-22": 1,
+      "polars-23": 1,
+      "polars-3": 1,
+      "polars-4": 1,
+      "polars-5": 1,
+      "polars-6": 1,
+      "polars-7": 1,
+      "polars-8": 1,
+      "polars-9": 1,
+      "python": 1
+     },
+     "count": 30,
+     "cpu_ms_non_main": 0.0
+    },
+    "threads_after_polars_init": {
+     "comm": {
+      "jemalloc_bg_thd": 5,
+      "polars-0": 1,
+      "polars-1": 1,
+      "polars-10": 1,
+      "polars-11": 1,
+      "polars-12": 1,
+      "polars-13": 1,
+      "polars-14": 1,
+      "polars-15": 1,
+      "polars-16": 1,
+      "polars-17": 1,
+      "polars-18": 1,
+      "polars-19": 1,
+      "polars-2": 1,
+      "polars-20": 1,
+      "polars-21": 1,
+      "polars-22": 1,
+      "polars-23": 1,
+      "polars-3": 1,
+      "polars-4": 1,
+      "polars-5": 1,
+      "polars-6": 1,
+      "polars-7": 1,
+      "polars-8": 1,
+      "polars-9": 1,
+      "python": 1
+     },
+     "count": 30,
+     "cpu_ms_non_main": 0.0
+    },
+    "threads_pre_fit": {
+     "comm": {
+      "jemalloc_bg_thd": 2,
+      "python": 1
+     },
+     "count": 3,
+     "cpu_ms_non_main": 0.0
+    },
+    "vm_rss": "254484 kB",
+    "vm_size": "2942208 kB"
+   },
+   "rc": 0,
+   "run": 2
+  }
+ ],
+ "runs": 3,
+ "stripped_env": [
+  "OMP_NUM_THREADS",
+  "OPENBLAS_NUM_THREADS",
+  "MKL_NUM_THREADS",
+  "POLARS_MAX_THREADS",
+  "GOTO_NUM_THREADS"
+ ],
+ "uname": "Linux rux-MS-7D89 6.8.0-138-generic #138~22.04.1-Ubuntu SMP PREEMPT_DYNAMIC Fri Aug  7 13:43:15 UTC  x86_64 x86_64",
+ "versions": {
+  "catboost": "1.2.10",
+  "lightgbm": "4.6.0",
+  "numpy": "2.4.5",
+  "pandas": "3.0.3",
+  "polars": "1.40.1",
+  "pyarrow": "24.0.0",
+  "scikit-learn": "1.8.0",
+  "scipy": "1.17.1",
+  "threadpoolctl": "3.6.0",
+  "xgboost": "3.2.0"
+ }
+}
