@@ -49,6 +49,9 @@ Per the time-decay policy in `PROCEDURE-pr-research.md`, any PR marked `fully-re
 - **PR-020** — Solver-library landscape is fast-moving (Clarabel is younger than OSQP; cvxpy's solver list changes). Phase 1 should re-survey the QP solver landscape at implementation time.
 - **PR-021** — `docs/VERSIONING.md` may have been amended by PR-017 (per A5); the rewrite script's mapping table must reflect those amendments. Cross-check before running.
 
+- **PR-063 Q5 (moved out of PR-063, the operator's go 2026-10-16)** — the XGBoost stall rate at `nthread` 32 / 24 / 8 on the `[m9]` batch shape (PR-062 probe 1: one 26.9 s fit vs 0.07 s; PR-062's build arm 0 / 12 slow at 24 vs 12 / 12 slow at 0). Unranked; the input to any change of the `memory.omp_threads` default (moves `root_cfg_hash`; its own config PR).
+- **PR-063 Q3 follow-up (a lean, not ruled)** — the in-process verbs hold 62 idle OpenBLAS workers (PR-063 Q1: 0 CPU idle, RSS equal); the cost of a BLAS call during a fit next to XGBoost's 24 threads is unmeasured. Measure it before any CLI re-exec (a Tier-2 PR of its own).
+
 ---
 
 ## Design References

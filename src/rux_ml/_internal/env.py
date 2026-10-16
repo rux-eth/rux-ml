@@ -12,8 +12,16 @@ Two surfaces live here:
   PR-082 R3-a; PR-062 probe 2). The XGBoost / CatBoost thread budget
   therefore travels as an explicit argument from ``cfg.memory.omp_threads``
   (``make_trainer(..., threads=...)``; the native adapter's ``memory_cfg``),
-  not through this env var. The import-order fix (and whether the BLAS /
-  MKL / Polars pins reach their pools) is PR-063.
+  not through this env var. PR-063 (measured on the desktop, 2026-10-16):
+  libgomp and both OpenBLAS copies (numpy's, scipy's) size their pools in
+  load-time constructors, so a pin after the import reaches neither; Polars
+  sizes on first use and LightGBM maps its own libgomp lazily, so the pin
+  still reaches both. The trial child therefore receives the four values in
+  its spawn env (:func:`thread_env`, passed by
+  ``tuning/isolation.py``); the in-process verbs (``train``, in-process
+  ``tune``, ``solve``) still pin after the import, so their libgomp /
+  OpenBLAS run at the library default (32 on the desktop) — a CLI re-exec
+  was not built (PR-063 Q3).
 - :func:`get_versions` (PR-013) — captures the runtime version provenance
   block that lands in ``TrialAttrs`` (``xgboost_version``,
   ``cuda_runtime_version``, ``omp_threads``, ``image_digest``,
@@ -23,7 +31,11 @@ Two surfaces live here:
 
 Callers:
 
-- ``_internal/trial_runner.py`` — the subprocess child calls
+- ``tuning/isolation.py`` — the parent spawns the trial child with
+  :func:`thread_env` over its own environment (PR-063), the only route that
+  reaches libgomp / OpenBLAS in the child.
+- ``_internal/trial_runner.py`` — the subprocess child warns when the env it
+  started with disagrees with :func:`thread_env` (PR-063), then calls
   :func:`pin_threads` after loading ``RuxMLConfig`` (PR-008 pattern,
   refactored here in PR-011); that import already loads xgboost and numpy
   (``rux_ml.config`` → ``config/training.py`` → ``rux_ml.training``), so the
@@ -61,6 +73,29 @@ _IMAGE_DIGEST_PATH = Path(".docker-image-digest")
 _UNKNOWN = "unknown"
 
 
+THREAD_ENV_KEYS: tuple[str, ...] = (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "POLARS_MAX_THREADS",
+)
+
+
+def thread_env(memory: MemoryConfig) -> dict[str, str]:
+    """The four thread-pool env values for ``memory`` (keys :data:`THREAD_ENV_KEYS`).
+
+    The one source for :func:`pin_threads` and for the trial child's spawn env
+    (PR-063): a value set before a process starts reaches the pools that size
+    at load (libgomp, OpenBLAS); a value set after the import does not.
+    """
+    return {
+        "OMP_NUM_THREADS": str(memory.omp_threads),
+        "OPENBLAS_NUM_THREADS": str(memory.openblas_threads),
+        "MKL_NUM_THREADS": str(memory.mkl_threads),
+        "POLARS_MAX_THREADS": str(memory.polars_threads),
+    }
+
+
 def pin_threads(memory: MemoryConfig) -> None:
     """Export ``OMP_NUM_THREADS`` / ``OPENBLAS_NUM_THREADS`` / ``MKL_NUM_THREADS``
     / ``POLARS_MAX_THREADS`` from a resolved ``MemoryConfig``.
@@ -69,10 +104,7 @@ def pin_threads(memory: MemoryConfig) -> None:
     unconditionally (overwrites any inherited shell value) so the workbench's
     intended budget always wins.
     """
-    os.environ["OMP_NUM_THREADS"] = str(memory.omp_threads)
-    os.environ["OPENBLAS_NUM_THREADS"] = str(memory.openblas_threads)
-    os.environ["MKL_NUM_THREADS"] = str(memory.mkl_threads)
-    os.environ["POLARS_MAX_THREADS"] = str(memory.polars_threads)
+    os.environ.update(thread_env(memory))
 
 
 class EnvironmentVersions(NamedTuple):

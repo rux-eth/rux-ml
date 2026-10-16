@@ -618,7 +618,7 @@ Container digest pinning is non-negotiable per `docs/CONSTRAINTS.md`.
 | OOM soft cap | Container `--memory-reservation=28g` | 28 GB |
 | In-process watchdog | `psutil` RSS sampler at 1 Hz; `MemoryPressureError → optuna.TrialPruned` | 28 GB threshold (BEST-GUESS) |
 | Trial isolation | `subprocess.run` of `python -m rux_ml._internal.trial_runner` (spawn semantics) | enabled |
-| Thread allocation | `OMP_NUM_THREADS=24`, `OPENBLAS_NUM_THREADS=1`, `MKL_NUM_THREADS=1`, `POLARS_MAX_THREADS=24`, XGBoost `nthread=24` | per-library all-or-one |
+| Thread allocation | `OMP_NUM_THREADS=24`, `OPENBLAS_NUM_THREADS=1`, `MKL_NUM_THREADS=1`, `POLARS_MAX_THREADS=24`, XGBoost `nthread=24` (the booster and every native-adapter matrix, PR-062 / PR-063). libgomp and OpenBLAS read the env when they load, so the four values reach them only when set before the process starts: the trial child receives them in its spawn env (`tuning/isolation.py`, PR-063); the in-process verbs pin after the import, so their libgomp / OpenBLAS run at the library default (32 on the desktop). Polars and LightGBM's libgomp size after the pin and honour it. MKL is not installed. | per-library all-or-one |
 | Skipped | `RLIMIT_AS` (unreliable on Linux) | — |
 | On-demand profiling | `memray attach --aggregate` | manual |
 | ExtMem host-RAM cache | `MemoryConfig.cache_host_ratio` (`null` = XGBoost auto-estimate) — consumed by `XGBoostNativeAdapter` (per PR-033) when `use_native=True` AND `select_ingest` returns `ExtMemQuantileDMatrix` AND `cfg.training.device=="cuda"` (XGBoost 3.2 only honors the kwarg on GPU; CPU build raises) | `null` |

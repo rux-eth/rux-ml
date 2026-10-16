@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import optuna
+import pytest
 
 from rux_ml.config import RuxMLConfig, TuningConfig
 from rux_ml.tuning.isolation import (
@@ -202,3 +203,97 @@ def test_mark_trial_failed_flips_running_trial_state(tmp_path: Path) -> None:
     post = optuna.load_study(study_name="t_mark", storage=storage)
     assert all(t.state != optuna.trial.TrialState.RUNNING for t in post.trials)
     assert any(t.state == optuna.trial.TrialState.FAIL for t in post.trials)
+
+
+# --- PR-063 (Q2): the parent passes the pinned thread env at spawn ----------------
+
+_THREAD_KEYS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "POLARS_MAX_THREADS")
+
+
+def _spawn_env(tmp_path: Path, cfg: RuxMLConfig) -> dict[str, str]:
+    captured: dict[str, object] = {}
+
+    class _FakeCompleted:
+        returncode = 0
+
+    def _fake_run(argv: list[str], **kwargs: object) -> _FakeCompleted:
+        captured["env"] = kwargs.get("env")
+        return _FakeCompleted()
+
+    with patch("rux_ml.tuning.isolation.subprocess.run", side_effect=_fake_run):
+        run_subprocess_trial(
+            cfg=cfg,
+            cfg_path=tmp_path / "base.toml",
+            problem=None,
+            study_layer=None,
+            study_name="t-env",
+            overrides={},
+        )
+    env = captured["env"]
+    assert isinstance(env, dict), "the child must be spawned with an explicit env"
+    return env  # pyright: ignore[reportUnknownVariableType]
+
+
+def _cfg(omp: int, openblas: int, mkl: int, polars: int) -> RuxMLConfig:
+    from rux_ml.config import MemoryConfig  # noqa: PLC0415
+
+    return RuxMLConfig(
+        tuning=TuningConfig(trial_timeout_s=None),
+        memory=MemoryConfig(
+            omp_threads=omp, openblas_threads=openblas, mkl_threads=mkl, polars_threads=polars
+        ),
+    )
+
+
+def test_run_subprocess_trial_passes_the_pinned_thread_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OMP_NUM_THREADS", "99")  # an inherited shell value loses
+    monkeypatch.setenv("RUXML_PR063_KEPT", "kept")  # the rest of the env is inherited
+    env = _spawn_env(tmp_path, _cfg(5, 2, 3, 4))
+    assert {k: env[k] for k in _THREAD_KEYS} == {
+        "OMP_NUM_THREADS": "5",
+        "OPENBLAS_NUM_THREADS": "2",
+        "MKL_NUM_THREADS": "3",
+        "POLARS_MAX_THREADS": "4",
+    }
+    assert env["RUXML_PR063_KEPT"] == "kept"
+    import os  # noqa: PLC0415
+
+    assert os.environ["OMP_NUM_THREADS"] == "99"  # the parent's own env is not touched
+
+
+_POOL_PROBE = """
+import json
+from rux_ml.config import RuxMLConfig  # noqa: F401 -- the child's first import (trial_runner)
+from threadpoolctl import threadpool_info
+info = threadpool_info()
+import polars as pl
+print(json.dumps({
+    "omp": sorted({i["num_threads"] for i in info if i["user_api"] == "openmp"}),
+    "blas": sorted({i["num_threads"] for i in info if i["user_api"] == "blas"}),
+    "polars": pl.thread_pool_size(),
+}))
+"""
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="libgomp / OpenBLAS size their pools at load on Linux; on macOS a late pin "
+    "already works, so a Mac run proves nothing (PR-063 Phase 1, stale 6)",
+)
+def test_the_spawn_env_reaches_libgomp_openblas_and_polars_in_the_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The effect, not the env (PR-011's lesson): the pools of a child spawned with the
+    env the parent passes, after the child's heavy ``rux_ml.config`` import."""
+    import subprocess  # noqa: PLC0415
+
+    for key in (*_THREAD_KEYS, "GOTO_NUM_THREADS"):
+        monkeypatch.delenv(key, raising=False)
+    env = _spawn_env(tmp_path, _cfg(5, 2, 1, 4))
+    out = subprocess.run(
+        [sys.executable, "-c", _POOL_PROBE], env=env, capture_output=True, text=True, check=True
+    )
+    got = json.loads(out.stdout.strip().splitlines()[-1])
+    assert got == {"omp": [5], "blas": [2], "polars": 4}
