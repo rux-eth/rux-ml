@@ -114,6 +114,10 @@ class XGBoostNativeAdapter:
 
         ``model_kwargs`` last-wins matches PR-006's convention so TOML
         overrides apply without per-field plumbing.
+
+        ``nthread`` (PR-062): the CPU thread budget ``memory_cfg.omp_threads``, set
+        before the ``model_kwargs`` update (an env pin after xgboost loads cannot
+        reach libgomp's pool; program PR-082 R3-a).
         """
         params: dict[str, Any] = {
             "device": self._cfg.device,
@@ -124,6 +128,7 @@ class XGBoostNativeAdapter:
             "colsample_bytree": self._cfg.colsample_bytree,
             "eval_metric": self._cfg.metric,
             "objective": _objective_for_task(self._task),
+            "nthread": self._memory_cfg.omp_threads,
         }
         if self._seed is not None:
             params["seed"] = self._seed

@@ -3,10 +3,17 @@
 Two surfaces live here:
 
 - :func:`pin_threads` (PR-011 sub-decision A1) — sets the thread-pool /
-  parallelism env vars the workbench must export **before** importing
-  numpy / polars / sklearn / xgboost. Those libraries read the env at
-  import-time to size their thread pools; setting them later is a no-op
-  against the existing pool.
+  parallelism env vars the workbench means to export **before** importing
+  numpy / polars / sklearn / xgboost. Those libraries read the env when they
+  size their thread pools; setting them later is a no-op against the
+  existing pool. **As of PR-062 that ordering holds on no path**: every
+  caller below pins after xgboost (and numpy) have loaded — measured on the
+  desktop, ``OMP_NUM_THREADS`` 24 set, ``omp_get_max_threads()`` 32 (program
+  PR-082 R3-a; PR-062 probe 2). The XGBoost / CatBoost thread budget
+  therefore travels as an explicit argument from ``cfg.memory.omp_threads``
+  (``make_trainer(..., threads=...)``; the native adapter's ``memory_cfg``),
+  not through this env var. The import-order fix (and whether the BLAS /
+  MKL / Polars pins reach their pools) is PR-063.
 - :func:`get_versions` (PR-013) — captures the runtime version provenance
   block that lands in ``TrialAttrs`` (``xgboost_version``,
   ``cuda_runtime_version``, ``omp_threads``, ``image_digest``,
@@ -17,8 +24,10 @@ Two surfaces live here:
 Callers:
 
 - ``_internal/trial_runner.py`` — the subprocess child calls
-  :func:`pin_threads` after loading ``RuxMLConfig`` and before lazy-importing
-  the heavy stack (PR-008 pattern, refactored here in PR-011). Calls
+  :func:`pin_threads` after loading ``RuxMLConfig`` (PR-008 pattern,
+  refactored here in PR-011); that import already loads xgboost and numpy
+  (``rux_ml.config`` → ``config/training.py`` → ``rux_ml.training``), so the
+  heavy stack is not lazy there (PR-062 probe 2; PR-063). Calls
   :func:`get_versions` from inside the trial body (after heavy imports).
 - ``cli/train.py`` and ``cli/tune.py`` — in-process CLI verbs call
   :func:`pin_threads` at the start of the verb body so a user running

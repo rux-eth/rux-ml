@@ -118,7 +118,8 @@ def test_catboost_takes_the_same_argument(monkeypatch: pytest.MonkeyPatch) -> No
     trainer = cast("Any", make_trainer(_catboost(), threads=BUDGET.omp_threads))
     assert trainer.get_params()["thread_count"] == 7
     unset = cast("Any", make_trainer(_catboost()))
-    assert unset.get_params()["thread_count"] == -1  # CatBoost's own default: all cores
+    # -1 = CatBoost's own default (all cores); its get_params leaves the default out
+    assert unset.get_params().get("thread_count", -1) == -1
 
 
 def test_lightgbm_accepts_the_argument_and_ignores_it() -> None:

@@ -127,7 +127,9 @@ def _lgbm_kwargs(cfg: LightGBMTraining, *, seed: int | None) -> dict[str, Any]:
     return base
 
 
-def make_lightgbm_trainer(cfg: LightGBMTraining, *, seed: int | None = None) -> Trainer:
+def make_lightgbm_trainer(
+    cfg: LightGBMTraining, *, seed: int | None = None, threads: int | None = None
+) -> Trainer:
     """Return the concrete LightGBM trainer for ``cfg`` wrapped in the early-stopping shim.
 
     The task (classifier vs regressor) is derived from ``cfg.metric``:
@@ -153,6 +155,11 @@ def make_lightgbm_trainer(cfg: LightGBMTraining, *, seed: int | None = None) -> 
         raise NotImplementedError(msg)
 
     from lightgbm import LGBMClassifier, LGBMRegressor  # noqa: PLC0415
+
+    # PR-062: ``make_trainer`` passes every family the CPU thread budget; LightGBM accepts
+    # it and ignores it (gate lean 5) — it imports lazily, after ``pin_threads``, so its
+    # OpenMP pool is expected to honor ``OMP_NUM_THREADS`` (best-guess, unmeasured).
+    del threads
 
     kwargs = _lgbm_kwargs(cfg, seed=seed)
     task = task_for_metric(cfg.metric)

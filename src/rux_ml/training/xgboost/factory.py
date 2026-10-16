@@ -30,7 +30,9 @@ if TYPE_CHECKING:
 _EVAL_METRIC_TRANSLATE: dict[str, str] = {"brier": "rmse"}
 
 
-def _xgb_kwargs(cfg: XGBoostTraining, *, seed: int | None) -> dict[str, object]:
+def _xgb_kwargs(
+    cfg: XGBoostTraining, *, seed: int | None, threads: int | None = None
+) -> dict[str, object]:
     """Assemble the XGBoost kwargs from ``XGBoostTraining`` fields + model_kwargs.
 
     ``model_kwargs`` always wins on key collisions so callers can override
@@ -43,6 +45,12 @@ def _xgb_kwargs(cfg: XGBoostTraining, *, seed: int | None) -> dict[str, object]:
     fits with the same seed (and ``tree_method="hist"`` + single thread on
     CPU) produce bit-exact predictions. GPU `hist` is near-deterministic
     only (per D9 + CONSTRAINTS.md tolerance-based golden-tests rule).
+
+    ``threads`` (PR-062): the CPU thread budget, ``cfg.memory.omp_threads`` at every
+    workbench fit site, set as ``n_jobs`` (the booster's ``nthread``). It is the transport
+    because ``pin_threads``' ``OMP_NUM_THREADS`` is exported after xgboost has loaded, when
+    libgomp's pool is already sized (program PR-082 R3-a: 24 set, 32 effective). ``None``
+    sets nothing (the OpenMP default). ``model_kwargs`` ``n_jobs`` still wins.
     """
     base: dict[str, object] = {
         "device": cfg.device,
@@ -58,11 +66,15 @@ def _xgb_kwargs(cfg: XGBoostTraining, *, seed: int | None) -> dict[str, object]:
     }
     if seed is not None:
         base["random_state"] = seed
+    if threads is not None:
+        base["n_jobs"] = threads
     base.update(cfg.model_kwargs)
     return base
 
 
-def make_xgboost_trainer(cfg: XGBoostTraining, *, seed: int | None = None) -> Trainer:
+def make_xgboost_trainer(
+    cfg: XGBoostTraining, *, seed: int | None = None, threads: int | None = None
+) -> Trainer:
     """Return the concrete XGBoost trainer for ``cfg``.
 
     The task (classifier vs regressor) is derived from ``cfg.metric`` via the
@@ -73,8 +85,11 @@ def make_xgboost_trainer(cfg: XGBoostTraining, *, seed: int | None = None) -> Tr
     nondeterministic RNG. ``model_kwargs`` in the config takes precedence
     over the ``seed`` argument on key collision (matches PR-006's existing
     "model_kwargs wins" convention for direct user overrides).
+
+    ``threads`` (PR-062): the CPU thread budget (``cfg.memory.omp_threads``), set as
+    ``n_jobs`` before ``model_kwargs`` (see :func:`_xgb_kwargs`).
     """
-    kwargs = _xgb_kwargs(cfg, seed=seed)
+    kwargs = _xgb_kwargs(cfg, seed=seed, threads=threads)
     task = task_for_metric(cfg.metric)
     # XGBoost stubs don't expose ``best_iteration_`` (set at runtime) so the
     # structural match against the minimal Trainer Protocol needs a cast here.

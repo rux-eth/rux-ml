@@ -356,7 +356,7 @@ Reproducibility-grade seed handling lives in `src/rux_ml/_internal/seeds.py`. Fu
 - **`bag.entropy_hex` (32 lowercase hex chars) is the round-trip identity.** Storing it in `TrialAttrs.entropy_hex` is sufficient to reconstruct the full bag — no need for the master or trial number at promotion time. `registry/promote.py` reads the recorded `entropy_hex` and calls `make_seed_bag_from_hex` so the re-fit uses the EXACT same `split_seed` and `xgb_seed` the originating trial used. Without this contract, the promoted bundle would silently diverge from the trial's reported metrics.
 - **Child seeds are int32-safe.** `_seed_from_child` masks to `[0, 2**31)` so JSON / SQLite TEXT round-trips and XGBoost's `random_state` handling are both stable.
 - **`features/encoders.py` `NestedCVWrapper` keeps `random_state=0`.** Target-encoder internal CV is an implementation detail of the feature pipeline, not part of the outer `(split, cv, sampler, xgb)` bag. Future PRs that introduce additional randomized feature transforms may revisit if the determinism contract demands it.
-- **CPU bit-exact contract**: `device="cpu"` + `tree_method="hist"` + `OMP_NUM_THREADS=1` + pinned `xgb_seed` → bit-exact predictions. The integration test in `tests/integration/test_determinism_cpu.py` asserts this with `np.testing.assert_array_equal`; subsampling (`subsample=0.8, colsample_bytree=0.8`) is enabled there so the seed actually drives randomness.
+- **CPU bit-exact contract**: `device="cpu"` + `tree_method="hist"` + `n_jobs=1` (in `training.model_kwargs`, which wins over the factory's thread budget) + pinned `xgb_seed` → bit-exact predictions. The tests' autouse `OMP_NUM_THREADS=1` runs after their module has imported xgboost, so it is expected to be a no-op (PR-062; import order proven, runtime best-guess); `n_jobs=1` carries the contract. The integration test in `tests/integration/test_determinism_cpu.py` asserts this with `np.testing.assert_array_equal`; subsampling (`subsample=0.8, colsample_bytree=0.8`) is enabled there so the seed actually drives randomness.
 - **GPU near-determinism contract** (per D9): `device="cuda"` + pinned `xgb_seed` → predictions match within `atol=1e-5`. **Never** `assert_array_equal` on GPU output (forbidden by `docs/CONSTRAINTS.md` Tolerance-Based Golden Tests rule). If the GPU tolerance test fails intermittently, investigate against XGBoost release notes; do not loosen the tolerance silently.
 
 ## Environment version capture (per PR-013)
@@ -449,25 +449,27 @@ src/rux_ml/solving/
 
 ## Per-family threading model (per PR-019 Q-Parallel)
 
-The workbench's `pin_threads()` (PR-011) exports `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, `POLARS_MAX_THREADS` env vars to the trial subprocess. **Not every family honors these.**
+The workbench's `pin_threads()` (PR-011) exports `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, `POLARS_MAX_THREADS` env vars. **An env pin reaches a library only if it is set before the library sizes its pool**, and today every verb pins after xgboost (and numpy) have loaded: `rux_ml.cli` imports the verbs at load, and the trial child's `rux_ml.config` import chain loads xgboost before its `pin_threads` (program PR-082 R3-a; PR-062's probe 2: `OMP_NUM_THREADS` 24 set, `omp_get_max_threads()` 32). The import-order fix is PR-063.
+
+**The thread budget therefore travels as an explicit argument (PR-062).** Every fit site — `cli/train.py`, `tuning/objective.py`, `registry/promote.py`, `training/xgboost/batches.py` (`fit_batches`) — passes `threads=cfg.memory.omp_threads` to `make_trainer` / `make_xgboost_trainer`; the native adapter reads its `memory_cfg.omp_threads`. `training.model_kwargs` still wins on a collision (`n_jobs` / `nthread`).
 
 | Family | Threading library | Honors `OMP_NUM_THREADS`? | Workbench transport |
 |---|---|---|---|
-| XGBoost | OpenMP | Yes | env var (no factory action) |
-| LightGBM | OpenMP | Yes | env var (no factory action) |
-| **CatBoost** | **Intel TBB** | **No** | factory reads env, passes `thread_count=` explicitly |
+| XGBoost | OpenMP | Only if set before xgboost loads (it is not, PR-063) | factory `threads` → `n_jobs` (booster `nthread`); native adapter `nthread` from `memory_cfg` |
+| LightGBM | OpenMP | Expected (lazy import after the pin; best-guess, unmeasured) | env var; the factory accepts `threads` and ignores it |
+| **CatBoost** | **Intel TBB** | **No** | factory `threads` → `thread_count=` (`None` → -1, all cores) |
 
-When adding a family whose threading library is NOT OpenMP, the factory must read `OMP_NUM_THREADS` from the env and translate explicitly. For CatBoost, the helper is `_resolve_thread_count()` in `src/rux_ml/training/catboost/factory.py`.
+When adding a family, its factory takes the `threads` keyword from `make_trainer` and maps it to the family's own thread parameter (or accepts and ignores it, saying why). The booster records what it ran with: `TrialAttrs.booster_nthread`, `fold_meta.json` `booster.nthread` and the manifest's `refit.nthread` read the booster's saved config (PR-054 / PR-059); `TrialAttrs.omp_threads` records the budget.
 
 **CPU bit-exact determinism (PR-013 contract)** also varies by family:
 
-- XGBoost: `random_state` + `OMP_NUM_THREADS=1` + `tree_method="hist"` suffices.
+- XGBoost: `random_state` + `n_jobs=1` (in `training.model_kwargs`) + `tree_method="hist"` suffices (PR-062: not `OMP_NUM_THREADS=1`, which is set after xgboost has loaded).
 - LightGBM: `random_state` + `deterministic=True` + `OMP_NUM_THREADS=1`.
 - CatBoost: `random_seed` + `thread_count=1` + `bootstrap_type='No'` + `rsm=1` + `random_strength=0` + `has_time=True` + `boosting_type='Plain'`. **A dedicated determinism test for CatBoost is deferred to a follow-up Tier-2 PR** (PR-019 scope reduction — recipe is exotic, deserves its own focused review).
 
 ## Per-family fit-time callbacks / kwarg translation (per PR-018 Q-Wrap)
 
-Each family's factory translates `TrainingBase` and per-variant config fields to the family's upstream kwarg names. The Trainer Protocol surface (`fit(X, y, **kwargs) -> Trainer`; `predict(X) -> ArrayLike`) is family-agnostic; callers (cli/train.py, tuning/objective.py, registry/promote.py) call `make_trainer(cfg.training, seed=...).fit(x, y, ...)` without knowing the family.
+Each family's factory translates `TrainingBase` and per-variant config fields to the family's upstream kwarg names. The Trainer Protocol surface (`fit(X, y, **kwargs) -> Trainer`; `predict(X) -> ArrayLike`) is family-agnostic; callers (cli/train.py, tuning/objective.py, registry/promote.py) call `make_trainer(cfg.training, seed=..., threads=cfg.memory.omp_threads).fit(x, y, ...)` without knowing the family.
 
 Family-specific translation patterns observed so far:
 

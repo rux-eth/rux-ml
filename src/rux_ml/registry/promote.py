@@ -243,7 +243,7 @@ def _refit(
     x_train_t = cast("pl.DataFrame", pipeline.transform(x_train))  # pyright: ignore[reportUnknownMemberType]
     x_val_t = cast("pl.DataFrame", pipeline.transform(x_val))  # pyright: ignore[reportUnknownMemberType]
 
-    trainer = make_trainer(cfg.training, seed=bag.xgb_seed)
+    trainer = make_trainer(cfg.training, seed=bag.xgb_seed, threads=cfg.memory.omp_threads)
     trainer.fit(
         x_train_t.to_pandas(),
         y_train.to_numpy(),

@@ -626,7 +626,7 @@ GPU is NOT bit-exact across hardware (`docs/CONSTRAINTS.md` Tolerance-Based Gold
 | Thread allocation | `OMP_NUM_THREADS=24` / `OPENBLAS=MKL=1` / `POLARS_MAX_THREADS=24` | per-library all-or-one |
 | ExtMem host-RAM cache | `MemoryConfig.cache_host_ratio` | `null` = XGBoost auto-estimate |
 
-`pin_threads(cfg.memory)` is the canonical surface — every CLI verb calls it. The subprocess child calls it **before** importing numpy/polars/sklearn/xgboost because those libraries read the env at import-time to size their thread pools (setting them later is a no-op against the existing pool).
+`pin_threads(cfg.memory)` exports the env — every CLI verb calls it. It is meant to run **before** numpy/polars/sklearn/xgboost load, because those libraries read the env when they size their thread pools (setting them later is a no-op against the existing pool); today it runs after xgboost has loaded on every path (program PR-082 R3-a: 24 set, 32 effective; the import-order fix is PR-063). **XGBoost's budget therefore travels explicitly (PR-062):** every fit passes `memory.omp_threads` as `n_jobs` / `nthread` (CatBoost: `thread_count`), and the booster's recorded `nthread` (`booster_nthread`, `fold_meta.json`, the manifest's `refit.nthread`) reads 24 at the default, not 0. A `training.model_kwargs.n_jobs` still wins.
 
 `threadpoolctl` is intentionally NOT used — it can't reliably reach across distinct OpenMP runtimes (libgomp vs libiomp).
 

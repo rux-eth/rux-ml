@@ -245,7 +245,7 @@ def _fold_scores(
         # artifact upload. Wall-clock timing only — CUDA streams may complete
         # asynchronously, but xgb's GPU sync at predict() makes the wall-clock
         # measurement a faithful upper-bound on fit cost.
-        trainer = make_trainer(cfg.training, seed=bag.xgb_seed)
+        trainer = make_trainer(cfg.training, seed=bag.xgb_seed, threads=cfg.memory.omp_threads)
         x_tr_pd = x_tr_t.to_pandas()
         x_te_pd = x_te_t.to_pandas()
         fold_start = time.perf_counter()
