@@ -214,3 +214,80 @@ def test_trial_runner_overrides_json_round_trips(child_workdir: Path) -> None:
         trial.user_attrs["training_cfg_hash"]
         != baseline_study.trials[0].user_attrs["training_cfg_hash"]
     )
+
+
+# --- PR-063 (Q2): the child warns, not refuses, when its start env disagrees ------
+
+
+def test_the_child_warns_when_its_start_env_disagrees(caplog: pytest.LogCaptureFixture) -> None:
+    import logging  # noqa: PLC0415
+
+    mem = MemoryConfig(omp_threads=12, openblas_threads=2, mkl_threads=3, polars_threads=8)
+    start = {
+        "OMP_NUM_THREADS": "32",
+        "OPENBLAS_NUM_THREADS": "2",
+        "MKL_NUM_THREADS": "3",
+        "POLARS_MAX_THREADS": None,
+    }
+    with caplog.at_level(logging.WARNING, logger=trial_runner.__name__):
+        mismatched = trial_runner._warn_on_thread_env_mismatch(mem, start)  # pyright: ignore[reportPrivateUsage]
+    assert mismatched == ["OMP_NUM_THREADS", "POLARS_MAX_THREADS"]
+    assert "OMP_NUM_THREADS" in caplog.text
+    assert "POLARS_MAX_THREADS" in caplog.text
+
+
+def test_the_child_warning_logs_all_four_values(caplog: pytest.LogCaptureFixture) -> None:
+    """One key off: the warning still names all four start / cfg values (the full picture)."""
+    import logging  # noqa: PLC0415
+
+    mem = MemoryConfig(omp_threads=12, openblas_threads=2, mkl_threads=3, polars_threads=8)
+    start = {
+        "OMP_NUM_THREADS": "32",
+        "OPENBLAS_NUM_THREADS": "2",
+        "MKL_NUM_THREADS": "3",
+        "POLARS_MAX_THREADS": "8",
+    }
+    with caplog.at_level(logging.WARNING, logger=trial_runner.__name__):
+        mismatched = trial_runner._warn_on_thread_env_mismatch(mem, start)  # pyright: ignore[reportPrivateUsage]
+    assert mismatched == ["OMP_NUM_THREADS"]
+    assert [r.levelno for r in caplog.records] == [logging.WARNING]
+    for key in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "POLARS_MAX_THREADS"):
+        assert key in caplog.text
+    assert "'32'" in caplog.text
+    assert "'12'" in caplog.text
+
+
+def test_the_child_is_silent_when_its_start_env_matches(caplog: pytest.LogCaptureFixture) -> None:
+    import logging  # noqa: PLC0415
+
+    mem = MemoryConfig(omp_threads=12, openblas_threads=2, mkl_threads=3, polars_threads=8)
+    start = {
+        "OMP_NUM_THREADS": "12",
+        "OPENBLAS_NUM_THREADS": "2",
+        "MKL_NUM_THREADS": "3",
+        "POLARS_MAX_THREADS": "8",
+    }
+    with caplog.at_level(logging.WARNING, logger=trial_runner.__name__):
+        assert trial_runner._warn_on_thread_env_mismatch(mem, start) == []  # pyright: ignore[reportPrivateUsage]
+    assert caplog.text == ""
+
+
+def test_main_checks_the_env_it_started_with(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``main`` snapshots the thread env before its heavy config import and checks it."""
+    seen: dict[str, object] = {}
+
+    class _Stop(Exception):
+        pass
+
+    def _fake(memory: MemoryConfig, start_env: dict[str, str | None]) -> list[str]:
+        seen["start"] = dict(start_env)
+        raise _Stop
+
+    monkeypatch.setattr(trial_runner, "_warn_on_thread_env_mismatch", _fake)
+    monkeypatch.setenv("OMP_NUM_THREADS", "31")
+    base = Path(__file__).resolve().parents[2] / "configs" / "base.toml"
+    with pytest.raises(_Stop):
+        trial_runner.main(["--config", str(base), "--study-name", "pr063-never-created"])
+    start = seen["start"]
+    assert isinstance(start, dict)
+    assert start["OMP_NUM_THREADS"] == "31"

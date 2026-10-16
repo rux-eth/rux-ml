@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 import sys
 import tempfile
@@ -23,6 +24,8 @@ from typing import TYPE_CHECKING
 
 import optuna
 from optuna.trial import TrialState
+
+from rux_ml._internal.env import thread_env
 
 if TYPE_CHECKING:
     from rux_ml.config import RuxMLConfig
@@ -119,11 +122,18 @@ def run_subprocess_trial(
     try:
         argv = _child_argv(cfg_path, problem, study_layer, study_name, overrides_json)
         logger.info("spawning child: %s", " ".join(argv))
+        # PR-063: the child's pools that size at load (libgomp, both OpenBLAS
+        # copies) read the env before the child's own pin can run (its config
+        # import loads numpy / scipy / sklearn / xgboost), so the pinned values
+        # travel in the spawn env; the child still pins (idempotent) and warns
+        # if its start env disagrees.
+        child_env = {**os.environ, **thread_env(cfg.memory)}
         try:
             result = subprocess.run(
                 argv,
                 check=False,
                 timeout=cfg.tuning.trial_timeout_s,
+                env=child_env,
             )
         except subprocess.TimeoutExpired:
             logger.warning(

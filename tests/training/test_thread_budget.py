@@ -127,3 +127,62 @@ def test_lightgbm_accepts_the_argument_and_ignores_it() -> None:
     with_budget = cast("Any", make_trainer(cfg, threads=BUDGET.omp_threads))
     without = cast("Any", make_trainer(cfg))
     assert with_budget.get_params() == without.get_params()
+
+
+# --- PR-063 (Q4): the native adapter's matrices carry the budget too -------------
+# PR-062 put ``nthread`` on the booster; the matrices were built at XGBoost's default
+# (``nthread=None`` -> -1 -> the OpenMP default, 32 on the desktop, not 24).
+
+
+def _spy_plain_dmatrix(monkeypatch: pytest.MonkeyPatch) -> list[object]:
+    """Record the ``nthread`` of every plain ``xgb.DMatrix(...)`` the adapter builds."""
+    import xgboost as xgb  # noqa: PLC0415
+
+    seen: list[object] = []
+
+    class _Spy(xgb.DMatrix):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            seen.append(kwargs.get("nthread"))
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(xgb, "DMatrix", _Spy)
+    return seen
+
+
+def test_the_native_adapter_quantile_matrix_carries_the_budget(tmp_path: Any) -> None:
+    import xgboost as xgb  # noqa: PLC0415
+
+    adapter = _adapter(_xgb())
+    x, y = _xy()
+    dtrain = adapter._build_train_dmatrix(x, y, tmp_dir=tmp_path)  # pyright: ignore[reportPrivateUsage]
+    assert type(dtrain) is xgb.QuantileDMatrix
+    assert dtrain.nthread == 7
+
+
+def test_the_native_adapter_extmem_matrix_carries_the_budget(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import xgboost as xgb  # noqa: PLC0415
+
+    from rux_ml.training.xgboost import native_adapter  # noqa: PLC0415
+
+    monkeypatch.setattr(
+        native_adapter, "select_ingest", lambda *_a, **_k: xgb.ExtMemQuantileDMatrix
+    )
+    adapter = _adapter(_xgb())
+    x, y = _xy()
+    dtrain = adapter._build_train_dmatrix(x, y, tmp_dir=tmp_path)  # pyright: ignore[reportPrivateUsage]
+    assert type(dtrain) is xgb.ExtMemQuantileDMatrix
+    assert dtrain.nthread == 7
+
+
+def test_the_native_adapter_eval_and_predict_matrices_carry_the_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _spy_plain_dmatrix(monkeypatch)
+    adapter = _adapter(_xgb())
+    x, y = _xy()
+    adapter.fit(x, y, eval_set=[(x, y)])
+    adapter.predict(x.to_pandas())
+    adapter.predict_proba(x.to_pandas())
+    assert seen == [7, 7, 7]  # the eval matrix, predict, predict_proba

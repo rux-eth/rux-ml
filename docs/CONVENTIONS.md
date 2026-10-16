@@ -305,22 +305,17 @@ This pattern avoids the pitfalls of `model_copy(update=…)` with nested fields 
 
 ---
 
-## Subprocess-per-trial env pinning (per PR-008)
+## Subprocess-per-trial env pinning (per PR-008; PR-063)
 
-The subprocess-per-trial path (`cfg.tuning.trial_isolation = "subprocess"`, default) requires a strict module-loading order in `src/rux_ml/_internal/trial_runner.py`:
+The subprocess-per-trial path (`cfg.tuning.trial_isolation = "subprocess"`, default) gets its thread budget from its spawn env. PR-008's design (the child pins before every heavy import) has not held since PR-017, when `rux_ml.config` began loading the training stack; PR-063 replaced it:
 
-1. **Top-level imports stay stdlib-only** (`argparse`, `json`, `os`, `sys`, `pathlib`).
-2. `main()` parses CLI args + loads the overrides JSON.
-3. `from rux_ml.config import RuxMLConfig` (light — pydantic + tomllib only).
-4. `cfg = RuxMLConfig.from_layers(...)`.
-5. **Pin thread env vars from `cfg.memory` before any heavy import**:
-   - `OMP_NUM_THREADS` = `cfg.memory.omp_threads`
-   - `OPENBLAS_NUM_THREADS` = `cfg.memory.openblas_threads`
-   - `MKL_NUM_THREADS` = `cfg.memory.mkl_threads`
-   - `POLARS_MAX_THREADS` = `cfg.memory.polars_threads`
-6. **Now** lazy-import `rux_ml.tuning` + the rest (which pull in numpy / polars / sklearn / xgboost).
+1. **The parent passes the four values in the child's spawn env**: `tuning/isolation.py` runs the child with `env={**os.environ, **thread_env(cfg.memory)}` (`_internal/env.py`; `thread_env` is also `pin_threads`' one source). The parent's own `os.environ` is not touched.
+2. `src/rux_ml/_internal/trial_runner.py` keeps its top-level imports stdlib-only; `main()` parses the args, loads the overrides JSON and **snapshots the four values it started with**, before any `rux_ml.config` import.
+3. `from rux_ml.config import RuxMLConfig` is **not light**: the `rux_ml.training` package inits load numpy / scipy / sklearn / xgboost / polars / pyarrow / pandas.
+4. `cfg = RuxMLConfig.from_layers(...)`; when the start env disagrees with `cfg.memory` (a child not spawned by `isolation.py`, e.g. run by hand), the child **logs a warning naming all four values — it does not refuse**.
+5. `pin_threads(cfg.memory)` (idempotent), then the lazy imports of `rux_ml.tuning` and the rest.
 
-**Why the order matters**: numpy / openblas / mkl read these env vars at import-time to size their thread pools. Setting them after the libraries are imported is a no-op against the existing pool — at best it affects subsequent operations and at worst it silently does nothing. The child sets them once before the first heavy import.
+**Why the spawn env**: on Linux libgomp and both OpenBLAS copies (numpy's, scipy's) read these env vars in load-time constructors, so only a value present when the process starts reaches them (desktop, PR-063 Q1: 65 threads before any fit with the pin after the import, libgomp 32; 3 with the env at start, libgomp 24, OpenBLAS 1 + 1). Polars sizes its pool on first use and LightGBM maps the system libgomp when it is imported, both after the pin, so the child's own pin still reaches them. On macOS LLVM libomp reads the env on first use, so a Mac run cannot show the defect. The in-process verbs still pin after the import (no re-exec; PR-063 Q3).
 
 The parent-side dispatcher uses a manual `for _ in range(n_trials): subprocess.run([...])` loop (PR-008 sub-decision A1). It does **not** call `study.optimize(_spawn_trial_dispatcher, ...)` — that pattern would double-tell the trial score (parent's `optimize` calls `study.tell` after the dispatcher returns, while the child has already told the score itself). Each child runs its own `study.optimize(build_objective(cfg), n_trials=1)`; SQLite coordinates state.
 
@@ -449,14 +444,14 @@ src/rux_ml/solving/
 
 ## Per-family threading model (per PR-019 Q-Parallel)
 
-The workbench's `pin_threads()` (PR-011) exports `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, `POLARS_MAX_THREADS` env vars. **An env pin reaches a library only if it is set before the library sizes its pool**, and today every verb pins after xgboost (and numpy) have loaded: `rux_ml.cli` imports the verbs at load, and the trial child's `rux_ml.config` import chain loads xgboost before its `pin_threads` (program PR-082 R3-a; PR-062's probe 2: `OMP_NUM_THREADS` 24 set, `omp_get_max_threads()` 32). The import-order fix is PR-063.
+The workbench's `pin_threads()` (PR-011) exports `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, `POLARS_MAX_THREADS` env vars. **An env pin reaches a library only if it is set before the library sizes its pool**, and today every verb pins after xgboost (and numpy) have loaded: `rux_ml.cli` imports the verbs at load, and the trial child's `rux_ml.config` import chain loads xgboost before its `pin_threads` (program PR-082 R3-a; PR-062's probe 2: `OMP_NUM_THREADS` 24 set, `omp_get_max_threads()` 32). PR-063 passes the four values in the trial child's spawn env instead (§Subprocess-per-trial env pinning), so libgomp / OpenBLAS take them there; the in-process verbs' libgomp / OpenBLAS stay at the library default (no re-exec, PR-063 Q3).
 
 **The thread budget therefore travels as an explicit argument (PR-062).** Every fit site — `cli/train.py`, `tuning/objective.py`, `registry/promote.py`, `training/xgboost/batches.py` (`fit_batches`) — passes `threads=cfg.memory.omp_threads` to `make_trainer` / `make_xgboost_trainer`; the native adapter reads its `memory_cfg.omp_threads`. `training.model_kwargs` still wins on a collision (`n_jobs` / `nthread`).
 
 | Family | Threading library | Honors `OMP_NUM_THREADS`? | Workbench transport |
 |---|---|---|---|
-| XGBoost | OpenMP | Only if set before xgboost loads (it is not, PR-063) | factory `threads` → `n_jobs` (booster `nthread`); native adapter `nthread` from `memory_cfg` |
-| LightGBM | OpenMP | Expected (lazy import after the pin; best-guess, unmeasured) | env var; the factory accepts `threads` and ignores it |
+| XGBoost | OpenMP | Only if set before xgboost loads: yes in the trial child (its spawn env, PR-063), no in the in-process verbs | factory `threads` → `n_jobs` (booster `nthread`); native adapter `nthread` from `memory_cfg` |
+| LightGBM | OpenMP | Yes (`import lightgbm` maps the system libgomp after the pin; 24 on the desktop, PR-063 Q1) | env var; the factory accepts `threads` and ignores it |
 | **CatBoost** | **Intel TBB** | **No** | factory `threads` → `thread_count=` (`None` → -1, all cores) |
 
 When adding a family, its factory takes the `threads` keyword from `make_trainer` and maps it to the family's own thread parameter (or accepts and ignores it, saying why). The booster records what it ran with: `TrialAttrs.booster_nthread`, `fold_meta.json` `booster.nthread` and the manifest's `refit.nthread` read the booster's saved config (PR-054 / PR-059); `TrialAttrs.omp_threads` records the budget.

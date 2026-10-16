@@ -139,6 +139,16 @@ class XGBoostNativeAdapter:
     # DMatrix construction (branches on select_ingest)
     # ------------------------------------------------------------------
 
+    def _matrix_nthread(self) -> int:
+        """The CPU thread budget for every matrix this adapter builds (PR-063 Q4).
+
+        ``memory_cfg.omp_threads``, the booster's budget (PR-062). Without it a
+        matrix is built at XGBoost's default (``nthread=None`` -> -1 -> the
+        OpenMP default: 32 on the desktop, where the env pin cannot reach
+        libgomp). A ``model_kwargs`` ``nthread`` overrides the booster only.
+        """
+        return self._memory_cfg.omp_threads
+
     def _build_train_dmatrix(
         self,
         x: pl.DataFrame,
@@ -152,6 +162,7 @@ class XGBoostNativeAdapter:
                 x.to_pandas(),
                 label=y,
                 enable_categorical=True,
+                nthread=self._matrix_nthread(),
             )
         # ExtMem branch: chunk to N temp Parquets via single_source_iter.
         # ParquetDataIter pops the target column per batch, so it must live
@@ -164,7 +175,7 @@ class XGBoostNativeAdapter:
             tmp_dir=tmp_dir,
             cache_prefix=str(tmp_dir / "xgb_cache"),
         )
-        kwargs: dict[str, Any] = {"enable_categorical": True}
+        kwargs: dict[str, Any] = {"enable_categorical": True, "nthread": self._matrix_nthread()}
         # XGBoost 3.2 only honors `cache_host_ratio` on GPU `ExtMemQuantileDMatrix`
         # (CPU build raises "cache_host_ratio is only used by the GPU
         # ExtMemQuantileDMatrix"). Gate on the trainer's device so CPU
@@ -208,6 +219,7 @@ class XGBoostNativeAdapter:
                     eval_x.to_pandas(),
                     label=eval_y,
                     enable_categorical=True,
+                    nthread=self._matrix_nthread(),
                 )
                 evals.append((deval, f"val_{i}"))
             train_kwargs: dict[str, Any] = {
@@ -233,7 +245,7 @@ class XGBoostNativeAdapter:
         if self._booster is None:
             msg = "XGBoostNativeAdapter.predict called before fit()"
             raise RuntimeError(msg)
-        dmat = xgb.DMatrix(x, enable_categorical=True)
+        dmat = xgb.DMatrix(x, enable_categorical=True, nthread=self._matrix_nthread())
         return np.asarray(self._booster.predict(dmat))
 
     def predict_proba(self, x: Any) -> NDArray[Any]:
@@ -241,7 +253,7 @@ class XGBoostNativeAdapter:
         if self._booster is None:
             msg = "XGBoostNativeAdapter.predict_proba called before fit()"
             raise RuntimeError(msg)
-        dmat = xgb.DMatrix(x, enable_categorical=True)
+        dmat = xgb.DMatrix(x, enable_categorical=True, nthread=self._matrix_nthread())
         p = np.asarray(self._booster.predict(dmat))
         if p.ndim == 1:
             return np.column_stack([1.0 - p, p])

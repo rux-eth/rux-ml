@@ -15,10 +15,19 @@ times spawning fresh children, which is the canonical Optuna distributed
 pattern (each worker = one independent trial) adapted to sequential
 single-GPU execution.
 
-**Critical**: top-level imports stay stdlib-only so the child can pin BLAS /
-OpenMP / Polars thread env vars (from ``cfg.memory``) **before** importing
-numpy / polars / sklearn / xgboost. Those libraries read the env vars at
-import-time to size their thread pools; setting them late is a no-op.
+**Thread pools (PR-063)**: the thread env must be in place **before** the
+pools that size at load. libgomp and both OpenBLAS copies (numpy's, scipy's)
+read it in load-time constructors; loading ``RuxMLConfig`` already loads
+numpy / scipy / sklearn / xgboost / polars / pyarrow / pandas (the
+``rux_ml.training`` package inits, since PR-017), so this module's own
+:func:`~rux_ml._internal.env.pin_threads` comes too late for them (desktop:
+libgomp 32 and 2 x 31 OpenBLAS workers against a pin of 24 / 1). The parent
+therefore passes the four values in the child's env at spawn
+(``tuning/isolation.py``); here the child records the env it started with,
+warns (does not refuse — tests call :func:`main` in-process) when it
+disagrees with ``cfg.memory``, and still pins: Polars (first use) and
+LightGBM's own libgomp (loaded lazily) size after the pin and honour it.
+Top-level imports stay stdlib-only so the snapshot sees the start env.
 """
 
 # pyright: reportMissingTypeArgument=false
@@ -27,12 +36,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from rux_ml.config import RuxMLConfig
+    from collections.abc import Mapping
+
+    from rux_ml.config import MemoryConfig, RuxMLConfig
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -72,6 +87,31 @@ def _load_overrides(path: Path | None) -> dict[str, Any]:
     return dict(raw)  # type: ignore[arg-type]
 
 
+def _warn_on_thread_env_mismatch(
+    memory: MemoryConfig, start_env: Mapping[str, str | None]
+) -> list[str]:
+    """Warn (not refuse) when the env this process started with is not ``memory``'s.
+
+    Returns the mismatched keys. A mismatch means libgomp / OpenBLAS sized
+    their pools from the start env, not from ``cfg.memory`` (PR-063): the
+    child was not spawned by ``tuning/isolation.py`` (e.g. run by hand).
+    """
+    from rux_ml._internal.env import thread_env  # noqa: PLC0415
+
+    want = thread_env(memory)
+    mismatched = [key for key, value in want.items() if start_env.get(key) != value]
+    if mismatched:
+        logger.warning(
+            "thread env at start %s != cfg.memory %s (mismatched: %s): libgomp / OpenBLAS "
+            "sized their pools from the start env and the pin below cannot reach them "
+            "(PR-063); spawn the child through rux_ml.tuning.isolation.run_subprocess_trial",
+            {key: start_env.get(key) for key in want},
+            want,
+            mismatched,
+        )
+    return mismatched
+
+
 def main(argv: list[str] | None = None) -> int:
     """Child entry point — run one trial and exit.
 
@@ -83,7 +123,15 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     overrides = _load_overrides(args.overrides_json)
 
-    # Config import is light (pydantic + tomllib only); safe before env pinning.
+    # PR-063: the thread env this process STARTED with, read before the heavy import.
+    from rux_ml._internal.env import THREAD_ENV_KEYS  # noqa: PLC0415 — stdlib-only module
+
+    start_env = {key: os.environ.get(key) for key in THREAD_ENV_KEYS}
+
+    # NOT light: rux_ml.config -> config/training.py -> the rux_ml.training package
+    # inits load numpy / scipy / sklearn / xgboost / polars / pyarrow / pandas
+    # (since PR-017 a98349f; PR-063 Phase 1), and libgomp / OpenBLAS size their
+    # pools as they load. Their values come from the spawn env (tuning/isolation.py).
     from rux_ml.config import RuxMLConfig  # noqa: PLC0415
 
     cfg: RuxMLConfig = RuxMLConfig.from_layers(
@@ -93,7 +141,10 @@ def main(argv: list[str] | None = None) -> int:
         overrides=overrides,
     )
 
-    # CRITICAL: pin BLAS/OpenMP/Polars env vars BEFORE importing numpy/polars/sklearn/xgboost.
+    _warn_on_thread_env_mismatch(cfg.memory, start_env)
+
+    # Still pin (idempotent): Polars sizes on first use and LightGBM maps its own
+    # libgomp lazily, both after this line (PR-063 Q1, desktop).
     from rux_ml._internal.env import pin_threads  # noqa: PLC0415
 
     pin_threads(cfg.memory)
