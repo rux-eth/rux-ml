@@ -194,6 +194,28 @@ The child holds 3 threads before any fit instead of 65. The child's own pin afte
 
 **Spend:** one agent, ≤ 26 tool calls; one desktop window of 31 s under the lock; $0.
 
+### Build status (2026-10-16)
+
+<!-- The build on the gate's go (item 11). The builder agent returned nothing (no build commit on the branch after the Q1 commits); the reviewer built it, tests first, at `303c3a5`. Desktop window under `~/rumpy-heavy.lock` (mkdir) 16:10:38 – 16:15:07 CDT, clone `~/pr063-build` detached at `303c3a5` (then `7b537b2` for the pre-fix arm), `uv sync --locked --all-extras`, the four thread vars and `RUMPY_HARNESS_DATA_ROOT` unset; outputs `~/pr063-build-job.log`, `~/pr063-bytes/{branch,prefix}.json`. -->
+
+**Built (`303c3a5`).**
+- **Q2, the spawn env.** `tuning/isolation.py` spawns the trial child with `env={**os.environ, **thread_env(cfg.memory)}`. `_internal/env.py` gains `THREAD_ENV_KEYS` and `thread_env(memory)`, the one source for `pin_threads` and the spawn env. The parent's own env is not touched.
+- **Q2, the child.** `trial_runner.main` snapshots the four values it started with *before* the heavy `rux_ml.config` import, warns (`logging`, not a refusal) on a mismatch with `cfg.memory`, then still pins (Polars and LightGBM's libgomp size after the pin). The `:18-21` docstring and the `:86` comment are rewritten to the true state.
+- **Q4.** `nthread = memory_cfg.omp_threads` (`_matrix_nthread()`) on every native-adapter matrix: `QuantileDMatrix`, `ExtMemQuantileDMatrix`, the eval `DMatrix`, and the `predict` / `predict_proba` `DMatrix`. A `model_kwargs` `nthread` still overrides the booster only (the gate's letter). `registry/scorer.py:97` is untouched (§Not in scope).
+- **Not built:** Q3 (no CLI restructure, no re-exec) and Q5 (moved to `docs/0.1/RESEARCH-BACKLOG.md`, beside a Q3 overlap-cost item marked as a lean, not ruled).
+- Docs: `ARCHITECTURE.md` thread-allocation row, `CHANGELOG.md` [Unreleased] Fixed, `env.py` module docstring. `README.md:626` / `:631` (MKL described as acting) not touched.
+
+**Tests first.** 8 new tests; 7 failed on the Mac before the fix (3 adapter, 1 isolation, 3 trial-runner); the 8th, the Linux-only effect test (`threadpool_info` + `pl.thread_pool_size()` in a child run with the env the parent passes, after the child's `rux_ml.config` import: libgomp 5, OpenBLAS 2, Polars 4), is skipped on the Mac by design (Phase 1 stale 6).
+
+**Results.**
+- **Mac** (the worktree `.venv` lacks the catboost / lightgbm extras): the touched modules 31 passed / 1 skipped (the Linux test) / 2 deselected (catboost, lightgbm not installed); the full suite 789 passed / 5 skipped / 17 failed, every failure a catboost / lightgbm test (environmental). ruff, ruff format and basedpyright on the touched files clean.
+- **Desktop (Linux):** the full suite **806 passed / 5 skipped / 0 failed** at `303c3a5` against **798 / 5 / 0** at `7b537b2` (pre-fix): +8 = the new tests, the skipped count unchanged, so the Linux effect test ran and passed. `basedpyright src/` 0 errors.
+- **Revert spot-check (desktop):** with `env=child_env` removed, the effect test fails (`the child must be spawned with an explicit env`); restored, the tree clean.
+- **Q4 model bytes (desktop, `scripts/measure_pr063_bytes.py`; 200,000 × 27 float32, 50 rounds, an eval set, seed 7, each fit twice):** `matrix_nthread_explicit` False (pre-fix, matrices at the OpenMP default 32) vs True (branch, 24). **The model `ubj` sha256 and the prediction sha256 are equal between pre-fix and branch on all four QuantileDMatrix arms** (cpu and cuda × regression and binary), and each self-reproduces.
+- **Found, pre-existing, not fixed (out of scope):** the native adapter's **ExtMem path with an eval set fails on both versions**: `ValueError('data did not contain feature names, but the following fields are expected: feat__0, …')`. The ExtMem training matrix (from the Parquet iterator) carries no feature names, while the eval `DMatrix` (pandas) does. So the ExtMem bytes were not compared; the ExtMem matrix's `nthread` is covered by its unit test only. This is its own item (a defect on `dev`).
+
+**Spend:** $0; one desktop window of 4 min 29 s.
+
 ## Scope
 
 <!-- Draft scope from PR-062's options B / B-lite; to be fixed by this PR's Phase 2 – 4. -->
