@@ -23,9 +23,10 @@ and [the scientific-python NumPy RNG best-practices post](https://blog.scientifi
 Reconstruction from a recorded ``entropy_hex`` (skips step 1+2 — caller
 supplies the per-trial entropy directly): see :func:`make_seed_bag_from_hex`.
 
-This module's numpy import is **lazy inside the function bodies** so that
-``trial_runner.py`` can call ``pin_threads(cfg.memory)`` BEFORE the heavy
-imports per PR-008. Top-level imports stay stdlib + pydantic only.
+This module's numpy import is **lazy inside the function bodies** (PR-008's
+design: ``trial_runner.py`` pinned before the heavy imports; since PR-017 its
+``rux_ml.config`` import loads them first, and the trial child's thread values
+come from its spawn env, PR-063). Top-level imports stay stdlib + pydantic only.
 """
 
 from __future__ import annotations

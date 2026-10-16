@@ -236,6 +236,27 @@ def test_the_child_warns_when_its_start_env_disagrees(caplog: pytest.LogCaptureF
     assert "POLARS_MAX_THREADS" in caplog.text
 
 
+def test_the_child_warning_logs_all_four_values(caplog: pytest.LogCaptureFixture) -> None:
+    """One key off: the warning still names all four start / cfg values (the full picture)."""
+    import logging  # noqa: PLC0415
+
+    mem = MemoryConfig(omp_threads=12, openblas_threads=2, mkl_threads=3, polars_threads=8)
+    start = {
+        "OMP_NUM_THREADS": "32",
+        "OPENBLAS_NUM_THREADS": "2",
+        "MKL_NUM_THREADS": "3",
+        "POLARS_MAX_THREADS": "8",
+    }
+    with caplog.at_level(logging.WARNING, logger=trial_runner.__name__):
+        mismatched = trial_runner._warn_on_thread_env_mismatch(mem, start)  # pyright: ignore[reportPrivateUsage]
+    assert mismatched == ["OMP_NUM_THREADS"]
+    assert [r.levelno for r in caplog.records] == [logging.WARNING]
+    for key in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "POLARS_MAX_THREADS"):
+        assert key in caplog.text
+    assert "'32'" in caplog.text
+    assert "'12'" in caplog.text
+
+
 def test_the_child_is_silent_when_its_start_env_matches(caplog: pytest.LogCaptureFixture) -> None:
     import logging  # noqa: PLC0415
 

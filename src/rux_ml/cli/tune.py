@@ -94,8 +94,9 @@ def _run_trials(
     """Dispatch trials per ``cfg.tuning.trial_isolation``."""
     opts = get_options(ctx)
     if cfg.tuning.trial_isolation == "in_process":
-        # PR-011: parent pins env vars before the in-process fit loop (subprocess
-        # children already self-pin via ``_internal/trial_runner.main``).
+        # PR-011: parent pins env vars before the in-process fit loop. It runs after
+        # xgboost / numpy loaded, so libgomp / OpenBLAS keep their default (PR-063);
+        # subprocess children get the values in their spawn env (tuning/isolation.py).
         pin_threads(cfg.memory)
         objective = build_objective(cfg)
         study_obj.optimize(objective, n_trials=n_trials)

@@ -102,11 +102,12 @@ def _warn_on_thread_env_mismatch(
     mismatched = [key for key, value in want.items() if start_env.get(key) != value]
     if mismatched:
         logger.warning(
-            "thread env at start %s != cfg.memory %s: libgomp / OpenBLAS sized their "
-            "pools from the start env and the pin below cannot reach them (PR-063); "
-            "spawn the child through rux_ml.tuning.isolation.run_subprocess_trial",
-            {key: start_env.get(key) for key in mismatched},
-            {key: want[key] for key in mismatched},
+            "thread env at start %s != cfg.memory %s (mismatched: %s): libgomp / OpenBLAS "
+            "sized their pools from the start env and the pin below cannot reach them "
+            "(PR-063); spawn the child through rux_ml.tuning.isolation.run_subprocess_trial",
+            {key: start_env.get(key) for key in want},
+            want,
+            mismatched,
         )
     return mismatched
 

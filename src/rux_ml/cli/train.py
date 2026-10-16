@@ -712,8 +712,8 @@ def run_command(ctx: typer.Context) -> None:
         study=opts.study,
         overrides=opts.overrides,
     )
-    # PR-011: pin OMP/BLAS/POLARS env vars before any in-process fit (no-op for the
-    # subprocess child case which self-pins via ``_internal/trial_runner.main``).
+    # PR-011: pin OMP/BLAS/POLARS env vars before any in-process fit. It runs after
+    # xgboost / numpy loaded, so libgomp / OpenBLAS keep their default (PR-063).
     pin_threads(cfg.memory)
 
     source_path, target_col = _require(cfg)
