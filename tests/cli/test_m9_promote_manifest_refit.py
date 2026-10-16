@@ -69,6 +69,7 @@ def test_an_m9_promote_records_the_refit_the_range_and_the_trials_test_record(
     assert refit.iteration_range == (0, attrs.best_iteration + 1)
     assert (refit.device, refit.nthread) == (attrs.booster_device, attrs.booster_nthread)
     assert (refit.device, refit.nthread) == (meta["booster"]["device"], meta["booster"]["nthread"])
+    assert refit.nthread == attrs.omp_threads  # PR-062: the budget reaches trial and re-fit
     assert attrs.oos_export_sha256 is not None
     assert manifest.oos_export_sha256 == attrs.oos_export_sha256
     assert manifest.oos_export_sha256 == meta["oos_export"]["sha256"]

@@ -478,7 +478,7 @@ def _fit_and_score(
             fold_extras,
         )
 
-    trainer = make_trainer(cfg.training, seed=bag.xgb_seed)
+    trainer = make_trainer(cfg.training, seed=bag.xgb_seed, threads=cfg.memory.omp_threads)
     x_train_pd = x_train_t.to_pandas()
     x_val_pd = None if x_val_t is None else x_val_t.to_pandas()
     # PR-060: the val-less fit is given no eval_set (and early stopping is off)

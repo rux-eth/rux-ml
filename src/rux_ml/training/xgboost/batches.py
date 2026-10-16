@@ -224,7 +224,8 @@ def fit_batches(
             "fit builds an in-memory QuantileDMatrix (an ExtMemQuantileDMatrix is not built)"
         )
         raise ValueError(msg)
-    model = cast("Any", make_xgboost_trainer(training, seed=seed))
+    # PR-062: the budget reaches n_jobs, so the params and both matrices carry it
+    model = cast("Any", make_xgboost_trainer(training, seed=seed, threads=cfg.memory.omp_threads))
     params = {k: v for k, v in model.get_xgb_params().items() if v is not None}
     matrix: dict[str, Any] = {
         "missing": model.missing,

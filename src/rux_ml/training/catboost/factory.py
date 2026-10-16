@@ -18,11 +18,15 @@ Four Q-finding-driven implementation details:
    ``cfg.device == "cuda"`` → ``task_type="GPU"`` + ``devices="0"`` for
    single-GPU. ``cfg.device == "cpu"`` → ``task_type="CPU"``.
 
-3. **Explicit ``thread_count``** (Q-Parallel). CatBoost uses Intel TBB,
-   NOT OpenMP. The workbench's ``OMP_NUM_THREADS`` pinning is invisible to
-   CatBoost. The factory passes ``cfg.memory.omp_threads`` explicitly as
-   ``thread_count=`` to match the workbench's intent. (Per Phase 4 sub-
-   decision 2: reuse existing field rather than add a parallel knob.)
+3. **Explicit ``thread_count``** (Q-Parallel; PR-062). CatBoost uses Intel
+   TBB, NOT OpenMP. The workbench's ``OMP_NUM_THREADS`` pinning is invisible
+   to CatBoost. Every workbench fit site passes ``cfg.memory.omp_threads`` as
+   the factory's ``threads`` argument (through ``make_trainer``), which goes
+   to ``thread_count=``; ``threads=None`` gives CatBoost's own default (-1,
+   all cores). (Per Phase 4 sub-decision 2: reuse existing field rather than
+   add a parallel knob. Before PR-062 the factory read ``OMP_NUM_THREADS``
+   back from the environment; the argument is now the one transport, shared
+   with XGBoost.)
 
 4. **`cat_features` extraction at fit time** (Q-Cat). CatBoost does NOT
    auto-detect pandas Categorical dtype (opposite of LightGBM); raises
@@ -34,7 +38,6 @@ Four Q-finding-driven implementation details:
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING, Any, cast
 
 import pandas as pd
@@ -133,8 +136,9 @@ def _catboost_kwargs(
       regressor). NOT exposed as a config field because ``AUC`` is
       eval-only (Q-Wrap §4).
     - ``eval_metric``: ``_METRIC_TRANSLATE[cfg.metric]``.
-    - ``thread_count``: factory arg (sourced from ``cfg.memory.omp_threads``
-      by the dispatcher in higher layers; Q-Parallel sub-decision).
+    - ``thread_count``: factory arg (``cfg.memory.omp_threads`` from the fit
+      site via ``make_trainer``'s ``threads``; -1 when none is given;
+      Q-Parallel sub-decision, PR-062).
     """
     task = task_for_metric(cfg.metric)
     eval_metric = _METRIC_TRANSLATE[cfg.metric]
@@ -194,46 +198,25 @@ def _catboost_kwargs(
     return base
 
 
-def _resolve_thread_count() -> int:
-    """Sample the workbench's thread-pin intent from ``OMP_NUM_THREADS`` env var.
-
-    CatBoost uses Intel TBB and does NOT honor ``OMP_NUM_THREADS`` directly
-    (Q-Parallel PROVEN). PR-011's ``pin_threads()`` exports the env var from
-    ``cfg.memory.omp_threads`` into the trial subprocess; the CatBoost
-    factory reads it back as an integer and passes through to
-    ``thread_count=`` explicitly. Same intent, different transport.
-
-    Falls back to ``-1`` (CatBoost auto = all logical cores) when the env
-    var is unset or unparseable — matches PR-011's default behavior when
-    pinning isn't active.
-    """
-    raw = os.environ.get("OMP_NUM_THREADS")
-    if raw is None:
-        return -1
-    try:
-        return int(raw)
-    except ValueError:
-        return -1
-
-
 def make_catboost_trainer(
     cfg: CatBoostTraining,
     *,
     seed: int | None = None,
+    threads: int | None = None,
 ) -> Trainer:
     """Return the concrete CatBoost trainer for ``cfg`` wrapped in the cat_features shim.
 
     Args:
         cfg: ``CatBoostTraining`` variant of the discriminated ``TrainingConfig``.
         seed: PR-013 seed (factory plumbs to ``random_seed``).
-
-    Thread count is read from the ``OMP_NUM_THREADS`` env var (set by PR-011's
-    ``pin_threads()`` from ``cfg.memory.omp_threads``) and passed explicitly
-    to CatBoost since it doesn't honor ``OMP_NUM_THREADS`` itself.
+        threads: the CPU thread budget (PR-062; ``cfg.memory.omp_threads`` at
+            every workbench fit site), passed as ``thread_count=`` since CatBoost
+            does not honor ``OMP_NUM_THREADS``. ``None`` → -1 (CatBoost's default:
+            all cores).
     """
     from catboost import CatBoostClassifier, CatBoostRegressor  # noqa: PLC0415
 
-    thread_count = _resolve_thread_count()
+    thread_count = -1 if threads is None else threads
     kwargs = _catboost_kwargs(cfg, seed=seed, thread_count=thread_count)
     task = task_for_metric(cfg.metric)
     base = CatBoostClassifier(**kwargs) if task == "classification" else CatBoostRegressor(**kwargs)

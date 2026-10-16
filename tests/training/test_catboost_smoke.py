@@ -25,7 +25,6 @@ from typing import cast
 
 import numpy as np
 import pandas as pd
-import pytest
 from numpy.typing import NDArray
 
 from rux_ml.training import CatBoostTraining, make_trainer
@@ -189,9 +188,10 @@ def test_catboost_task_type_cpu_when_device_cpu() -> None:
     assert "devices" not in params or params.get("devices") in (None, "")
 
 
-def test_catboost_thread_count_from_omp_num_threads(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Q-Parallel: factory reads OMP_NUM_THREADS and passes as ``thread_count``."""
-    monkeypatch.setenv("OMP_NUM_THREADS", "3")
+def test_catboost_thread_count_from_the_threads_argument() -> None:
+    """Q-Parallel, PR-062: the factory's ``threads`` argument (``cfg.memory.omp_threads``
+    at every fit site) is passed as ``thread_count`` — the env read is gone (one transport,
+    shared with XGBoost; ``tests/training/test_thread_budget.py``)."""
     cfg = CatBoostTraining(
         device="cpu",
         metric="auc",
@@ -200,7 +200,7 @@ def test_catboost_thread_count_from_omp_num_threads(monkeypatch: pytest.MonkeyPa
         learning_rate=0.3,
         early_stopping_rounds=None,
     )
-    trainer = make_trainer(cfg)
+    trainer = make_trainer(cfg, threads=3)
     params = trainer.get_params()  # pyright: ignore[reportAttributeAccessIssue]
     assert params["thread_count"] == 3
 

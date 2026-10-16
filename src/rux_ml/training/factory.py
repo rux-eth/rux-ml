@@ -4,7 +4,8 @@ Replaces the pre-PR-017 single-family if/elif dispatch with a registry-driven
 lookup against ``TRAINER_FAMILIES`` (declared in
 :mod:`rux_ml.training.__init__`). The signature is preserved — every existing
 caller (``cli/train.py``, ``tuning/objective.py``, ``registry/promote.py``,
-tests) continues to call ``make_trainer(cfg.training, seed=...)`` unchanged.
+tests) continues to call ``make_trainer(cfg.training, seed=...)`` unchanged; PR-062 adds
+``threads=cfg.memory.omp_threads`` at the workbench fit sites.
 
 Per Q4 of ``docs/0.1/DESIGN-log.md``: the registry is a plain dict, not a
 decorator-driven plugin loader. Each family's factory is registered explicitly
@@ -27,7 +28,9 @@ if TYPE_CHECKING:
     from rux_ml.training.protocol import Trainer
 
 
-def make_trainer(cfg: TrainingConfig, *, seed: int | None = None) -> Trainer:
+def make_trainer(
+    cfg: TrainingConfig, *, seed: int | None = None, threads: int | None = None
+) -> Trainer:
     """Return the concrete trainer for ``cfg``.
 
     Dispatches on ``cfg.kind`` via the ``TRAINER_FAMILIES`` registry. Each
@@ -37,6 +40,11 @@ def make_trainer(cfg: TrainingConfig, *, seed: int | None = None) -> Trainer:
 
     ``seed`` (PR-013) is passed through to the family factory; the family
     decides where to plumb it (XGBoost uses ``random_state``).
+
+    ``threads`` (PR-062) is the CPU thread budget — every workbench fit site passes
+    ``cfg.memory.omp_threads`` — passed through to the family factory: XGBoost sets
+    ``n_jobs``, CatBoost ``thread_count``, LightGBM accepts and ignores it. ``None``
+    leaves the family's own default.
 
     Raises:
         ValueError: when ``cfg.kind`` is not in ``TRAINER_FAMILIES``. This
@@ -56,7 +64,7 @@ def make_trainer(cfg: TrainingConfig, *, seed: int | None = None) -> Trainer:
             f"PRs and must register themselves in src/rux_ml/training/__init__.py."
         )
         raise ValueError(msg)
-    return factory(_narrow_for_family(cfg, family), seed=seed)
+    return factory(_narrow_for_family(cfg, family), seed=seed, threads=threads)
 
 
 def _narrow_for_family(cfg: TrainingConfig, family: str) -> TrainingConfig:
