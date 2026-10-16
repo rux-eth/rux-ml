@@ -292,19 +292,19 @@ None open in rux-ml: `dev` `814cc15` carries PR-060 and PR-061. Program side: mu
 
 ## Verification criteria
 
-- [ ] **1. Test first, failing on `dev` by assertion.** Test (4): a default `rux-ml train` CLI fit records `booster_nthread == cfg.memory.omp_threads` (shaped like `tests/cli/test_m9_batch_train_cli.py:69-73`). On `dev` `814cc15` it fails on the assertion (`booster_nthread` 0 ≠ `memory.omp_threads`), not on an import or collection error; after the change it passes. *Evidence:* both `pytest -rA` outputs with their commits. (Test (1) below calls the new argument, so on `dev` it fails with a signature error; the assertion-level red is test (4).)
-- [ ] **2. The factory.** Test (1): `make_xgboost_trainer` built with memory `omp_threads=7` has `get_params()['n_jobs'] == 7`, and after a tiny fit `booster_threads_device()['nthread'] == 7`.
-- [ ] **3. `model_kwargs` still wins.** Test (2): `model_kwargs` `n_jobs=1` with memory `omp_threads=7` gives `n_jobs` 1 and booster `nthread` 1.
-- [ ] **4. The native adapter.** Test (3): the native adapter's params carry `nthread` from `memory_cfg.omp_threads`, and a `model_kwargs` `nthread` still wins.
-- [ ] **5. The `[m9]` batch path and promote.** A default `[m9]` batch fit records `booster_nthread == cfg.memory.omp_threads`, and `test_m9_promote_manifest_refit` passes with both the trial and the re-fit at that value (changed by design). *Evidence:* the test output.
-- [ ] **6. Unchanged by construction:** golden 15 / 15, `tests/integration/test_determinism_cpu.py`, the A11 `n_jobs=3` test, the c6 pin (`tests/cli/test_data_hash_per_file_c6.py`). *Evidence:* the junit `testcase` entries by name.
-- [ ] **7. No hash moves.** `root_cfg_hash` and `training_cfg_hash` for every config under `configs/` are equal on `dev` and on the branch. *Evidence:* both lists, diffed.
-- [ ] **8. Bytes, before / after (must-answer 2; Synthesis change 1).** On the desktop, under the mkdir heavy lock: the probe of program `docs/0.5/evidence/ruxml-track/pr062-probes-20261015/probe_bytes.py` re-run on the branch head (its default, no `--set`) and on `dev` `814cc15` (`n_jobs` unset), cpu + cuda, the in-memory classifier and the `[m9]` regression batch path. Pass: `model.ubj`, the OOS export (sha256) and the told value equal branch vs `dev`, and the branch records `booster_nthread` 24. Any byte difference is reported to the lead before the merge — never waived silently. *Evidence:* a record under program `docs/0.5/evidence/ruxml-track/`.
-- [ ] **8b. The effect (Synthesis change 2; Linux).** In a fresh interpreter with `OMP_NUM_THREADS` unset, a default fit on the branch adds a 24-thread team (≈ +26 threads on the desktop, probe 2's control figure), not a 32-thread one (≈ +34). Recorded; a miss is reported.
-- [ ] **9. Mac:** `uv run pytest`, `ruff check --no-cache .`, `ruff format --check src tests`, `basedpyright src/` clean.
-- [ ] **10. Desktop:** `uv run --frozen --all-extras pytest -n 8` diffed against `dev` — no new failure.
-- [ ] **11. Docs in the same commit** (Scope 5). *Evidence:* the commit's diff.
-- [ ] **12. Program-side consumers checked** (must-answer 6) by the lead before the merge.
+- [x] **1. Test first, failing on `dev` by assertion.** Test (4): a default `rux-ml train` CLI fit records `booster_nthread == cfg.memory.omp_threads` (shaped like `tests/cli/test_m9_batch_train_cli.py:69-73`). On `dev` `814cc15` it fails on the assertion (`booster_nthread` 0 ≠ `memory.omp_threads`), not on an import or collection error; after the change it passes. *Evidence:* both `pytest -rA` outputs with their commits. (Test (1) below calls the new argument, so on `dev` it fails with a signature error; the assertion-level red is test (4).)
+- [x] **2. The factory.** Test (1): `make_xgboost_trainer` built with memory `omp_threads=7` has `get_params()['n_jobs'] == 7`, and after a tiny fit `booster_threads_device()['nthread'] == 7`.
+- [x] **3. `model_kwargs` still wins.** Test (2): `model_kwargs` `n_jobs=1` with memory `omp_threads=7` gives `n_jobs` 1 and booster `nthread` 1.
+- [x] **4. The native adapter.** Test (3): the native adapter's params carry `nthread` from `memory_cfg.omp_threads`, and a `model_kwargs` `nthread` still wins.
+- [x] **5. The `[m9]` batch path and promote.** A default `[m9]` batch fit records `booster_nthread == cfg.memory.omp_threads`, and `test_m9_promote_manifest_refit` passes with both the trial and the re-fit at that value (changed by design). *Evidence:* the test output.
+- [x] **6. Unchanged by construction:** golden 15 / 15, `tests/integration/test_determinism_cpu.py`, the A11 `n_jobs=3` test, the c6 pin (`tests/cli/test_data_hash_per_file_c6.py`). *Evidence:* the junit `testcase` entries by name.
+- [x] **7. No hash moves.** `root_cfg_hash` and `training_cfg_hash` for every config under `configs/` are equal on `dev` and on the branch. *Evidence:* both lists, diffed.
+- [x] **8. Bytes, before / after (must-answer 2; Synthesis change 1).** On the desktop, under the mkdir heavy lock: the probe of program `docs/0.5/evidence/ruxml-track/pr062-probes-20261015/probe_bytes.py` re-run on the branch head (its default, no `--set`) and on `dev` `814cc15` (`n_jobs` unset), cpu + cuda, the in-memory classifier and the `[m9]` regression batch path. Pass: `model.ubj`, the OOS export (sha256) and the told value equal branch vs `dev`, and the branch records `booster_nthread` 24. Any byte difference is reported to the lead before the merge — never waived silently. *Evidence:* a record under program `docs/0.5/evidence/ruxml-track/`.
+- [x] **8b. The effect (Synthesis change 2; Linux).** In a fresh interpreter with `OMP_NUM_THREADS` unset, a default fit on the branch adds a 24-thread team (≈ +26 threads on the desktop, probe 2's control figure), not a 32-thread one (≈ +34). Recorded; a miss is reported.
+- [x] **9. Mac:** `uv run pytest`, `ruff check --no-cache .`, `ruff format --check src tests`, `basedpyright src/` clean.
+- [x] **10. Desktop:** `uv run --frozen --all-extras pytest -n 8` diffed against `dev` — no new failure.
+- [x] **11. Docs in the same commit** (Scope 5). *Evidence:* the commit's diff.
+- [x] **12. Program-side consumers checked** (must-answer 6) by the lead before the merge.
 
 ## Performance budget
 
@@ -330,3 +330,34 @@ Not a per-event path: the change sets one parameter per fit. The effect it must 
 - **(proven)** `TrialAttrs.omp_threads` records the intended budget, not what ran; after A1 the booster's `nthread` records what the booster was given.
 - **(convention)** rux-ml's default 24 is not the fastest measured setting (Q16: 8 faster); changing it moves every `root_cfg_hash` and is a separate config PR (gate lean 4).
 - **(best-guess)** The predict side runs at 32 threads; its exposure to the stall is unmeasured (gate lean 6).
+
+## Build status (2026-10-16)
+
+<!-- The builder, on the operator's build go of 2026-10-16 ≈ 08:49 CDT. Branch `pr-062-threads` (off `dev` `814cc15`), worktree `~/projects/rux-ml-pr-062`; NOT pushed (the operator's word "push"), NOT merged. Evidence: program `docs/0.5/evidence/ruxml-track/pr062-build-20261016/` (`pr062-build-summary.json`, `mac/`, `desktop/`, `scripts/`). -->
+
+**Commits:** `5e4c5f2` (this file + the tests first, red on `dev`'s code), `d07450e` (A1 + the docs + the CHANGELOG line), `c2096e5` (the PR-063 stub), and this status commit.
+
+- **1. Red first (by assertion).** On `dev` `814cc15`'s code with the new tests: 13 failed / 5 passed. Every CLI path fails on the assertion `booster_nthread` / `refit.nthread` 0 == 24 (train sklearn + native, tune in-process + subprocess, the in-memory promote re-fit, the `[m9]` batch fit, the `[m9]` promote re-fit); the factory / adapter tests fail on the missing `threads` argument (`TypeError`) and the adapter's missing `nthread` key (`KeyError`), as Verification 1 expected. After the change: 55 passed in the targeted set (`mac/red_tests_on_dev_code.txt`, `mac/green_targeted.txt`).
+- **2 – 5.** `tests/training/test_thread_budget.py` (8 tests: the factory and `make_trainer` at `omp_threads=7`, booster `nthread` 7; no budget → `n_jobs` unset; `model_kwargs` `n_jobs=1` wins; the native adapter's `nthread` from `memory_cfg` and a `model_kwargs` `nthread` winning; CatBoost `thread_count` from the argument, the env no longer; LightGBM unchanged params) and `tests/cli/test_thread_budget_cli.py` (7 tests, above); `test_m9_promote_manifest_refit` gains `refit.nthread == attrs.omp_threads`; `test_catboost_smoke`'s env test now reads the argument (changed by design, gate lean 5).
+- **6.** Desktop junit: golden 15 / 15 on both trees, `test_determinism_cpu` (2), the A11 `n_jobs=3` test, the c6 pin (5) passed on both.
+- **7. No hash moves.** `root_cfg_hash` + `training_cfg_hash` over 35 layer combinations of `configs/` (base, × 4 problems, × 6 studies; 30 hashed, the same 5 combinations refused by validation on both sides): the two lists are equal, `diff` empty (`mac/hashes_branch.tsv`, `mac/hashes_dev.tsv`, `mac/hashes_diff.txt`). `configs/` is unchanged (0 diff lines).
+- **8. Bytes, before / after (the desktop).** Probe 1 re-run on the branch (default, repeat, `n_jobs` 8) and on `dev` (unset), cpu + cuda, both paths: `model.ubj`, the OOS export and the told value equal branch vs `dev` on all 12 rows; the branch records `booster_nthread` 24 (8 at `--set n_jobs=8`), `dev` 0; `generic_param` differs only in `n_jobs` / `nthread`; the default rows' config hashes equal. The `model.ubj` sha256 prefixes are probe 1's (clf cpu `52c8c60c39d3`, clf cuda `570b78a9ec27`, m9reg cpu `03b51decbe54`, m9reg cuda `a9ae1eb44f37`). No byte difference to report.
+- **8b. The effect.** Fresh interpreter, `OMP_NUM_THREADS` unset, the trial child's order, a default fit through `make_trainer`: the branch adds **26** threads (65 → 91, booster `nthread` 24), `dev` adds **34** (65 → 99, `nthread` 0). `omp_get_max_threads()` is 32 on both (the pool is still sized before the pin — PR-063).
+- **9. Mac.** `uv run pytest` 800 passed / 3 skipped (exit 0); `ruff check --no-cache .`, `ruff format --check src tests`, `basedpyright src/` (0 errors) — each gated on its bare exit status.
+- **10. Desktop suite** (`uv run --frozen --all-extras pytest -n 8`): branch 798 passed / 5 skipped / 0 failed in 878.8 s; `dev` 784 / 5 / 0 in 1,100.8 s. Diff: no new failure, no status change on any common test, +15 new tests, 1 renamed, the same 5 skips.
+- **11.** The docs ride in `d07450e` (CONVENTIONS ×4, `env.py`, README, the CatBoost docstrings, the CHANGELOG line, the backlog row).
+- **12.** Answered by the program lead 2026-10-15 (must-answer 6: no consumer compares rux-ml's recorded `nthread`).
+
+**Performance budget — closed.** The arm (12 default cpu fits of the `pr062probe_m9reg` shape per tree, `boost` = the `xgb.train` call):
+
+| Tree | nthread | `boost` median | min – max | Stalls (rule: > 10× the run's median) | > 10× the branch median |
+|---|---|---|---|---|---|
+| branch | 24 | **0.0718 s** | 0.0595 – 0.0766 s | **0 / 12** | 0 / 12 |
+| `dev` | 0 (a 32-thread pool) | **27.24 s** | 3.24 – 32.44 s | 0 / 12 (its own median is stalled) | **12 / 12** |
+
+No stall at 24, so gate lean 4 is not reopened. At nthread 0 every `dev` fit of this shape ran slow today (probe 1 saw this shape at 0.070 – 0.074 s when not stalled, and 1 stall in 2). The model bytes are equal across all 24 fits (`03b51decbe54`). Reported, not gated; the stall's mechanism is PR-063's.
+
+**Deviations.**
+- The heavy lock was held in four segments, not one: the `dev` arm hit its 210 s timeout after 7 of 12 fits (every fit stalled, ≈ 27 s each), and the first foreground branch suite hit a 450 s timeout at ≈ 85 % (the desktop suite takes ≈ 15 – 18 min; the Mac's 33 s). Each time the trap released the lock; it was re-taken within a minute; the `dev` arm was completed with 5 more fits in a separate scratch dir, and both suites re-ran in the background. Lock segments (CDT): 09:03:27 – 09:07:56, 09:08:44 – 09:18:46, 09:19:37 – 09:52:39, 09:52:54 – 09:53:00.
+- The branch is `pr-062-threads` (the draft's go-list named `pr-062`). Pushing it (the draft's go-list item 5) waits on the operator's word "push".
+- During both desktop suites the load average reached ≈ 135 – 195 (8 xdist workers, each fit a 24- or 32-thread team on 32 logical CPUs). Not gated; recorded for PR-063.
