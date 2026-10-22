@@ -82,7 +82,13 @@ _HASH_OPTIONAL_LAYERS: frozenset[str] = frozenset({"m9"})
 # pins); once set they are part of the trial identity.
 _HASH_OPTIONAL_FIELDS: dict[str, frozenset[str]] = {
     "data": frozenset(
-        {"split_embargo", "group_column", "symbol_holdout_seed", "train_prefix_frac"}
+        {
+            "split_embargo",
+            "group_column",
+            "symbol_holdout_seed",
+            "train_prefix_frac",
+            "split_cut_date",  # PR-065
+        }
     ),
 }
 
@@ -212,6 +218,31 @@ class RuxMLConfig(BaseSettings):
         # A diagnostic among the features is refused at every training-set build by
         # rux_ml.data.check_feature_labels (PR-043), with exit 2 — not here, where a
         # config error surfaces as a traceback (exit 1).
+        return self
+
+    @model_validator(mode="after")
+    def _validate_split_cut_date(self) -> RuxMLConfig:
+        """PR-065: a date-given cut is a val-less ``[m9]`` ``time_ordered`` split, no prefix
+        (the harness's ``partition_at_cut``; widened only with a consumer and its test)."""
+        data = self.data
+        if data.split_cut_date is None:
+            return self
+        if data.split_kind != "time_ordered":
+            msg = (
+                f"data.split_cut_date needs data.split_kind 'time_ordered', got {data.split_kind!r}"
+            )
+            raise ValueError(msg)
+        if self.m9 is None:
+            msg = (
+                "data.split_cut_date needs an [m9] problem: the cut is a rule of its partition plan"
+            )
+            raise ValueError(msg)
+        if data.train_prefix_frac is not None:
+            msg = (
+                "data.split_cut_date does not take data.train_prefix_frac (no prefix on a date cut)"
+            )
+            raise ValueError(msg)
+        data.refuse_val_with_cut()
         return self
 
     # Single-process workbench: TOML paths threaded through class state because

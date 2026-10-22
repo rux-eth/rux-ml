@@ -140,6 +140,75 @@ replay in whichever harness PR owns it.
 **Exit:** stale assumptions flagged, new constraints documented; the premise holds (smaller than drafted). HALT at the
 Phase 1 gate.
 
+
+### Research Questions (Phase 2, light — 2026-10-22)
+
+Run as program track `track/ruxml-pr065-s2` after the operator's go (≈ 12:39 CDT 2026-10-22, the program's Stage 1
+combined gate: every Phase 1 lean above approved as written). Tier-1 in rux-ml's sense; no drift since Phase 1
+(`origin/dev` still `d51e89f`), so Phases 2 – 4 run light in the main loop with no external sources — the rule is fixed
+by its consumer (the harness's `partition_at_cut`), not by a library choice.
+
+**Must-answer:**
+1. Shape, type, val, ratios, refusals, scope, identity — **answered by the gate** (leans 1 – 7, approved values).
+2. A TOML *datetime* (or an int) given where the date belongs: truncate or refuse? — success: no input moves the cut
+   silently.
+3. Where the refusals live so that no route reaches the plan unchecked — success: every route that builds a config
+   re-runs them, or the plan refuses too.
+4. Does anything change for a fraction-mode config? — success: `data_cfg_hash` / `root_cfg_hash` pins and the
+   fraction-mode split record unchanged.
+
+**Dependencies:** none (2 – 4 independent of each other; all depend on the gate's leans).
+
+**Explicitly excluded** (as Phase 1): a val date; a prefix with a date cut; non-`[m9]` problems and the legacy
+in-memory splitter; a declared unit for the time column; the harness-side replay test (program PR-110's build, the
+lead's call).
+
+### Research (Phase 3, light — executed in the main loop, 2026-10-22)
+
+- **Q2 (proven, executed in this worktree's venv, pydantic 2):** a lax `datetime.date` field accepts and *truncates*
+  more than a date. `tomllib` reads `2025-11-26` as a `date`, but `2025-11-26T00:00:00-06:00` as an offset `datetime`,
+  which pydantic turns into the date 2025-11-26 → the UTC-midnight cut, six hours before the Central midnight the
+  author wrote; the ints `1764115200000` and `1764115200` are also accepted (as Unix ms / s) → 2025-11-26. A datetime
+  with a non-zero time is refused (`date_from_datetime_inexact`). **Decision:** the field takes only a `date` (TOML
+  date) or an ISO `YYYY-MM-DD` string (the env / dot-path override routes deliver strings); a `datetime`, an int or any
+  other string is refused by name. This implements gate 2 ("a TOML date"); no new value.
+- **Q3 (proven, read):** config overlays reach the plan through `RuxMLConfig.model_validate` (`registry/promote.py:167`,
+  `tuning/objective.py:140`), which re-runs the root validators; only a direct attribute assignment on a built config
+  skips the cross-field checks. **Decision:** the refusals are root validators at load (gates 3, 6) and the plan
+  re-checks `val == 0` in date mode, so a mutated config cannot get a silent val-less split.
+- **Q4 (proven by construction, pinned by test):** the field joins `_HASH_OPTIONAL_FIELDS["data"]` (PR-042's rule); the
+  split record gains its date keys (`cuts.source`, `cuts.cut_date`, `cuts.cut_stamp`) only in date mode, so a
+  fraction-mode record and every existing hash pin are untouched.
+- **Found while reading (proven):** `m9.h_max_ms` is `gt=0` and `split_embargo >= h_max_ms` for every `[m9]`
+  time-block problem, so rux-ml runs h ≥ 1 ms only; the harness's `partition_at_cut` also takes `h_days = 0`. v0.7's
+  cells are h 7 / 14, so nothing is lost; the fixture covers h ∈ {1, 7, 14}.
+
+### Synthesis (Phase 4, light)
+
+**Outcome:** Confirm — the build is the approved leans; Phase 3 adds only input-type refusals inside gate 2's contract.
+
+**Changes to this PR from research:** the date field refuses a `datetime`, an int and a non-ISO string by name (Q2);
+the plan re-checks val-less in date mode (Q3).
+
+**Changes to ARCHITECTURE.md:** the split section gains the date mode (in the build commit).
+
+**Changes to CONSTRAINTS.md:** none.
+
+**New PRs that must come first:** none.
+
+**Research-backed details now locked:** `data.split_cut_date` (a TOML date → `(date − 1970-01-01).days ·
+86,400,000` ms; 2025-11-26 → 1,764,115,200,000); the record writes the date and the stamp with `cuts.source = "date"`;
+val-less only; `time_ordered` + `[m9]` only; no `train_prefix_frac`; the purged-train refusal unchanged plus an
+empty-train refusal by name; the ratios sum-checked and unused for the cut.
+
+### Gate Check (Phase 5)
+
+- Premise still valid: ✓ (no drift; `origin/dev` = `d51e89f`)
+- No prerequisite PRs surfaced: ✓
+- User approved updated spec: ✓ (2026-10-22 ≈ 12:39 CDT — the operator's "go" on the rumpy program's Stage 1 combined
+  gate approves every Phase 1 lean above as written; Phase 3's input-type refusals sit inside lean 2)
+- Implementation cleared
+
 ---
 
 ## Scope
@@ -161,12 +230,72 @@ None in rux-ml (base `d51e89f`). Consumers: program PR-110 (the probe) and PR-11
 
 ## Verification criteria
 
-- [ ] Date mode = fraction mode, row for row, wherever the date equals the fraction-chosen `test_first_stamp`.
-- [ ] Rows tied on the cut are test; a row at `cut − split_embargo` is purged; null targets are in no partition.
-- [ ] The per-day batch plan equals the frame plan in date mode.
-- [ ] Each refusal fires by name (gates 3, 5, 6); existing `data_cfg_hash` / `root_cfg_hash` pins are unchanged.
-- [ ] The committed fixture reproduces through the harness's `partition_at_cut` (harness-side test, its owner's PR).
-- [ ] Performance budget met and measured (above).
+- [x] Date mode = fraction mode, row for row, wherever the date equals the fraction-chosen `test_first_stamp`
+  (`test_date_mode_equals_fraction_mode_at_the_fraction_chosen_cut`: train 0.3 / 0.5 / 0.7 / 0.85 × h 1 / 7 — plan,
+  assign, tally, `make_splits` partitions, and the record minus its three date keys).
+- [x] Rows tied on the cut are test; a row at `cut − split_embargo` is purged; null targets are in no partition
+  (`test_ties_go_to_test_the_cut_minus_h_row_is_purged_and_nulls_are_nowhere`, h 1 / 7 / 14).
+- [x] The per-day batch plan equals the frame plan in date mode (60 day batches; plan, tally, record, and
+  `split_definition` of the in-memory split).
+- [x] Each refusal fires by name — val > 0 (at load and, for a config mutated after load, in the plan), kind
+  `random` / `symbol_holdout`, no `[m9]`, `train_prefix_frac`, the purged-train refusal kept, the new empty-train
+  refusal (no row below the cut; an empty frame), and a datetime / int / non-ISO string for the date; the ratios still
+  sum-checked. Existing `data_cfg_hash` / `root_cfg_hash` pins unchanged (the PR-040 pins re-asserted in the new module;
+  `tests/config/` all green).
+- [ ] The committed fixture reproduces through the harness's `partition_at_cut` — **the harness-side test is its
+  owner's PR** (the lead's lean: program PR-110's build). A scratch replay (not committed; the harness checkout read
+  only, `probe/partition.py` loaded by path as in Phase 1) agreed on all **81 cases, 0 mismatches**: 47 fitted (20 of
+  them with an empty test), 22 purged-train refusals = the harness's `partition_embargo_purged_train`, 12 empty-train
+  refusals = the harness's empty train.
+- [x] Performance budget met and measured (below).
+
+## Build status (2026-10-22 ≈ 12:59 CDT, branch `track/date-cut-split`)
+
+Built at the approved leans, tests first: the new module `tests/data/test_m9_date_cut.py` ran **37 failed** before the
+build (the field did not exist) and **37 passed** after.
+
+- `src/rux_ml/config/data.py`: `split_cut_date: date | None` (before-validator: a `date` or an ISO `YYYY-MM-DD`
+  string only), `split_cut_stamp` (property, not a field — the dump and the hash carry only the date),
+  `refuse_val_with_cut()`.
+- `src/rux_ml/config/root.py`: `split_cut_date` in `_HASH_OPTIONAL_FIELDS["data"]`; the root validator
+  `_validate_split_cut_date` (kind, `[m9]`, prefix, val).
+- `src/rux_ml/data/partitions.py`: `_plan_time` → `_plan_cut` in date mode (val = test first stamp = the cut; the rows
+  below the cut returned as the purged-train check's n; the empty-train refusal); `PartitionPlan.cut_date`;
+  `split_record`'s `cuts` gains `source` / `cut_date` / `cut_stamp` in date mode only. `_time_folds`, the per-day batch
+  path, promote, the OOS export mask and the leakage audit unchanged.
+- `tests/data/pr065_fixture.py` + `tests/fixtures/pr065/` (six made-up tables in 2020 — event stamps, intra-day, ties
+  on the cut and on `cut − h·DAY ± 1`, n 1 / 2 / 3 — y null-only, no NaN, since pyarrow's `is_valid` counts NaN valid;
+  81 cases × h 1 / 7 / 14; `_contract` key states the replay rule). Regenerate: `uv run python -m
+  tests.data.pr065_fixture`.
+- `docs/ARCHITECTURE.md`: the date-given cut bullet after the val-less mode.
+
+**Suite (the Mac, this worktree, `--all-extras`):** 849 collected → **844 passed, 5 skipped, 0 failed** (in
+selections: config / data / features / solving / _internal 447 + 2 s; cli 168 + 1 s; registry / runs / training /
+tuning / integration / container / golden / smoke 229 + 2 s). Without the extras the 17 catboost / lightgbm tests fail
+on import only (env, not this PR). `ruff check --no-cache .` clean; `ruff format --check` flags only
+`scripts/calibrate_pr025.py` (untouched, as on `dev`); `basedpyright src/` 0 errors with the extras.
+
+**CI:** rux-ml has **no GitHub Actions workflow** (`gh api repos/rux-eth/rux-ml/actions/workflows` → `total_count 0`;
+no `.github/`), so there is no CI run to watch; the local suite above is the record (as PR-063's Mac + desktop runs).
+
+**Performance (the budget stated at Phase 1; Mac, 1,000,000 synthetic rows over 200 days, h 7, median of 7):** plan +
+assign, whole frame — fraction 0.010 s, **date 0.009 s**; 200 day batches — fraction 0.236 s, **date 0.231 s**. Met:
+date ≤ fraction and ≤ 1 s. (Script in the program track's scratch folder, not committed.) The first real-cell
+measurement stays with program PR-110's sample.
+
+**Found (proven, flag for the consumers):** a date cut is val-less, so it runs on the in-memory `[m9]` fit only — the
+per-day batch fit (an `[m9]` XGBoost *regression* target, `uses_batch_fit`) refuses an empty val (`fit_batches`:
+"empty partition: train … rows, val 0 rows"). **Program PR-111 is covered only if its training is val-less (early
+stopping off) AND on the in-memory route** (not an `[m9]` XGBoost regression target). Flag carried to the lead.
+
+**Held for the lead (the track's standing rule: no CHANGELOG edit), the `[Unreleased]` entry to add at the merge:**
+
+> ### Added
+> - `data.split_cut_date` (PR-065): the `[m9]` time-block cut given as a date — its UTC-midnight epoch-ms stamp
+>   replaces the fraction-chosen cut of a val-less `time_ordered` split (train `t + split_embargo < cut`, test
+>   `t >= cut`); refused with `split_ratios.val > 0`, another split kind, no `[m9]`, or `train_prefix_frac`, and when
+>   no row lies below the cut. The split record adds `cuts.source = "date"`, `cuts.cut_date`, `cuts.cut_stamp`.
+>   Hash-neutral while unset.
 
 ## Research backing
 

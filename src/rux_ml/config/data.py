@@ -1,12 +1,20 @@
 """Data layer config (per D3, D9, D14; PR-024 split_kind + time_column; PR-040 oracle)."""
 
+import datetime as dt
 import os
+import re
 from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, field_validator
 
 from rux_ml.config._strict_model import StrictModel
+
+# PR-065: a date-given cut is the date's UTC midnight in epoch ms (the time column's unit,
+# as ``m9.h_max_ms``). Calendar constants, not configuration.
+_EPOCH = dt.date(1970, 1, 1)
+_DAY_MS = 86_400_000
+_ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 class OracleQuarantineConfig(StrictModel):
@@ -87,8 +95,46 @@ class DataConfig(StrictModel):
     # are untouched, so the prefixes of one regime share one OOS set. None = all.
     train_prefix_frac: float | None = Field(default=None, gt=0.0, le=1.0)
 
+    # PR-065 (rumpy program v0.7 D63): the ``[m9]`` time-block cut given as a date — its
+    # UTC midnight in epoch ms (``split_cut_stamp``): train keeps ``t + split_embargo <
+    # cut``, test ``t >= cut`` (ties to test). A val-less ``[m9]`` ``time_ordered`` split
+    # only, without ``train_prefix_frac`` (validators in config/root.py); ``split_ratios``
+    # is still sum-checked but no longer places the cut. None = the fraction-chosen cut.
+    split_cut_date: dt.date | None = None
+
     # PR-040: oracle quarantine. None refuses every ingest (fail closed) rather
     # than disabling the check; configs/base.toml sets it. Hash-elided in
     # config/root.py — it only decides whether ingest refuses, never what a
     # passing run computes.
     oracle: OracleQuarantineConfig | None = None
+
+    @field_validator("split_cut_date", mode="before")
+    @classmethod
+    def _cut_is_a_date(cls, v: object) -> object:
+        # pydantic's lax date truncates a datetime (an offset midnight would move the cut by
+        # the offset) and reads an int as a Unix stamp: only a date, or an ISO ``YYYY-MM-DD``
+        # string (the env / dot-path override routes), is taken.
+        if v is None or (isinstance(v, dt.date) and not isinstance(v, dt.datetime)):
+            return v
+        if isinstance(v, str) and _ISO_DATE.fullmatch(v):
+            return v
+        msg = (
+            f"data.split_cut_date takes a date (YYYY-MM-DD; its UTC midnight is the cut), got {v!r}"
+        )
+        raise ValueError(msg)
+
+    @property
+    def split_cut_stamp(self) -> int | None:
+        """PR-065: ``split_cut_date``'s UTC midnight in epoch ms (the cut), or None."""
+        if self.split_cut_date is None:
+            return None
+        return (self.split_cut_date - _EPOCH).days * _DAY_MS
+
+    def refuse_val_with_cut(self) -> None:
+        """PR-065: a date cut is val-less only (``split_ratios.val == 0``), refused by name."""
+        val = self.split_ratios.get("val")
+        if self.split_cut_date is not None and val != 0:
+            msg = (
+                f"data.split_cut_date is val-less only: data.split_ratios.val must be 0, got {val}"
+            )
+            raise ValueError(msg)
