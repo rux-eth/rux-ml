@@ -12,6 +12,8 @@ then carry only their own rows of a partition to XGBoost:
   ``t + embargo`` lies before the next partition's first stamp. Rows tied on a boundary
   stamp go to the **later** partition (the row-count slice split them by an unstable
   sort and purged the earlier side); every other row is where the slice put it.
+  PR-065: with ``data.split_cut_date`` (val-less only) both first stamps are the date's
+  UTC midnight instead — the same predicates, the cut given rather than chosen.
 - **symbol holdout**: each group's fixed point in [0, 1) (:func:`unit_interval`), as
   :func:`rux_ml.data.splits.symbol_holdout_split` — unchanged.
 - **row-random** (program PR-027 A4, an operator ruling of 2026-09-28): a version-stable
@@ -52,7 +54,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from rux_ml.config import RuxMLConfig
-    from rux_ml.config.data import OracleQuarantineConfig
+    from rux_ml.config.data import DataConfig, OracleQuarantineConfig
 
 _TOL = 1e-6
 FOLDS: tuple[str, str, str] = ("train", "val", "test")
@@ -258,6 +260,7 @@ class PartitionPlan:
     seed: int | None = None
     prefix_frac: float | None = None
     prefix_last_stamp: int | None = None
+    cut_date: str | None = None  # PR-065: the date the time-block cut was given as
     tally: pl.DataFrame = field(default_factory=pl.DataFrame)
     batch_rows: list[tuple[int, int, int]] = field(default_factory=list)
     filtered_rows: int = 0
@@ -345,7 +348,7 @@ def plan_partitions(cfg: RuxMLConfig, batches: Batches, *, seed: int | None) -> 
     )
     train_n = 0
     if plan.kind == "time_ordered":
-        train_n = _plan_time(plan, batches, names, data.split_embargo)
+        train_n = _plan_time(plan, batches, names, data)
     elif plan.kind == "symbol_holdout":
         _plan_groups(plan, batches, names, data.symbol_holdout_seed)
     else:
@@ -380,7 +383,9 @@ def _frames(batches: Batches, columns: list[str]) -> list[pl.DataFrame]:
     return [batches.frame(i, columns) for i in range(batches.n_batches)]
 
 
-def _plan_time(plan: PartitionPlan, batches: Batches, names: list[str], embargo: int | None) -> int:
+def _plan_time(plan: PartitionPlan, batches: Batches, names: list[str], data: DataConfig) -> int:
+    """The time-block cuts; returns the rows below the val cut (the purged-train check's n)."""
+    embargo = data.split_embargo
     t = plan.time_column
     assert t is not None  # RuxMLConfig: time_ordered requires data.time_column
     if t not in names:
@@ -402,6 +407,9 @@ def _plan_time(plan: PartitionPlan, batches: Batches, names: list[str], embargo:
         raise ValueError(msg)
     cum = counts["len"].cum_sum().to_numpy()
     stamps = counts[t].to_numpy()
+    plan.embargo = embargo
+    if data.split_cut_date is not None:
+        return _plan_cut(plan, data, cum, stamps)
     n = int(cum[-1]) if cum.size else 0
     train_n = int(n * plan.ratios["train"])
     val_n = int(n * plan.ratios["val"])
@@ -410,10 +418,30 @@ def _plan_time(plan: PartitionPlan, batches: Batches, names: list[str], embargo:
         # the stamp at sorted row position ``position``: the first whose running count exceeds it
         return int(stamps[np.searchsorted(cum, position, side="right")]) if position < n else None
 
-    plan.embargo = embargo
     plan.val_first_stamp = stamp_at(train_n)
     plan.test_first_stamp = stamp_at(train_n + val_n)
     return train_n
+
+
+def _plan_cut(
+    plan: PartitionPlan, data: DataConfig, cum: NDArray[Any], stamps: NDArray[Any]
+) -> int:
+    """PR-065: the cut given as a date — val and test both start at its UTC midnight (val
+    empty); the ratios do not place it. Returns the rows below the cut; none is refused."""
+    data.refuse_val_with_cut()  # load-time too; here for a config mutated after load
+    cut, day = data.split_cut_stamp, data.split_cut_date
+    assert cut is not None and day is not None
+    k = int(np.searchsorted(stamps, cut, side="left"))
+    below = int(cum[k - 1]) if k else 0
+    if not below:
+        msg = (
+            f"split cut date {day.isoformat()} (stamp {cut}) has no row below it: train is "
+            f"empty (time_column {plan.time_column!r})"
+        )
+        raise ValueError(msg)
+    plan.val_first_stamp = plan.test_first_stamp = cut
+    plan.cut_date = day.isoformat()
+    return below
 
 
 def _plan_groups(
@@ -518,11 +546,7 @@ def split_record(
             "split_embargo": plan.embargo,
             "rows": rows,
             "purged_rows": plan.filtered_rows - sum(rows.values()),
-            "cuts": {
-                "val_first_stamp": plan.val_first_stamp,
-                "test_first_stamp": plan.test_first_stamp,
-                "boundary_ties": "later_partition",
-            },
+            "cuts": _cuts(plan),
             **filtered,
         }
     else:
@@ -541,6 +565,17 @@ def split_record(
         out["train_prefix_frac"] = plan.prefix_frac
         out["train_prefix_last_stamp"] = plan.prefix_last_stamp
     return out
+
+
+def _cuts(plan: PartitionPlan) -> dict[str, object]:
+    cuts: dict[str, object] = {
+        "val_first_stamp": plan.val_first_stamp,
+        "test_first_stamp": plan.test_first_stamp,
+        "boundary_ties": "later_partition",
+    }
+    if plan.cut_date is not None:  # PR-065; a fraction-chosen cut's record is unchanged
+        cuts |= {"source": "date", "cut_date": plan.cut_date, "cut_stamp": plan.test_first_stamp}
+    return cuts
 
 
 @dataclass
